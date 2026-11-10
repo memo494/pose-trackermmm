@@ -255,6 +255,11 @@ device/OS, accelerator, capture size/fps, timestamp-source stats, `model_info.js
   idle gaps don't advance lifecycle/lock timers and dt is capped after a gap (**re-check in M3 consult**).
   Handoff item: AGENTS.md rule 5 + ARCHITECTURE §11.5 still cite `ResolutionSelector` (CameraX) — propose new
   example wording at session end (AGENTS.md is not edited mid-session).
+- **T2 done** — `bc6b304`, 8 vendored files (pose-only strips logged), AGPL LICENSE, ULTRALYTICS.md, `@Test` 5 → 16.
+  Spotless excludes `**/com/ultralytics/**` (readable upstream diff). `unitTests.isReturnDefaultValues = true` in
+  `detector` only so vendored class-init (`Paint`) doesn't throw on the JVM — reviewer to re-check. Layout detection
+  `(1,300,57)` not pure → golden test in M1 instead. Finding for M1: classic-layout NMS hard-codes conf 0.25
+  (> our 0.15). **Not compiled yet** (no local build; CI after push).
 
 ## Then (lead)
 `android-reviewer` on the full diff → fixes via implementer → PR "M0b: screen-capture overlay" with

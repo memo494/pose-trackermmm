@@ -26,7 +26,7 @@ coroutines = "1.11.0"
 
 # Inference — used from M0b/M1; pinned now so later milestones are ready
 litert = "2.3.2"               # com.google.ai.edge.litert:litert (+ litert-gpu), CompiledModel API
-camerax = "1.6.2"              # frame source from upstream Ultralytics; under revision for screen-capture (M0b)
+camerax = "1.6.2"              # Preview + ImageAnalysis (ARCHITECTURE §2); wired in M0b
 
 # Tests
 junit = "6.1.3"                # JUnit 6 (unified platform+jupiter version); JVM tests in core

@@ -19,6 +19,13 @@ package com.memo494.posetracker.core
  *   pass-through.
  * @property dotStrokeDp stroke width of the head ring, in dp.
  * @property boxStrokeDp stroke width of debug boxes, in dp.
+ * @property redrawDeadbandPx smallest on-screen movement, in View pixels, of any box edge or keypoint
+ *   that makes the overlay redraw (the overlay is captured, so redraws must be rare; Consult C1-B).
+ * @property keypointMinScore keypoints with a lower confidence (unitless in [0, 1]) are not drawn and
+ *   do not take part in the head-ring centre.
+ * @property hudTextSizeSp text size of the debug HUD, in sp.
+ * @property headRingRadiusRatio radius of the head ring as a fraction of the person box width
+ *   (unitless).
  */
 data class TrackerConfig(
     val scoreThreshold: Float = DEFAULT_SCORE_THRESHOLD,
@@ -28,6 +35,10 @@ data class TrackerConfig(
     val overlayAlphaCapFallback: Float = DEFAULT_OVERLAY_ALPHA_CAP_FALLBACK,
     val dotStrokeDp: Float = DEFAULT_DOT_STROKE_DP,
     val boxStrokeDp: Float = DEFAULT_BOX_STROKE_DP,
+    val redrawDeadbandPx: Float = DEFAULT_REDRAW_DEADBAND_PX,
+    val keypointMinScore: Float = DEFAULT_KEYPOINT_MIN_SCORE,
+    val hudTextSizeSp: Float = DEFAULT_HUD_TEXT_SIZE_SP,
+    val headRingRadiusRatio: Float = DEFAULT_HEAD_RING_RADIUS_RATIO,
 ) {
     init {
         require(scoreThreshold in MIN_SCORE_THRESHOLD..MAX_SCORE_THRESHOLD) {
@@ -51,6 +62,19 @@ data class TrackerConfig(
         }
         require(boxStrokeDp in MIN_STROKE_DP..MAX_STROKE_DP) {
             "boxStrokeDp $boxStrokeDp outside [$MIN_STROKE_DP, $MAX_STROKE_DP]"
+        }
+        require(redrawDeadbandPx in MIN_REDRAW_DEADBAND_PX..MAX_REDRAW_DEADBAND_PX) {
+            "redrawDeadbandPx $redrawDeadbandPx outside [$MIN_REDRAW_DEADBAND_PX, $MAX_REDRAW_DEADBAND_PX]"
+        }
+        require(keypointMinScore in MIN_KEYPOINT_MIN_SCORE..MAX_KEYPOINT_MIN_SCORE) {
+            "keypointMinScore $keypointMinScore outside [$MIN_KEYPOINT_MIN_SCORE, $MAX_KEYPOINT_MIN_SCORE]"
+        }
+        require(hudTextSizeSp in MIN_HUD_TEXT_SIZE_SP..MAX_HUD_TEXT_SIZE_SP) {
+            "hudTextSizeSp $hudTextSizeSp outside [$MIN_HUD_TEXT_SIZE_SP, $MAX_HUD_TEXT_SIZE_SP]"
+        }
+        require(headRingRadiusRatio in MIN_HEAD_RING_RADIUS_RATIO..MAX_HEAD_RING_RADIUS_RATIO) {
+            "headRingRadiusRatio $headRingRadiusRatio outside " +
+                "[$MIN_HEAD_RING_RADIUS_RATIO, $MAX_HEAD_RING_RADIUS_RATIO]"
         }
     }
 
@@ -116,8 +140,56 @@ data class TrackerConfig(
         /** Highest accepted stroke width ([dotStrokeDp], [boxStrokeDp]), in dp. */
         const val MAX_STROKE_DP = 6.0f
 
+        /** Default [redrawDeadbandPx]: half a View pixel. */
+        const val DEFAULT_REDRAW_DEADBAND_PX = 0.5f
+
+        /** Lowest accepted [redrawDeadbandPx], in View pixels. */
+        const val MIN_REDRAW_DEADBAND_PX = 0.1f
+
+        /** Highest accepted [redrawDeadbandPx], in View pixels. */
+        const val MAX_REDRAW_DEADBAND_PX = 4.0f
+
+        /** Default [keypointMinScore]: unitless confidence. */
+        const val DEFAULT_KEYPOINT_MIN_SCORE = 0.5f
+
+        /** Lowest accepted [keypointMinScore]. */
+        const val MIN_KEYPOINT_MIN_SCORE = 0.05f
+
+        /** Highest accepted [keypointMinScore]. */
+        const val MAX_KEYPOINT_MIN_SCORE = 0.95f
+
+        /** Default [hudTextSizeSp], in sp. */
+        const val DEFAULT_HUD_TEXT_SIZE_SP = 12.0f
+
+        /** Lowest accepted [hudTextSizeSp], in sp. */
+        const val MIN_HUD_TEXT_SIZE_SP = 8.0f
+
+        /** Highest accepted [hudTextSizeSp], in sp. */
+        const val MAX_HUD_TEXT_SIZE_SP = 24.0f
+
+        /** Default [headRingRadiusRatio]: unitless fraction of the box width. */
+        const val DEFAULT_HEAD_RING_RADIUS_RATIO = 0.12f
+
+        /** Lowest accepted [headRingRadiusRatio]. */
+        const val MIN_HEAD_RING_RADIUS_RATIO = 0.03f
+
+        /** Highest accepted [headRingRadiusRatio]. */
+        const val MAX_HEAD_RING_RADIUS_RATIO = 0.4f
+
         // Fixed constants (not user-tunable) used by the pure helpers, kept here so no number lives
         // elsewhere (AGENTS rule 5).
+
+        /** Keypoints 0-4 (COCO nose, eyes, ears) are the head keypoints used for the head ring. */
+        const val HEAD_KEYPOINT_COUNT = 5
+
+        /** Radius of a drawn keypoint dot, in dp. */
+        const val KEYPOINT_RADIUS_DP = 2.0f
+
+        /** Padding inside the HUD strip and its distance from the screen corner, in dp. */
+        const val HUD_PADDING_DP = 4.0f
+
+        /** Capacity, in characters, of one reused HUD line buffer; longer text is cut. */
+        const val HUD_LINE_CAPACITY_CHARS = 64
 
         /** Nanoseconds per second. */
         const val NANOS_PER_SECOND = 1_000_000_000f

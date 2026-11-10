@@ -14,6 +14,10 @@ class TrackerConfigTest {
         assertThat(config.hudRateHz).isEqualTo(2f)
         assertThat(config.timestampGuardNs).isEqualTo(100_000_000L)
         assertThat(config.overlayAlphaCapFallback).isEqualTo(0.8f)
+        assertThat(config.redrawDeadbandPx).isEqualTo(0.5f)
+        assertThat(config.keypointMinScore).isEqualTo(0.5f)
+        assertThat(config.hudTextSizeSp).isEqualTo(12f)
+        assertThat(config.headRingRadiusRatio).isEqualTo(0.12f)
     }
 
     @Test
@@ -30,6 +34,14 @@ class TrackerConfigTest {
         )
         assertWithin(config.dotStrokeDp, TrackerConfig.MIN_STROKE_DP, TrackerConfig.MAX_STROKE_DP)
         assertWithin(config.boxStrokeDp, TrackerConfig.MIN_STROKE_DP, TrackerConfig.MAX_STROKE_DP)
+        assertWithin(config.redrawDeadbandPx, TrackerConfig.MIN_REDRAW_DEADBAND_PX, TrackerConfig.MAX_REDRAW_DEADBAND_PX)
+        assertWithin(config.keypointMinScore, TrackerConfig.MIN_KEYPOINT_MIN_SCORE, TrackerConfig.MAX_KEYPOINT_MIN_SCORE)
+        assertWithin(config.hudTextSizeSp, TrackerConfig.MIN_HUD_TEXT_SIZE_SP, TrackerConfig.MAX_HUD_TEXT_SIZE_SP)
+        assertWithin(
+            config.headRingRadiusRatio,
+            TrackerConfig.MIN_HEAD_RING_RADIUS_RATIO,
+            TrackerConfig.MAX_HEAD_RING_RADIUS_RATIO,
+        )
         assertThat(config.timestampGuardNs).isAtLeast(TrackerConfig.MIN_TIMESTAMP_GUARD_NS)
         assertThat(config.timestampGuardNs).isAtMost(TrackerConfig.MAX_TIMESTAMP_GUARD_NS)
     }
@@ -72,6 +84,67 @@ class TrackerConfigTest {
 
         assertThat(low.captureScale).isEqualTo(TrackerConfig.MIN_CAPTURE_SCALE)
         assertThat(high.captureScale).isEqualTo(TrackerConfig.MAX_CAPTURE_SCALE)
+    }
+
+    @Test
+    fun redrawDeadbandPx_outsideItsBounds_isRejected() {
+        assertThrows(IllegalArgumentException::class.java) {
+            TrackerConfig(redrawDeadbandPx = TrackerConfig.MIN_REDRAW_DEADBAND_PX - 0.01f)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            TrackerConfig(redrawDeadbandPx = TrackerConfig.MAX_REDRAW_DEADBAND_PX + 0.01f)
+        }
+    }
+
+    @Test
+    fun keypointMinScore_outsideItsBounds_isRejected() {
+        assertThrows(IllegalArgumentException::class.java) {
+            TrackerConfig(keypointMinScore = TrackerConfig.MIN_KEYPOINT_MIN_SCORE - 0.01f)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            TrackerConfig(keypointMinScore = TrackerConfig.MAX_KEYPOINT_MIN_SCORE + 0.01f)
+        }
+    }
+
+    @Test
+    fun hudTextSizeSp_outsideItsBounds_isRejected() {
+        assertThrows(IllegalArgumentException::class.java) {
+            TrackerConfig(hudTextSizeSp = TrackerConfig.MIN_HUD_TEXT_SIZE_SP - 0.5f)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            TrackerConfig(hudTextSizeSp = TrackerConfig.MAX_HUD_TEXT_SIZE_SP + 0.5f)
+        }
+    }
+
+    @Test
+    fun headRingRadiusRatio_outsideItsBounds_isRejected() {
+        assertThrows(IllegalArgumentException::class.java) {
+            TrackerConfig(headRingRadiusRatio = TrackerConfig.MIN_HEAD_RING_RADIUS_RATIO - 0.01f)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            TrackerConfig(headRingRadiusRatio = TrackerConfig.MAX_HEAD_RING_RADIUS_RATIO + 0.01f)
+        }
+    }
+
+    @Test
+    fun overlayAdditions_atTheirBounds_areAccepted() {
+        val low =
+            TrackerConfig(
+                redrawDeadbandPx = TrackerConfig.MIN_REDRAW_DEADBAND_PX,
+                keypointMinScore = TrackerConfig.MIN_KEYPOINT_MIN_SCORE,
+                hudTextSizeSp = TrackerConfig.MIN_HUD_TEXT_SIZE_SP,
+                headRingRadiusRatio = TrackerConfig.MIN_HEAD_RING_RADIUS_RATIO,
+            )
+        val high =
+            TrackerConfig(
+                redrawDeadbandPx = TrackerConfig.MAX_REDRAW_DEADBAND_PX,
+                keypointMinScore = TrackerConfig.MAX_KEYPOINT_MIN_SCORE,
+                hudTextSizeSp = TrackerConfig.MAX_HUD_TEXT_SIZE_SP,
+                headRingRadiusRatio = TrackerConfig.MAX_HEAD_RING_RADIUS_RATIO,
+            )
+
+        assertThat(low.redrawDeadbandPx).isEqualTo(TrackerConfig.MIN_REDRAW_DEADBAND_PX)
+        assertThat(high.headRingRadiusRatio).isEqualTo(TrackerConfig.MAX_HEAD_RING_RADIUS_RATIO)
     }
 
     private fun assertWithin(

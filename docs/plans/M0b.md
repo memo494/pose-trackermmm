@@ -262,7 +262,13 @@ device/OS, accelerator, capture size/fps, timestamp-source stats, `model_info.js
   (> our 0.15). **Not compiled yet** (no local build; CI after push).
 - **T3 done** — `5fbd896..5872676` (8 commits), `@Test` 16 → 66. API: `Letterbox.create`, `FitCenter.contentRectImg`
   / `fitInto` / `forDisplay` (window not at 0,0), `CaptureSize.of`, `RowCopy.ensureBuffer` / `copyRgba` (fails
-  closed), `FrameTimestamp.resolveNs` / `sourceOf`. Lead hand-checked FitCenter corner mapping. Not compiled yet.
+  closed), `FrameTimestamp.resolveNs` / `sourceOf`. Lead hand-checked FitCenter corner mapping.
+- **CI green for T1–T3** (run 42834207569) after one ktlint fix (`0f4b85e`). Draft PR #3 open.
+- **Model export** (separate branch `fix-model-export`): script imported TensorFlow (not used by Ultralytics'
+  `litert` export, which traces PyTorch via `litert_torch`) → fixed (`3ea57c6`); next run failed because
+  AutoUpdate installed `litert-torch` mid-process and swapped torch → preinstall it in `tools/requirements.txt`.
+  That run confirmed shapes: input `(1,3,320,320)` NCHW float, output `(1,300,57)`.
+- **Order change:** T6 (overlay) runs before T4/T5 — it needs only T3 types; T5 wires it in. T4 waits for the model.
 
 ## Then (lead)
 `android-reviewer` on the full diff → fixes via implementer → PR "M0b: screen-capture overlay" with

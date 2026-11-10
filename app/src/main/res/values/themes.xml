@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Compose supplies the real theming; this is a minimal edge-to-edge host theme. -->
+    <style name="Theme.PoseTracker" parent="@android:style/Theme.Material.NoActionBar" />
+</resources>

@@ -27,6 +27,9 @@ render.experimental.xml
 # Keystore files
 *.jks
 *.keystore
+# ...except the debug-only keystore, committed on purpose so every APK installs over the
+# previous one with no secrets setup (ARCHITECTURE §10). A real release key is never committed.
+!signing/debug.keystore
 
 # Google Services (e.g. APIs or Firebase)
 google-services.json

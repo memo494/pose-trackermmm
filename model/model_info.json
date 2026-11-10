@@ -1,20 +1,47 @@
 {
   "model": "yolo26n-pose",
-  "ultralytics_version": "8.4.208",
+  "versions": {
+    "ultralytics": "8.4.209",
+    "torch": "2.14.1",
+    "litert-torch": "0.10.0",
+    "ai-edge-litert": "2.3.0"
+  },
+  "exported_from": {
+    "ref": "fix-export-model-deps",
+    "sha": "e7eff0343121dbe6cf665611e185bd39b584b8b9"
+  },
   "export": {
     "format": "litert",
     "nms": false,
-    "dtype": "float32"
+    "end2end": true,
+    "precision": "float32"
+  },
+  "preprocess": {
+    "layout": "NCHW",
+    "color": "RGB",
+    "range": "0..1",
+    "letterbox_pad_value": 114,
+    "resize": "bilinear"
+  },
+  "output": {
+    "rows": 300,
+    "row_layout": "x1,y1,x2,y2,score,cls,17x(x,y,v)",
+    "coordinates": "pixels of the letterboxed model input (0..imgsz)"
   },
   "fixture": {
     "file": "fixture/people.jpg",
-    "source": "ultralytics ASSETS (AGPL-3.0)",
-    "sha256": "c02019c4979c191eb739ddd944445ef408dad5679acab6fd520ef9d434bfbc63"
+    "source": "NASA Image and Video Library, NASA ID 8903695: official Apollo 11 crew portrait (1969)",
+    "url": "https://images-assets.nasa.gov/image/8903695/8903695~medium.jpg",
+    "license": "Public domain (NASA media is not copyrighted)",
+    "sha256": "c4cd48af5f80074872df0070c14501cec1daa8af398cca945f5bb32525e15307",
+    "width": 1280,
+    "height": 987
   },
   "sizes": {
     "320": {
       "file": "yolo26n-pose_320.tflite",
-      "sha256": "b87293e7706ec95f1fe9d2ca6c4d8bc60777bfdff40158d235e8593e571b2ef2",
+      "sha256": "f7aa11b05c32f85b41a84f696a5879a0d8a94ba034c8d54bc3049abde0ec9c3b",
+      "bytes": 11968339,
       "input": [
         {
           "name": "serving_default_args_0",
@@ -24,7 +51,7 @@
             320,
             320
           ],
-          "dtype": "<class 'numpy.float32'>"
+          "dtype": "float32"
         }
       ],
       "output": [
@@ -35,14 +62,18 @@
             300,
             57
           ],
-          "dtype": "<class 'numpy.float32'>"
+          "dtype": "float32"
         }
       ],
-      "golden": "golden/320.npz"
+      "golden": "golden/320_golden.json",
+      "raw_output": "golden/320_raw_output.f32",
+      "raw_output_sha256": "b118b5bf93ea1edcd40000b430caa60755c6deafd2a387086bc6f7780ddd2c54",
+      "detections": 3
     },
     "416": {
       "file": "yolo26n-pose_416.tflite",
-      "sha256": "c20e5fb3a1367b13064d27db3dfe74b098ee6587ecc547aabe58c3f8865c0353",
+      "sha256": "470d80bf2ed22aa71f7e00fe904b6fc03093c0d1c98a66291faeefb276f646cd",
+      "bytes": 12003113,
       "input": [
         {
           "name": "serving_default_args_0",
@@ -52,7 +83,7 @@
             416,
             416
           ],
-          "dtype": "<class 'numpy.float32'>"
+          "dtype": "float32"
         }
       ],
       "output": [
@@ -63,10 +94,13 @@
             300,
             57
           ],
-          "dtype": "<class 'numpy.float32'>"
+          "dtype": "float32"
         }
       ],
-      "golden": "golden/416.npz"
+      "golden": "golden/416_golden.json",
+      "raw_output": "golden/416_raw_output.f32",
+      "raw_output_sha256": "cb889203506d048abf54223aa7c9bdddb32cfa5e55bd7e426103a39a4754d65e",
+      "detections": 3
     }
   }
 }

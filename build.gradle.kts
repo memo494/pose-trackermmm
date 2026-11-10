@@ -13,8 +13,9 @@ spotless {
     val ktlintVersion = libs.versions.ktlint.get()
     kotlin {
         target("**/*.kt")
-        // Never reformat vendored content (skills, and the Ultralytics import landing in M0b).
-        targetExclude("**/build/**", ".claude/skills/**", "third_party/**")
+        // Never reformat vendored content (skills, the Ultralytics sources): a readable diff against
+        // upstream matters more than ktlint style (ARCHITECTURE §2.1, third_party/ULTRALYTICS.md).
+        targetExclude("**/build/**", ".claude/skills/**", "third_party/**", "**/com/ultralytics/**")
         ktlint(ktlintVersion)
     }
     kotlinGradle {

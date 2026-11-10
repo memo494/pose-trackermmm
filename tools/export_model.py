@@ -7,7 +7,7 @@ source of truth, and the Android build fails if a model's sha256 does not match 
 
 Outputs, under model/:
   yolo26n-pose_320.tflite, yolo26n-pose_416.tflite   FP32 (GPU computes in FP16), nms=False
-  model_info.json       I/O shapes & dtypes, ultralytics version, sha256 per file, fixture info
+  model_info.json       I/O names, shapes, dtypes & quantization, ultralytics version, sha256 per file, fixture info
   golden/<size>.npz     raw predict() output on the fixture, for the detector golden decode test
   fixture/people.jpg    the exact image used for the goldens (ultralytics ASSETS, AGPL-3.0)
 """
@@ -32,6 +32,15 @@ OUT = ROOT / "model"
 
 def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def tensor_info(d: dict) -> dict:
+    """Shape, dtype, name and (when quantized) scale/zero_point of one interpreter tensor."""
+    entry = {"name": d["name"], "shape": [int(x) for x in d["shape"]], "dtype": str(d["dtype"])}
+    scale, zero_point = d.get("quantization", (0.0, 0))
+    if scale != 0:  # (0.0, 0) means "not quantized" in the LiteRT/TFLite interpreter
+        entry["quantization"] = {"scale": float(scale), "zero_point": int(zero_point)}
+    return entry
 
 
 def main() -> None:
@@ -61,8 +70,6 @@ def main() -> None:
         "sizes": {},
     }
 
-    import tensorflow as tf  # pulled in by the ultralytics litert export
-
     for size in SIZES:
         exported = Path(YOLO(f"{MODEL}.pt").export(format="litert", nms=False, imgsz=size))
         dst = OUT / f"{MODEL}_{size}.tflite"
@@ -73,19 +80,23 @@ def main() -> None:
         kpts = result.keypoints.data.cpu().numpy() if result.keypoints is not None else np.empty((0,))
         np.savez(OUT / "golden" / f"{size}.npz", boxes=boxes, keypoints=kpts)
 
-        interp = tf.lite.Interpreter(model_path=str(dst))
+        # Imported here, not at the top: ultralytics may auto-install its LiteRT toolchain
+        # (including ai-edge-litert) during the export/predict above.
+        try:
+            from ai_edge_litert.interpreter import Interpreter
+        except ImportError as e:
+            raise SystemExit(
+                "ai-edge-litert is not installed; it is needed to read the .tflite tensor "
+                "details (add it to tools/requirements.txt)"
+            ) from e
+
+        interp = Interpreter(model_path=str(dst))
         interp.allocate_tensors()
         info["sizes"][str(size)] = {
             "file": dst.name,
             "sha256": sha256(dst),
-            "input": [
-                {"shape": [int(x) for x in d["shape"]], "dtype": str(d["dtype"])}
-                for d in interp.get_input_details()
-            ],
-            "output": [
-                {"shape": [int(x) for x in d["shape"]], "dtype": str(d["dtype"])}
-                for d in interp.get_output_details()
-            ],
+            "input": [tensor_info(d) for d in interp.get_input_details()],
+            "output": [tensor_info(d) for d in interp.get_output_details()],
             "golden": f"golden/{size}.npz",
         }
 

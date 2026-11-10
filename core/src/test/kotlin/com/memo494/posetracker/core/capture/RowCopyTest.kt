@@ -17,11 +17,8 @@ class RowCopyTest {
         return buffer
     }
 
-    private val expected =
-        byteArrayOf(
-            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
-            17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28,
-        )
+    // Pixel bytes of both rows; the 4 padding bytes (13..16) of the first row are skipped.
+    private val expected = ((1..12) + (17..28)).map { it.toByte() }.toByteArray()
 
     @Test
     fun paddedStride_isRemovedFromEveryRow() {

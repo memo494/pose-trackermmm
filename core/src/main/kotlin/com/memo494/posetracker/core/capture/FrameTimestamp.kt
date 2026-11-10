@@ -38,6 +38,5 @@ object FrameTimestamp {
         imageTimestampNs: Long,
         nowNs: Long,
         guardNs: Long,
-    ): TimestampSource =
-        if (isImageStampValid(imageTimestampNs, nowNs, guardNs)) TimestampSource.IMAGE else TimestampSource.ARRIVAL
+    ): TimestampSource = if (isImageStampValid(imageTimestampNs, nowNs, guardNs)) TimestampSource.IMAGE else TimestampSource.ARRIVAL
 }

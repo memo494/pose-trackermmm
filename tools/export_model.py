@@ -21,6 +21,7 @@ from pathlib import Path
 
 import numpy as np
 import ultralytics
+from ai_edge_litert.interpreter import Interpreter
 from ultralytics import YOLO
 from ultralytics.utils import ASSETS
 
@@ -61,8 +62,6 @@ def main() -> None:
         "sizes": {},
     }
 
-    import tensorflow as tf  # pulled in by the ultralytics litert export
-
     for size in SIZES:
         exported = Path(YOLO(f"{MODEL}.pt").export(format="litert", nms=False, imgsz=size))
         dst = OUT / f"{MODEL}_{size}.tflite"
@@ -73,7 +72,7 @@ def main() -> None:
         kpts = result.keypoints.data.cpu().numpy() if result.keypoints is not None else np.empty((0,))
         np.savez(OUT / "golden" / f"{size}.npz", boxes=boxes, keypoints=kpts)
 
-        interp = tf.lite.Interpreter(model_path=str(dst))
+        interp = Interpreter(model_path=str(dst))
         interp.allocate_tensors()
         info["sizes"][str(size)] = {
             "file": dst.name,

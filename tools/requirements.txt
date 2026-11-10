@@ -1,6 +1,10 @@
 # Model-export deps (ARCHITECTURE §8). Used only by .github/workflows/export-model.yml.
-# ultralytics auto-installs the remaining LiteRT export toolchain (onnx, onnx2tf, tensorflow) on the
-# first export; the workflow then freezes the full resolved set into tools/requirements.lock, which
-# is the real pin. Normal app builds never install these.
+# The ultralytics LiteRT export uses litert-torch + ai-edge-litert (no TensorFlow). They are listed
+# here so pip resolves a torch version compatible with litert-torch (which caps torch below 2.15)
+# in one install, instead of ultralytics auto-installing them mid-run. The workflow then freezes the
+# full resolved set into tools/requirements.lock, which is the real pin. Normal app builds never
+# install these.
 ultralytics>=8.4.83
 numpy
+litert-torch>=0.10.0
+ai-edge-litert>=2.3.0

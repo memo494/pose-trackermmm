@@ -39,11 +39,10 @@ data class CaptureSize(
             val idealWidth = displayWidthPx * scale
             val idealHeight = displayHeightPx * scale
             val exact = exactAspect(displayWidthPx, displayHeightPx, idealWidth)
-            if (exact != null &&
-                abs(exact.widthImg - idealWidth) <= TrackerConfig.CAPTURE_EXACT_ASPECT_TOLERANCE_PX &&
-                abs(exact.heightImg - idealHeight) <= TrackerConfig.CAPTURE_EXACT_ASPECT_TOLERANCE_PX
-            ) {
-                return exact
+            if (exact != null) {
+                val widthOk = abs(exact.widthImg - idealWidth) <= TrackerConfig.CAPTURE_EXACT_ASPECT_TOLERANCE_PX
+                val heightOk = abs(exact.heightImg - idealHeight) <= TrackerConfig.CAPTURE_EXACT_ASPECT_TOLERANCE_PX
+                if (widthOk && heightOk) return exact
             }
             return CaptureSize(nearestEven(idealWidth), nearestEven(idealHeight))
         }

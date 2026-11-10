@@ -260,6 +260,9 @@ device/OS, accelerator, capture size/fps, timestamp-source stats, `model_info.js
   `detector` only so vendored class-init (`Paint`) doesn't throw on the JVM — reviewer to re-check. Layout detection
   `(1,300,57)` not pure → golden test in M1 instead. Finding for M1: classic-layout NMS hard-codes conf 0.25
   (> our 0.15). **Not compiled yet** (no local build; CI after push).
+- **T3 done** — `5fbd896..5872676` (8 commits), `@Test` 16 → 66. API: `Letterbox.create`, `FitCenter.contentRectImg`
+  / `fitInto` / `forDisplay` (window not at 0,0), `CaptureSize.of`, `RowCopy.ensureBuffer` / `copyRgba` (fails
+  closed), `FrameTimestamp.resolveNs` / `sourceOf`. Lead hand-checked FitCenter corner mapping. Not compiled yet.
 
 ## Then (lead)
 `android-reviewer` on the full diff → fixes via implementer → PR "M0b: screen-capture overlay" with

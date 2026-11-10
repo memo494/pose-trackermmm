@@ -61,10 +61,10 @@ def main() -> None:
         "sizes": {},
     }
 
-    import tensorflow as tf  # pulled in by the ultralytics litert export
-
     for size in SIZES:
         exported = Path(YOLO(f"{MODEL}.pt").export(format="litert", nms=False, imgsz=size))
+        import tensorflow as tf  # auto-installed by the first litert export, so import only afterwards
+
         dst = OUT / f"{MODEL}_{size}.tflite"
         shutil.copyfile(exported, dst)
 

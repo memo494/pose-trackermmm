@@ -7,17 +7,20 @@ A one-screen map so agents open the right file without a wide search. Full desig
 |---|---|---|---|
 | `core/` | Kotlin JVM (no `android.*`) | model types, geometry, tracking, `TrackerConfig`, replay I/O | `com.memo494.posetracker.core.CoreMath` |
 | `detector/` | Android library | `PoseDetector` + adapter over vendored Ultralytics code, Fake impl | `com.memo494.posetracker.detector.Accelerator` |
-| `app/` | Android application (Compose) | camera/screen frames, overlay, HUD, benchmark, diagnostics, DI | `com.memo494.posetracker.MainActivity` |
+| `app/` | Android application (Compose) | camera (CameraX), overlay, HUD, benchmark, diagnostics, DI | `com.memo494.posetracker.MainActivity` |
 
 Package root: `com.memo494.posetracker`. `applicationId` = `com.memo494.posetracker`.
 
 ## Build & tooling
 - `gradle/libs.versions.toml` — pinned versions (PROTECTED). `settings.gradle.kts` — module list.
-- `scripts/cloud-setup.sh` — installs the Android SDK (paste into the env Setup script, BUILD_PLAN §1.3).
+- `scripts/cloud-setup.sh` — installs the Android SDK (run by the `android` cloud environment's setup script).
 - `scripts/verify.sh` — `spotlessCheck test lint assembleDebug`, short summary, retries proxy 429s.
 - `scripts/ci-status.sh` — polls GitHub Actions for the current branch.
-- `.github/workflows/android.yml` — CI; `export-model.yml` — manual model export.
-- `signing/debug.keystore` — committed debug key (PROTECTED). `model/` — exported models (PROTECTED).
+- `.github/workflows/android.yml` — CI; `export-model.yml` — manual model export: runs
+  `tools/export_model.py` and pushes the `model-export` branch (open the PR from it by hand).
+- `signing/debug.keystore` — committed debug key (PROTECTED).
+- `model/` (PROTECTED) — `yolo26n-pose_{320,416}.tflite`, `model_info.json` (I/O tensors, sha256,
+  preprocessing), `golden/<size>_raw_output.f32` + `golden/<size>_golden.json`, `fixture/people.jpg`.
 
 ## AI team
 `.claude/settings.json` (lead = Opus, subagents = Sonnet), `.claude/agents/*` (implementer,

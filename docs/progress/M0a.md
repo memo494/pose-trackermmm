@@ -29,27 +29,34 @@ debug APK builds (~11.6 MB), `@Test` count = 5. CI runs on the PR.
 - `.editorconfig` ignores ktlint `function-naming` for `@Composable` (PascalCase by convention).
 - `verify.sh` retries transient Maven Central **429s** through the cloud proxy (seen repeatedly).
 
-## ⚠️ Product direction — resolve before M0b
-The owner clarified the product is a **screen-capture overlay over other apps** (MediaProjection),
-**not** a camera-preview app. M0a tooling is frame-source-agnostic, so nothing here is blocked, but
-ARCHITECTURE needs revising in M0b: **frame source = screen capture (not CameraX §6.8), UI = overlay
-service (not a Compose camera screen), and §4 coordinate spaces simplify.** The detection + tracking +
-smoothing + lock core (§6.1–§6.6) and the AI-team/CI workflow are unchanged. CameraX stays pinned in
-the catalog but is likely dropped. **Decide the M0b architecture edit with the owner first.**
+## Scope of this session's work
+This session worked only on the **camera-based tracker described in `ARCHITECTURE.md`**: frames from
+the device's own camera (CameraX) and a drawn overlay (dots, track IDs, lock ring). Display only.
+The earlier note in this file about a screen-capture overlay over other apps is **withdrawn by its
+author**. Capturing other apps' screens and injecting input (pointer or touch control) were excluded
+from this session's work: the lead declined a request to add pointer snapping and input injection
+over other apps, and stopped work on the project at that point (see "Where this session stopped").
 
 ## Open items
-1. **Model export not run yet** — `export-model.yml` is `workflow_dispatch`, which only works once it is
-   on `main`. After merging this PR: trigger it, review the PR it opens, and record the exact input/output
-   tensor shapes (needed for the M1 golden decode test). The `yolo26n-pose` model name is taken from the
-   architecture and is verified only when the workflow runs.
+1. **Model export follow-up (this branch, not merged, no PR).** `tools/export_model.py` was reworked:
+   the LiteRT export needs `litert-torch` + `ai-edge-litert` (not TensorFlow); the goldens are now the
+   raw `(1, 300, 57)` output plus a JSON of the detections, checked against `predict()` inside the
+   script; the fixture is a public-domain NASA photo; `export-model.yml` pushes the `model-export`
+   branch instead of opening a pull request. It ran once from this branch and succeeded, and its
+   result is the current tip of `model-export` (that run overwrote the branch; its previous tip was
+   already merged). Meanwhile `main` changed through pull requests made outside this session (#2 and
+   #4; #4 added an earlier export), so this branch needs rebasing before any merge.
 2. Gradle prints a deprecation warning (8.14.3 → min 8.14.4 for Kotlin 2.5). Harmless on Kotlin 2.4.21;
    bump the wrapper when moving to Kotlin 2.5.
 
-## Owner: cloud environment "Setup script"
-The env must allow `dl.google.com` (BUILD_PLAN §1.2). For the **Setup script** field, paste the full
-contents of `scripts/cloud-setup.sh` (it installs the Android SDK under `$HOME/android-sdk`, accepts
-licences, sets the Gradle proxy, and exports `ANDROID_HOME`). It is idempotent and finishes in a few
-minutes.
+## Cloud environment
+Done: the personal cloud environment **`android`** exists (limited network: package managers plus
+`dl.google.com`, the Gradle hosts and `github.com`; its setup script runs `scripts/cloud-setup.sh`,
+which installs the Android SDK under `$HOME/android-sdk` and writes `local.properties`). Start
+sessions for this repo on that environment. The setup script was run by hand from the checkouts'
+parent directory and worked; its first automatic run happens with the next fresh session.
 
-## Next step
-Merge this PR → trigger `export-model` (open item 1) → start **M0b** with the architecture decision above.
+## Where this session stopped
+After the export run above. No M0b plan was written and nothing from this branch was merged or
+proposed as a pull request. The session did not open or change the remote branches `expert-doodle`,
+`fix-model-export` and `m0b-screen-overlay`.

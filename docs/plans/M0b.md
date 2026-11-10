@@ -44,6 +44,8 @@ Answer (Fable 5.1, high confidence on items marked *): keep the architecture, wi
   strokes and a corner HUD, then measure (dot A/B in the checklist).
 - Plain `View`, not ComposeView, for the overlay. M4 tap-to-lock = a small touchable handle window that arms
   the overlay for one tap.
+- Teardown order (idempotent): remove overlay → `virtualDisplay.release()` → reader close on the capture thread
+  → detector close → `projection.stop()` → quit thread → `stopSelf`. Every restart needs new consent.
 **Decisions:** all adopted (D1). Docs follow-ups go into T1.
 
 ## Lead decisions for the owner to approve
@@ -247,6 +249,12 @@ device/OS, accelerator, capture size/fps, timestamp-source stats, `model_info.js
 
 **Tests first (JUnit4):** ring-buffer wrap; zip entry list builder (pure).
 **Accept:** CI green.
+
+## Progress
+- **T1 done** — `2581d57`, ARCHITECTURE v0.6; docs only. Accepted extras: §7.1/§7.2/§3 camera wording removed;
+  idle gaps don't advance lifecycle/lock timers and dt is capped after a gap (**re-check in M3 consult**).
+  Handoff item: AGENTS.md rule 5 + ARCHITECTURE §11.5 still cite `ResolutionSelector` (CameraX) — propose new
+  example wording at session end (AGENTS.md is not edited mid-session).
 
 ## Then (lead)
 `android-reviewer` on the full diff → fixes via implementer → PR "M0b: screen-capture overlay" with

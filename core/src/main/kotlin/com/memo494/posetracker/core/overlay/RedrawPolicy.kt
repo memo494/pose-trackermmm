@@ -17,10 +17,11 @@ object RedrawPolicy {
     /**
      * Whether the overlay must be redrawn for [current] given what [previous] drew.
      *
-     * Redraw when the number of drawn people changed, when the shown flag or the warning changed, when any
+     * Redraw when the number of drawn people changed, when the warning changed, when any
      * box edge or any drawn keypoint moved by more than [deadbandImg] along an axis, when a keypoint
-     * crossed [keypointMinScore], or when the HUD is [hudDue]. Detections count as empty while not shown,
-     * and a missing frame counts as an empty one.
+     * crossed [keypointMinScore], or when the HUD is [hudDue]. Detections count as empty while not shown
+     * (so a shown/hidden change redraws only when it changes the number of drawn people; with none drawn
+     * on both sides the flag alone changes nothing on screen), and a missing frame counts as an empty one.
      *
      * @param previous frame the overlay last drew, Img space; `null` = none yet.
      * @param current newest frame, Img space; `null` = none.
@@ -44,7 +45,7 @@ object RedrawPolicy {
         hudDue: Boolean,
     ): Boolean {
         if (hudDue) return true
-        if (previousShown != currentShown || previousWarning != currentWarning) return true
+        if (previousWarning != currentWarning) return true
         val previousCount = drawnCount(previous, previousShown)
         val currentCount = drawnCount(current, currentShown)
         if (previousCount != currentCount) return true

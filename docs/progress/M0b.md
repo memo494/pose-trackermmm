@@ -1,7 +1,17 @@
-# M0b — screen-capture overlay (handoff, IN PROGRESS — paused at usage limit)
+# M0b — screen-capture overlay (handoff, IN PROGRESS)
 
 **Plan:** `docs/plans/M0b.md` (approved 2026-11-10; D1–D3 accepted). **Branch:** `m0b-screen-overlay`,
 draft PR #3. **Session env:** aarch64 proot on the phone; no local Android builds, so CI is the build.
+
+## Session 2026-11-12 (lead: Opus 5.5)
+- Owner confirmed the product: **screen-capture overlay** drawn over the Tuya camera app. The camera-based
+  notes on the unmerged branch `fix-export-model-deps` (2026-11-10 night) are withdrawn; that branch is not
+  to be merged.
+- Merged `main` (PR #4: models) into `m0b-screen-overlay` (merge, no rebase/force push).
+- Consultant is Fable 5.2 (`fable` alias); docs updated, history lines unchanged.
+- T6 finished: RedrawPolicy no longer redraws on a shown-flag change alone (`23888e5`); lint WrongConstant
+  fixed with `setFitInsetsTypes(0)` (`b86e5f7`). **CI green** (run 43252274349).
+- **Next:** T4 (detector adapter + model packaging), then T5, T7, T8. Ask the owner before each task.
 
 ## Done
 - Owner decision: product = **screen-capture overlay** (MediaProjection → pose → floating overlay).

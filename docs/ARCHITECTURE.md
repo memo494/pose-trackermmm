@@ -389,7 +389,7 @@ Agents may not loosen asserted thresholds (protected files).
 ## 11. AGENTS.md (content outline)
 0. Roles, models and the milestone workflow are defined in `docs/AI_TEAM.md` (lead plans and supervises on
    Opus 5.5; implementer builds on Sonnet 5.5; android-reviewer and debugger on Opus 5.5; consultant on
-   Fable 5.1 for hard questions; Explore on Haiku 5.5).
+   Fable 5.2 for hard questions; Explore on Haiku 5.5).
 1. Read the ARCHITECTURE sections named in the task (not the whole file). Verify with `scripts/verify.sh`.
 2. **Protected — change only if the task explicitly says so:** `gradle/libs.versions.toml`, Gradle wrapper,
    `.github/**`, `core/**/geometry/**`, test thresholds in `core/src/test/**/Metrics*`, `model/**`, `signing/**`,
@@ -442,7 +442,7 @@ One session per milestone; M4 may need a second session for tuning on the phone.
 ## 14. Build environment (summary; details in BUILD_PLAN.md)
 Code is written in Claude Code cloud sessions (claude.ai/code) on this repo by the AI team in
 `docs/AI_TEAM.md`: the main session is the lead (Opus 5.5, effort `xhigh` by default, `max` on request),
-which plans and supervises while Sonnet 5.5 implementer subagents write the code and a Fable 5.1 consultant
+which plans and supervises while Sonnet 5.5 implementer subagents write the code and a Fable 5.2 consultant
 answers hard questions. Each change is verified in the session with `scripts/verify.sh`
 and always by GitHub Actions, which is the source of truth. The owner's laptop is not used for builds.
 

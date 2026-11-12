@@ -13,7 +13,7 @@ Single source of truth for how AI agents build this repo. The M0a session create
 | **implementer** (subagent) | Sonnet 5.5 (`sonnet`) | `high` | Implements exactly one planned task: tests first, code, `scripts/verify.sh`, small commits | Change scope, touch protected files, weaken tests, spawn agents |
 | **android-reviewer** (subagent) | Opus 5.5 | `high` | Fresh-context, read-only review of the full milestone diff | Edit anything |
 | **debugger** (subagent) | Opus 5.5 | `high` | Root cause + regression test + minimal fix, only on escalation | Run for routine tasks |
-| **consultant** (subagent) | Fable 5.1 (`fable`) | `xhigh` | Answers ONE focused hard question: knowledge the team lacks, conflicting or missing docs, high-risk design (geometry, tracking, latency), failures the debugger could not fix. Read-only, cites sources | Edit anything; run for routine work |
+| **consultant** (subagent) | Fable 5.2 (`fable`) | `xhigh` | Answers ONE focused hard question: knowledge the team lacks, conflicting or missing docs, high-risk design (geometry, tracking, latency), failures the debugger could not fix. Read-only, cites sources | Edit anything; run for routine work |
 | **Explore** (overrides built-in) | Haiku 5.5 (`haiku`) | `low` | Cheap read-only search across the repo | Edit anything |
 | `scripts/verify.sh`, `scripts/ci-status.sh` | — (plain scripts) | — | Build/test/CI results as short summaries | — |
 
@@ -21,7 +21,7 @@ Why this split:
 - Planning, supervision and review decide quality → strongest model at the highest effort.
 - Implementation is the bulk of the tokens → Sonnet 5.5 at `high` (5.5 models default to `medium`, so every
   agent sets its level explicitly).
-- The hardest questions go to the strongest model (Fable 5.1), only when needed and with a budget (§3),
+- The hardest questions go to the strongest model (Fable 5.2), only when needed and with a budget (§3),
   because it costs more than Opus.
 - Build logs and CI results are read by deterministic scripts, not by a model: cheaper and never "misread".
 - Every subagent starts with a fresh context and only its summary returns to the lead, so the lead's
@@ -174,7 +174,7 @@ Report (max 40 lines): root cause + evidence · fix · regression test · verify
 ```markdown
 ---
 name: consultant
-description: Senior expert on Fable 5.1, used only for hard questions - knowledge the team lacks, conflicting or missing docs, high-risk design decisions (geometry, tracking, latency), or failures the debugger could not fix. Read-only; advises, never edits.
+description: Senior expert on Fable 5.2, used only for hard questions - knowledge the team lacks, conflicting or missing docs, high-risk design decisions (geometry, tracking, latency), or failures the debugger could not fix. Read-only; advises, never edits.
 model: fable
 effort: xhigh
 tools: Read, Grep, Glob, Bash, WebSearch, WebFetch

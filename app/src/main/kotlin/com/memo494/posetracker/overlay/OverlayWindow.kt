@@ -86,7 +86,8 @@ class OverlayWindow(
         params.alpha = overlayAlpha()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             params.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
-            params.setFitInsetsTypes(NO_INSET_TYPES)
+            // no inset types: draw over the whole display (C1-A)
+            params.setFitInsetsTypes(0)
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             params.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
@@ -105,10 +106,5 @@ class OverlayWindow(
 
     private fun checkMainThread() {
         check(Looper.myLooper() === Looper.getMainLooper()) { "OverlayWindow must be used on the main thread" }
-    }
-
-    private companion object {
-        /** `setFitInsetsTypes` bit mask meaning "fit no insets": the window covers the whole display. */
-        const val NO_INSET_TYPES = 0
     }
 }

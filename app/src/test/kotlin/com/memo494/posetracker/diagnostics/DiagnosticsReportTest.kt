@@ -28,8 +28,7 @@ class DiagnosticsReportTest {
         logLines: List<String> = listOf("first", "second"),
         modelInfo: String? = "{\"sizes\":{}}",
         lastCrash: String? = "boom",
-    ): List<ReportEntry> =
-        DiagnosticsReport.entries(appInfo, deviceInfo, "TrackerConfig(x=1)", stats, logLines, modelInfo, lastCrash)
+    ): List<ReportEntry> = DiagnosticsReport.entries(appInfo, deviceInfo, "TrackerConfig(x=1)", stats, logLines, modelInfo, lastCrash)
 
     private fun List<ReportEntry>.text(name: String): String = first { it.name == name }.text
 

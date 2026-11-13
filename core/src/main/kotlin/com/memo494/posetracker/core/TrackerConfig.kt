@@ -236,5 +236,14 @@ data class TrackerConfig(
 
         /** Ultralytics `LetterBox` leading/trailing pad rounding bias, in pixels (padX = round(pad/2 - bias)). */
         const val LETTERBOX_PAD_BIAS_MDL = 0.1f
+
+        /** Size, in bytes, of the one buffer used to stream a model file through SHA-256 or into a copy (64 KiB). */
+        const val MODEL_IO_BUFFER_BYTES = 65_536
+
+        /** Length, in characters, of a SHA-256 digest written as lowercase hex. */
+        const val SHA256_HEX_LENGTH = 64
+
+        /** Leading characters of the model's SHA-256 that go into the staged file name (`<base>-<prefix>.<ext>`). */
+        const val STAGED_MODEL_SHA_PREFIX_LENGTH = 16
     }
 }

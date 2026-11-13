@@ -12,6 +12,35 @@ for near people, `0.02` to `0.08` for far ones, flicker in between. An offline s
 to 0.5, 0.09 → about 0.7) while the area crop alone does not. The owner then asked for a way to import a
 ready-made model, which also lets him try other models without a new app build.
 
+## Measured after T1 (2026-11-13, offline on the owner's screenshots)
+**The 640 file exists.** `export-model.yml` run 43481280634 (pinned toolchain, ultralytics 8.4.208) published
+`yolo26n-pose_640.tflite` under the release tag `models`: sha256 `a0e1fd6c…c26149`, 12.1 MB, input
+`[1,3,640,640]`, output `[1,300,57]`, three people at 0.85 to 0.89 on the sample image. The rolling `latest`
+APK release was not touched.
+
+**The real 640 model on his frames** (whole screen, as the app captures it; score of the person):
+alley walker 0.00 → 0.35 · bending person 0.09 → 0.68 · man on the ground 0.33 → 0.59 · far workers and the
+snow scene still 0.00. Scores of one person vary a lot with the exact scale (0.15 to 0.68 for the bending
+person), so single frames are an indication, not a guarantee.
+
+**Our own marks hide the person from the model (the open "dot A/B" question).** The overlay is inside the
+capture. Drawing the marks of v0.1.37 on a clean frame and running the 640 model again:
+
+| Marks drawn on the frame | walker (clean 0.34) | bending (clean 0.67) |
+|---|---|---|
+| everything v0.1.37 draws (box, ring, keypoint dots) | 0.05 | 0.20 |
+| keypoint dots only | 0.06 | 0.18 |
+| full box only | 0.07 | 0.75 |
+| ring 0.12 x box width (today) | 0.18 | 0.71 |
+| ring 0.12 x box width, at least 12 dp | 0.43 | 0.70 |
+| corner brackets instead of the box | 0.41 | 0.71 |
+| ring 0.25 x box width + corner brackets | 0.32 | 0.68 |
+| ring 0.40 x box width | 0.45 | 0.22 |
+
+Two people only, but the effect is large: a detected person is marked, the marks push the next frame under the
+threshold, the marks vanish, the person is detected again. That is the blinking the owner reported. T7 removes
+the cause; without it the 640 test on the phone would still blink.
+
 ## Goal (what the owner sees)
 On the control screen, while stopped: the active model (`Built-in 416` or the imported file with its input
 size), a button **Import model** (system file picker) and a button **Use built-in model**. A file that fits is
@@ -45,6 +74,8 @@ People of 12 to 15 % of the video height stay undetected. Version 1 accepts one 
 - **D6 Protected files named explicitly:** `.github/workflows/export-model.yml` (T1 only). Nothing else that is
   protected changes. No new dependency (`ActivityResultContracts.OpenDocument` is in the activity library
   already used; `SharedPreferences` and files are the platform's).
+- **D8 Marks (T7, pending the owner's yes):** ring and corner brackets by default, box and keypoint dots behind a
+  debug switch; evidence in "Measured after T1".
 - **D7 Not in M0c:** rectangular models, other output layouts, several imported models, a benchmark screen
   (M1), the area crop (M0d), Arabic texts.
 
@@ -145,6 +176,22 @@ for built-in and imported; the report fields.
 **Tests first:** the reducer for every new event in the stopped, running and importing states; a rejection keeps
 the previous model; `UseBuiltInClicked` clears the notice.
 
+### T7 — App: marks that do not hide the person from the model · S/M · runs after T5, before T6 · **waits for the owner's yes**
+**Files:** `TrackerConfig.kt` (`minHeadRingRadiusDp` = 12, `boxCornerRatio` = 0.18), new pure helper
+`core/overlay/HeadRing.kt`, `app/overlay/PoseOverlayView.kt`, `app/control/{ControlState,ControlScreen}.kt`,
+`MainActivity.kt`, a persisted "debug marks" switch read when a session starts, `res/values/strings.xml`,
+`docs/TEST_CHECKLIST.md` (the dot A/B block); tests `HeadRingTest`, `TrackerConfigTest`, `ControlReducerTest`.
+- Default drawing: the head ring with radius max(`headRingRadiusRatio` x box width, `minHeadRingRadiusDp`) and
+  short corner brackets instead of the full box. No keypoint dots.
+- Control screen switch **Debug marks (box and body points)**, off by default, used from the next Start: the
+  full box and the keypoint dots as today.
+- Nothing allocated in the draw phase; no magic numbers outside `TrackerConfig`.
+
+**Tests first:** the ring radius (minimum for small boxes, ratio for large ones, exactly equal at the crossover);
+the reducer for the switch in the stopped and running states; the new config bounds.
+**Acceptance:** with the defaults a medium-distance person no longer blinks the way v0.1.37 did; the switch
+brings today's marks back.
+
 ### T6 — Docs · S
 **Files:** `docs/ARCHITECTURE.md` (§8 model pack: imported models, D1 to D5; §6.5 the stale `onSizeChanged`
 sentence left by PR #5; §6.7 new diagnostics fields; §12 rows for M0c and M0d; §15 change entry),
@@ -179,4 +226,5 @@ before merging.
 | T3 | — | | |
 | T4 | — | | |
 | T5 | — | | |
+| T7 | — | | waits for the owner's yes |
 | T6 | — | | |

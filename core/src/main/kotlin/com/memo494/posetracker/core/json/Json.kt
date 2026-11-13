@@ -305,10 +305,10 @@ object Json {
         private fun readUnicodeEscape(out: StringBuilder) {
             pos++
             var code = 0
-            repeat(TrackerConfig.JSON_UNICODE_ESCAPE_DIGITS) {
+            repeat(JSON_UNICODE_ESCAPE_DIGITS) {
                 val digit = hexValue(peek("a hex digit"))
                 if (digit < 0) fail("invalid hex digit in a unicode escape")
-                code = code * TrackerConfig.JSON_HEX_RADIX + digit
+                code = code * JSON_HEX_RADIX + digit
                 pos++
             }
             out.append(code.toChar())
@@ -318,8 +318,8 @@ object Json {
         private fun hexValue(c: Char): Int =
             when (c) {
                 in '0'..'9' -> c - '0'
-                in 'a'..'f' -> c - 'a' + TrackerConfig.JSON_DECIMAL_RADIX
-                in 'A'..'F' -> c - 'A' + TrackerConfig.JSON_DECIMAL_RADIX
+                in 'a'..'f' -> c - 'a' + JSON_DECIMAL_RADIX
+                in 'A'..'F' -> c - 'A' + JSON_DECIMAL_RADIX
                 else -> -1
             }
 
@@ -352,6 +352,15 @@ object Json {
         }
     }
 }
+
+/** Number of hex digits of a JSON `\uXXXX` escape (fixed by RFC 8259, not a setting). */
+private const val JSON_UNICODE_ESCAPE_DIGITS = 4
+
+/** Radix of the hex digits in a JSON `\uXXXX` escape. */
+private const val JSON_HEX_RADIX = 16
+
+/** Value of the hex digit `a` (and `A`) minus the value of `0`, i.e. the decimal radix. */
+private const val JSON_DECIMAL_RADIX = 10
 
 private fun memberLabel(name: String): String = "member \"$name\""
 

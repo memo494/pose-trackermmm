@@ -224,15 +224,6 @@ data class TrackerConfig(
         /** Deepest array/object nesting the JSON reader accepts (`[[1]]` has depth 2); deeper input is rejected. */
         const val JSON_MAX_DEPTH = 32
 
-        /** Number of hex digits of a JSON `\uXXXX` escape. */
-        const val JSON_UNICODE_ESCAPE_DIGITS = 4
-
-        /** Radix of the hex digits in a JSON `\uXXXX` escape. */
-        const val JSON_HEX_RADIX = 16
-
-        /** Value of the hex digit `a` (and `A`) minus the value of `0`, i.e. the decimal radix. */
-        const val JSON_DECIMAL_RADIX = 10
-
         /** Nanoseconds per second. */
         const val NANOS_PER_SECOND = 1_000_000_000f
 

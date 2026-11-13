@@ -147,6 +147,35 @@ class TrackerConfigTest {
         assertThat(high.headRingRadiusRatio).isEqualTo(TrackerConfig.MAX_HEAD_RING_RADIUS_RATIO)
     }
 
+    @Test
+    fun modelInputSize_defaultsToTheLargeSize() {
+        assertThat(TrackerConfig().modelInputSize).isEqualTo(416)
+        assertThat(TrackerConfig.DEFAULT_MODEL_INPUT_SIZE).isEqualTo(TrackerConfig.MODEL_INPUT_SIZE_LARGE)
+    }
+
+    @Test
+    fun modelInputSize_smallAndLarge_areAccepted() {
+        assertThat(TrackerConfig(modelInputSize = TrackerConfig.MODEL_INPUT_SIZE_SMALL).modelInputSize)
+            .isEqualTo(320)
+        assertThat(TrackerConfig(modelInputSize = TrackerConfig.MODEL_INPUT_SIZE_LARGE).modelInputSize)
+            .isEqualTo(416)
+    }
+
+    @Test
+    fun modelInputSize_anyOtherValue_isRejected() {
+        for (size in intArrayOf(-416, 0, 319, 321, 352, 415, 417, 640)) {
+            assertThrows(IllegalArgumentException::class.java) {
+                TrackerConfig(modelInputSize = size)
+            }
+        }
+    }
+
+    @Test
+    fun jsonAndDetectionLimits_haveTheDocumentedValues() {
+        assertThat(TrackerConfig.MAX_DETECTIONS_PER_FRAME).isEqualTo(30)
+        assertThat(TrackerConfig.JSON_MAX_DEPTH).isEqualTo(32)
+    }
+
     private fun assertWithin(
         value: Float,
         min: Float,

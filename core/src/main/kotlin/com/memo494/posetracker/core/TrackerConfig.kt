@@ -26,6 +26,9 @@ package com.memo494.posetracker.core
  * @property hudTextSizeSp text size of the debug HUD, in sp.
  * @property headRingRadiusRatio radius of the head ring as a fraction of the person box width
  *   (unitless).
+ * @property modelInputSize side of the square model input, in pixels (Mdl space); only
+ *   [MODEL_INPUT_SIZE_SMALL] (320) or [MODEL_INPUT_SIZE_LARGE] (416) is accepted because only those
+ *   two model files are shipped.
  */
 data class TrackerConfig(
     val scoreThreshold: Float = DEFAULT_SCORE_THRESHOLD,
@@ -39,6 +42,7 @@ data class TrackerConfig(
     val keypointMinScore: Float = DEFAULT_KEYPOINT_MIN_SCORE,
     val hudTextSizeSp: Float = DEFAULT_HUD_TEXT_SIZE_SP,
     val headRingRadiusRatio: Float = DEFAULT_HEAD_RING_RADIUS_RATIO,
+    val modelInputSize: Int = DEFAULT_MODEL_INPUT_SIZE,
 ) {
     init {
         require(scoreThreshold in MIN_SCORE_THRESHOLD..MAX_SCORE_THRESHOLD) {
@@ -75,6 +79,9 @@ data class TrackerConfig(
         require(headRingRadiusRatio in MIN_HEAD_RING_RADIUS_RATIO..MAX_HEAD_RING_RADIUS_RATIO) {
             "headRingRadiusRatio $headRingRadiusRatio outside " +
                 "[$MIN_HEAD_RING_RADIUS_RATIO, $MAX_HEAD_RING_RADIUS_RATIO]"
+        }
+        require(modelInputSize == MODEL_INPUT_SIZE_SMALL || modelInputSize == MODEL_INPUT_SIZE_LARGE) {
+            "modelInputSize $modelInputSize is neither $MODEL_INPUT_SIZE_SMALL nor $MODEL_INPUT_SIZE_LARGE"
         }
     }
 
@@ -176,6 +183,15 @@ data class TrackerConfig(
         /** Highest accepted [headRingRadiusRatio]. */
         const val MAX_HEAD_RING_RADIUS_RATIO = 0.4f
 
+        /** Small model input side, in pixels (Mdl): the thermal fallback size. */
+        const val MODEL_INPUT_SIZE_SMALL = 320
+
+        /** Large model input side, in pixels (Mdl): small people need the extra pixels. */
+        const val MODEL_INPUT_SIZE_LARGE = 416
+
+        /** Default [modelInputSize], in pixels (the thermal policy steps 416 to 320). */
+        const val DEFAULT_MODEL_INPUT_SIZE = MODEL_INPUT_SIZE_LARGE
+
         // Fixed constants (not user-tunable) used by the pure helpers, kept here so no number lives
         // elsewhere (AGENTS rule 5).
 
@@ -190,6 +206,21 @@ data class TrackerConfig(
 
         /** Capacity, in characters, of one reused HUD line buffer; longer text is cut. */
         const val HUD_LINE_CAPACITY_CHARS = 64
+
+        /** Most people one frame can hold; a detector keeps at most this many detections per frame. */
+        const val MAX_DETECTIONS_PER_FRAME = 30
+
+        /** Deepest array/object nesting the JSON reader accepts (`[[1]]` has depth 2); deeper input is rejected. */
+        const val JSON_MAX_DEPTH = 32
+
+        /** Number of hex digits of a JSON `\uXXXX` escape. */
+        const val JSON_UNICODE_ESCAPE_DIGITS = 4
+
+        /** Radix of the hex digits in a JSON `\uXXXX` escape. */
+        const val JSON_HEX_RADIX = 16
+
+        /** Value of the hex digit `a` (and `A`) minus the value of `0`, i.e. the decimal radix. */
+        const val JSON_DECIMAL_RADIX = 10
 
         /** Nanoseconds per second. */
         const val NANOS_PER_SECOND = 1_000_000_000f

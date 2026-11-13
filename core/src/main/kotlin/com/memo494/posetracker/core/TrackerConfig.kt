@@ -310,6 +310,9 @@ data class TrackerConfig(
         /** Length, in characters, of a SHA-256 digest written as lowercase hex. */
         const val SHA256_HEX_LENGTH = 64
 
+        /** Leading characters of a model's SHA-256 shown in diagnostics and on screen (a short, readable id). */
+        const val SHA256_SHORT_CHARS = 12
+
         /** Leading characters of the model's SHA-256 that go into the staged file name (`<base>-<prefix>.<ext>`). */
         const val STAGED_MODEL_SHA_PREFIX_LENGTH = 16
 

@@ -264,4 +264,104 @@ class HudFormatterTest {
 
         assertThat(HudFormatter.hudChanged(before, after, idleFps)).isTrue()
     }
+
+    @Test
+    fun detections_builtInModelShowsTheInputSizeWithoutAMark() {
+        val state = sample.copy(frame = frameWith(1), rawRowsAboveThreshold = 1, maxRawScore = 0.84f, modelInputSize = 416)
+
+        assertThat(detections(state)).isEqualTo("det 1/1 max 0.84 in 416")
+    }
+
+    @Test
+    fun detections_importedModelShowsTheInputSizeAndTheMark() {
+        val state =
+            sample.copy(
+                frame = frameWith(1),
+                rawRowsAboveThreshold = 1,
+                maxRawScore = 0.84f,
+                modelInputSize = 640,
+                modelImported = true,
+            )
+
+        assertThat(detections(state)).isEqualTo("det 1/1 max 0.84 in 640 imp")
+    }
+
+    @Test
+    fun detections_withoutAModelTheSizeIsLeftOut() {
+        val state = sample.copy(modelInputSize = 0, modelImported = false)
+
+        assertThat(detections(state)).isEqualTo("det --/-- max --")
+    }
+
+    @Test
+    fun detections_worstCaseFitsTheHudLineAndStaysShorterThanTheStatsLine() {
+        val worst =
+            sample.copy(
+                frame = frameWith(9999),
+                rawRowsAboveThreshold = 9999,
+                maxRawScore = 99.99f,
+                modelInputSize = 9984,
+                modelImported = true,
+            )
+        val roomy = CharArray(TrackerConfig.HUD_LINE_CAPACITY_CHARS * 2)
+
+        val length = HudFormatter.formatDetections(worst, roomy)
+
+        assertThat(length).isAtMost(TrackerConfig.HUD_LINE_CAPACITY_CHARS)
+        assertThat(String(roomy, 0, length)).isEqualTo("det 9999/9999 max 99.99 in 9984 imp")
+    }
+
+    @Test
+    fun detections_typicalImportedLineIsNotWiderThanTheStatsLine() {
+        val typical =
+            sample.copy(
+                frame = frameWith(3),
+                rawRowsAboveThreshold = 12,
+                maxRawScore = 0.93f,
+                modelInputSize = 640,
+                modelImported = true,
+            )
+
+        assertThat(detections(typical).length).isAtMost(stats(sample).length)
+    }
+
+    @Test
+    fun detections_aSmallBufferCutsTheTextInsteadOfThrowing() {
+        val state = sample.copy(frame = frameWith(1), modelInputSize = 640, modelImported = true)
+        val small = CharArray(20)
+
+        val length = HudFormatter.formatDetections(state, small)
+
+        assertThat(length).isEqualTo(20)
+    }
+
+    @Test
+    fun warning_namesTheImportedModelThatIsNotUsed() {
+        val state = sample.copy(warning = OverlayWarning.IMPORTED_MODEL_NOT_USED)
+
+        assertThat(warning(state)).isEqualTo("Imported model not used: built-in model")
+    }
+
+    @Test
+    fun warning_theImportedModelNoteComesAfterEveryOtherWarning() {
+        val note = OverlayWarning.IMPORTED_MODEL_NOT_USED
+
+        assertThat(warning(sample.copy(dotsVisible = false, warning = note))).isEqualTo("Content not visible: dots hidden")
+        assertThat(warning(sample.copy(warning = note))).isEqualTo("Imported model not used: built-in model")
+    }
+
+    @Test
+    fun hudChanged_seesTheModelSizeAndTheImportedFlag() {
+        assertThat(HudFormatter.hudChanged(sample, sample.copy(modelInputSize = 640), idleFps)).isTrue()
+        assertThat(HudFormatter.hudChanged(sample, sample.copy(modelImported = true), idleFps)).isTrue()
+        assertThat(HudFormatter.hudChanged(sample, sample.copy(warning = OverlayWarning.IMPORTED_MODEL_NOT_USED), idleFps)).isTrue()
+    }
+
+    @Test
+    fun hudChanged_seesTheModelFieldsWhileIdle() {
+        val idle = sample.copy(captureFps = 0f)
+
+        assertThat(HudFormatter.hudChanged(idle, idle.copy(modelInputSize = 640), idleFps)).isTrue()
+        assertThat(HudFormatter.hudChanged(idle, idle.copy(modelImported = true), idleFps)).isTrue()
+    }
 }

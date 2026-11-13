@@ -115,7 +115,11 @@ class FramePipelineTest {
     private var publisherError: Throwable? = null
     private var loggerError: Throwable? = null
 
-    private fun pipeline(detector: PoseDetector? = this.detector): FramePipeline {
+    private fun pipeline(
+        detector: PoseDetector? = this.detector,
+        modelImported: Boolean = false,
+        importedModelNotUsed: Boolean = false,
+    ): FramePipeline {
         val pipeline =
             FramePipeline(
                 detector,
@@ -132,6 +136,8 @@ class FramePipelineTest {
                     logs.add(message)
                     loggedErrors.add(error)
                 },
+                modelImported,
+                importedModelNotUsed,
             )
         pipeline.setExpectedSize(CaptureSize(WIDTH, HEIGHT))
         return pipeline
@@ -709,5 +715,90 @@ class FramePipelineTest {
             xy[k * 2 + 1] = headYImg
         }
         return PoseDetection(0f, 0f, WIDTH.toFloat(), HEIGHT.toFloat(), 0.9f, xy, FloatArray(HEAD_KEYPOINTS) { 1f })
+    }
+
+    @Test
+    fun publishedStates_carryTheModelInputSizeAndTheBuiltInFlag() {
+        val pipeline = pipeline()
+
+        pipeline.onFrame(image(), acquireNs())
+
+        assertThat(states.last().modelInputSize).isEqualTo(detector.inputSize)
+        assertThat(states.last().modelImported).isFalse()
+        assertThat(states.last().warning).isNull()
+    }
+
+    @Test
+    fun publishedStates_carryTheImportedFlag() {
+        val pipeline = pipeline(modelImported = true)
+
+        pipeline.onFrame(image(), acquireNs())
+        pipeline.setContentVisible(false)
+
+        assertThat(states).hasSize(2)
+        assertThat(states.all { it.modelImported && it.modelInputSize == detector.inputSize }).isTrue()
+    }
+
+    @Test
+    fun republishBeforeTheFirstFrame_alreadyCarriesTheModel() {
+        val pipeline = pipeline(modelImported = true)
+
+        pipeline.setContentVisible(true)
+
+        assertThat(states.single().modelInputSize).isEqualTo(detector.inputSize)
+        assertThat(states.single().modelImported).isTrue()
+    }
+
+    @Test
+    fun withoutADetector_theModelInputSizeIsZero() {
+        val pipeline = pipeline(detector = null)
+
+        pipeline.onFrame(image(), acquireNs())
+
+        assertThat(states.last().modelInputSize).isEqualTo(0)
+        assertThat(states.last().modelImported).isFalse()
+    }
+
+    @Test
+    fun importedModelNotUsed_isTheNoteOfADetectedFrameAndKeepsTheDotsShown() {
+        val pipeline = pipeline(importedModelNotUsed = true)
+
+        pipeline.onFrame(image(), acquireNs())
+
+        val state = states.last()
+        assertThat(state.frame).isNotNull()
+        assertThat(state.warning).isEqualTo(OverlayWarning.IMPORTED_MODEL_NOT_USED)
+        assertThat(state.detectionsShown).isTrue()
+        assertThat(pipeline.frames).isEqualTo(1L)
+    }
+
+    @Test
+    fun importedModelNotUsed_losesToTheMissingDetector() {
+        val pipeline = pipeline(detector = null, importedModelNotUsed = true)
+
+        pipeline.onFrame(image(), acquireNs())
+
+        assertThat(states.last().warning).isEqualTo(OverlayWarning.DETECTOR_UNAVAILABLE)
+    }
+
+    @Test
+    fun importedModelNotUsed_losesToTheCaptureSizeProblemAndComesBack() {
+        val pipeline = pipeline(importedModelNotUsed = true)
+
+        pipeline.setDisplaySized(false)
+        assertThat(states.last().warning).isEqualTo(OverlayWarning.CAPTURE_NOT_DISPLAY_SIZED)
+
+        pipeline.setDisplaySized(true)
+        assertThat(states.last().warning).isEqualTo(OverlayWarning.IMPORTED_MODEL_NOT_USED)
+    }
+
+    @Test
+    fun withoutAFallback_thereIsNoWarning() {
+        val pipeline = pipeline()
+
+        pipeline.setContentVisible(true)
+        pipeline.onFrame(image(), acquireNs())
+
+        assertThat(states.all { it.warning == null }).isTrue()
     }
 }

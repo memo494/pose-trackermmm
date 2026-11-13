@@ -1,6 +1,10 @@
 package com.memo494.posetracker.diagnostics
 
 import com.google.common.truth.Truth.assertThat
+import com.memo494.posetracker.core.modelimport.ImportedModelMeta
+import com.memo494.posetracker.modelimport.ModelFallback
+import com.memo494.posetracker.modelimport.ModelSource
+import com.memo494.posetracker.modelimport.ModelStatus
 import org.junit.Test
 
 class DiagnosticsReportTest {
@@ -215,5 +219,95 @@ class DiagnosticsReportTest {
             )
 
         assertThat(lines).containsAtLeastElementsIn(expected)
+    }
+
+    // ---- the model block ----
+
+    private val importedMeta = ImportedModelMeta("my-model.tflite", "0123456789abcdef".repeat(4), 12_345_678L, 640, 300)
+
+    private fun modelLines(model: ModelStatus?): List<String> =
+        build(stats = stats.copy(model = model)).text("summary.txt").split("\n")
+
+    @Test
+    fun summary_builtInModel_isDescribedWithoutAFile() {
+        val lines = modelLines(ModelStatus(ModelSource.BUILT_IN, meta = null, fallback = null, message = null, inputSize = 416))
+
+        assertThat(lines)
+            .containsAtLeast(
+                "modelSource=builtin",
+                "modelFile=builtin",
+                "modelSha256=none",
+                "modelInputSize=416",
+                "modelOutputRows=none",
+                "modelFallback=none",
+                "modelFallbackMessage=none",
+            ).inOrder()
+        assertThat(lines.filter { it.startsWith("modelFallbackFile=") }).isEmpty()
+    }
+
+    @Test
+    fun summary_importedModel_showsNameShortHashSizeAndRows() {
+        val lines = modelLines(ModelStatus(ModelSource.IMPORTED, importedMeta, fallback = null, message = null, inputSize = 640))
+
+        assertThat(lines)
+            .containsAtLeast(
+                "modelSource=imported",
+                "modelFile=my-model.tflite",
+                "modelSha256=0123456789ab",
+                "modelInputSize=640",
+                "modelOutputRows=300",
+                "modelFallback=none",
+                "modelFallbackMessage=none",
+            ).inOrder()
+    }
+
+    @Test
+    fun summary_fallbackAfterAFailedLoad_namesTheReasonTheMessageAndTheRefusedFile() {
+        val status =
+            ModelStatus(
+                ModelSource.BUILT_IN,
+                importedMeta,
+                ModelFallback.LOAD_FAILED,
+                "IllegalStateException: input is not NCHW",
+                inputSize = 416,
+            )
+
+        val lines = modelLines(status)
+
+        assertThat(lines)
+            .containsAtLeast(
+                "modelSource=builtin",
+                "modelFile=builtin",
+                "modelInputSize=416",
+                "modelFallback=LOAD_FAILED",
+                "modelFallbackMessage=IllegalStateException: input is not NCHW",
+                "modelFallbackFile=my-model.tflite 0123456789ab",
+            )
+    }
+
+    @Test
+    fun summary_fallbackMessageStaysOnOneLine() {
+        val status = ModelStatus(ModelSource.BUILT_IN, null, ModelFallback.LOAD_FAILED, "a\nb", inputSize = 416)
+
+        assertThat(modelLines(status)).contains("modelFallbackMessage=a b")
+    }
+
+    @Test
+    fun summary_everyFallbackReasonIsPrintedByName() {
+        for (reason in ModelFallback.entries) {
+            val status = ModelStatus(ModelSource.BUILT_IN, null, reason, null, inputSize = 416)
+
+            assertThat(modelLines(status)).contains("modelFallback=${reason.name}")
+        }
+    }
+
+    @Test
+    fun summary_withoutAModelStatus_saysUnknown() {
+        assertThat(modelLines(null)).contains("modelSource=unknown")
+    }
+
+    @Test
+    fun summary_withoutAModelStatus_hasNoOtherModelLines() {
+        assertThat(modelLines(null).filter { it.startsWith("modelFile=") }).isEmpty()
     }
 }

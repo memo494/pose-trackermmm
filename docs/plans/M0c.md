@@ -227,7 +227,7 @@ before merging.
 | T2 | done, android CI green | 35640c3, cfd0b67 | `core/modelimport/*` + import limits in `TrackerConfig`; guard text form `idle`/`pending:<stage>`/`tripped:<stage>`; KDoc of `ImportGuard` says who calls what |
 | T3 | done, android CI green | feda3bc | `ModelProbe.probe(file): ProbeResult` (CPU `CompiledModel`, never throws); `PoseDetectors.fromImported` + internal `verifyImportedFile` (missing: `FileNotFoundException`; length/hash: `ModelIntegrityException`) |
 | T4a | done, android CI green | cdad460, 9573472, f7bbcd4 | `app/modelimport/{ImportedModelStore,ModelImporter,ModelChoice,WorkerThreadCheck}`; accept order: delete old meta, rename model, rename new meta (never a meta for another file); a refused import keeps a `Tripped` guard, only an accept clears it; +55 `@Test`; `app/build.gradle.kts` got `unitTests.isReturnDefaultValues = true` (it was missing) |
-| T4b | — | | session wiring, HUD, diagnostics |
+| T4b | pushed, CI pending | see git log | `modelimport/{SessionModelLoader,ModelStatus}` (`ModelStatusHolder`, `ModelSource`, `ModelFallback`), `CaptureSession.loadModel`, `OverlayWarning.IMPORTED_MODEL_NOT_USED` (does not hide the dots), HUD `det 1/1 max 0.84 in 640 imp`, `summary.txt` model block; main-thread check injectable (`isReturnDefaultValues` removed) |
 | T5 | — | | |
 | T7 | — | | approved by the owner |
 | T6 | — | | |

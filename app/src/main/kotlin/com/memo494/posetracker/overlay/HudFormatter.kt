@@ -19,6 +19,9 @@ object HudFormatter {
     private const val WARNING_CAPTURE_SIZE = "Capture not display-sized: dots hidden"
     private const val WARNING_DETECTOR_UNAVAILABLE = "Model not loaded: no detection"
     private const val WARNING_NOT_VISIBLE = "Content not visible: dots hidden"
+    private const val WARNING_IMPORTED_NOT_USED = "Imported model not used: built-in model"
+    private const val MODEL_SIZE_PREFIX = " in "
+    private const val IMPORTED_MARK = " imp"
 
     private const val UNKNOWN = "--"
     private const val NOT_AVAILABLE = -1
@@ -57,9 +60,11 @@ object HudFormatter {
     }
 
     /**
-     * Writes the detection line, e.g. `det 2/3 max 0.89`: people in the newest frame after filtering, model
-     * output rows whose raw score passed the threshold, and the highest raw score (two decimals). Unknown
-     * values print as `--`. Returns the number of characters written to [out].
+     * Writes the detection line, e.g. `det 2/3 max 0.89 in 416` (built-in model) or
+     * `det 2/3 max 0.89 in 640 imp` (imported model): people in the newest frame after filtering, model
+     * output rows whose raw score passed the threshold, the highest raw score (two decimals), then the model's
+     * input size and the mark ` imp` when the model is imported. Unknown values print as `--`; without a
+     * model (input size 0) the ` in ...` part is left out. Returns the number of characters written to [out].
      */
     fun formatDetections(
         state: OverlayState,
@@ -70,12 +75,17 @@ object HudFormatter {
         pos = putText(out, pos, "/")
         pos = putWhole(out, pos, state.rawRowsAboveThreshold)
         pos = putText(out, pos, " max ")
-        return putHundredths(out, pos, quantize(state.maxRawScore, HUNDREDTHS_PER_UNIT))
+        pos = putHundredths(out, pos, quantize(state.maxRawScore, HUNDREDTHS_PER_UNIT))
+        if (state.modelInputSize <= 0) return pos
+        pos = putText(out, pos, MODEL_SIZE_PREFIX)
+        pos = putWhole(out, pos, state.modelInputSize)
+        return if (state.modelImported) putText(out, pos, IMPORTED_MARK) else pos
     }
 
     /**
-     * Writes the warning line into [out]: the fail-closed warning if there is one, else a note when the
-     * captured content is not visible. Returns the number of characters written; 0 = nothing to show.
+     * Writes the warning line into [out], by priority: a missing detector, a capture that is not display-sized,
+     * content that is not visible, and last the note that an imported model is not used. Returns the number of
+     * characters written; 0 = nothing to show.
      */
     fun formatWarning(
         state: OverlayState,
@@ -84,6 +94,7 @@ object HudFormatter {
         if (state.warning == OverlayWarning.DETECTOR_UNAVAILABLE) return putText(out, 0, WARNING_DETECTOR_UNAVAILABLE)
         if (state.warning == OverlayWarning.CAPTURE_NOT_DISPLAY_SIZED) return putText(out, 0, WARNING_CAPTURE_SIZE)
         if (!state.dotsVisible) return putText(out, 0, WARNING_NOT_VISIBLE)
+        if (state.warning == OverlayWarning.IMPORTED_MODEL_NOT_USED) return putText(out, 0, WARNING_IMPORTED_NOT_USED)
         return 0
     }
 
@@ -106,6 +117,8 @@ object HudFormatter {
         if (before.captureHeightImg != after.captureHeightImg) return true
         if (before.dotsVisible != after.dotsVisible) return true
         if (before.warning != after.warning) return true
+        if (before.modelInputSize != after.modelInputSize) return true
+        if (before.modelImported != after.modelImported) return true
         if (detectionCount(before) != detectionCount(after)) return true
         if (shownFps(before, idleFps) != shownFps(after, idleFps)) return true
         if (isIdle(after, idleFps)) return false

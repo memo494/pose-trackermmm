@@ -28,6 +28,9 @@ import com.memo494.posetracker.overlay.OverlayState
  * @param clock `System.nanoTime()` source.
  * @param publisher receives every new state (the overlay's holder); may throw, the pipeline contains it.
  * @param logger receives a message and the failure, if any; may throw, the pipeline contains it.
+ * @param modelImported whether [detector] runs the owner's imported model; every state carries it for the HUD.
+ * @param importedModelNotUsed whether an imported model exists that this session does not use (a fallback to the
+ *   built-in one); it adds the note [OverlayWarning.IMPORTED_MODEL_NOT_USED] with the lowest priority.
  */
 internal class FramePipeline(
     private val detector: PoseDetector?,
@@ -35,6 +38,8 @@ internal class FramePipeline(
     private val clock: NanoClock,
     private val publisher: (OverlayState) -> Unit,
     private val logger: (String, Throwable?) -> Unit,
+    private val modelImported: Boolean = false,
+    private val importedModelNotUsed: Boolean = false,
 ) {
     private val captureFrame = CaptureFrame()
     private val fpsMeter = FpsMeter()
@@ -44,7 +49,8 @@ internal class FramePipeline(
     private var buffer: ByteArray? = null
     private var contentVisible = true
     private var displaySized = true
-    private var lastState = OverlayState.EMPTY
+    private val modelInputSize = detector?.inputSize ?: 0
+    private var lastState = OverlayState(modelInputSize = modelInputSize, modelImported = modelImported)
     private var imageClosed = false
     private var failureStreak = 0L
 
@@ -224,11 +230,13 @@ internal class FramePipeline(
                 captureHeightImg = heightImg,
                 timestampSource = source,
                 dotsVisible = contentVisible,
-                warning = null,
+                warning = currentWarning(),
                 displayWidthPx = displayWidthPx,
                 displayHeightPx = displayHeightPx,
                 maxRawScore = maxRawScore,
                 rawRowsAboveThreshold = detector.lastRawRowsAboveThreshold,
+                modelInputSize = modelInputSize,
+                modelImported = modelImported,
             ),
         )
         frames++
@@ -254,6 +262,8 @@ internal class FramePipeline(
                 warning = currentWarning(),
                 displayWidthPx = displayWidthPx,
                 displayHeightPx = displayHeightPx,
+                modelInputSize = modelInputSize,
+                modelImported = modelImported,
             ),
         )
     }
@@ -275,11 +285,15 @@ internal class FramePipeline(
         lastHeadYImg = first.headYImg(config.keypointMinScore)
     }
 
-    /** The fail-closed warning for the current flags; a missing detector wins over a wrong capture size. */
+    /**
+     * The warning for the current flags: a missing detector wins over a wrong capture size, which wins over the
+     * note that an imported model is not used (that one does not hide the detections).
+     */
     private fun currentWarning(): OverlayWarning? =
         when {
             detector == null -> OverlayWarning.DETECTOR_UNAVAILABLE
             !displaySized -> OverlayWarning.CAPTURE_NOT_DISPLAY_SIZED
+            importedModelNotUsed -> OverlayWarning.IMPORTED_MODEL_NOT_USED
             else -> null
         }
 

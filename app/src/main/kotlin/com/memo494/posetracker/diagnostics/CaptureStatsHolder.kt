@@ -1,6 +1,7 @@
 package com.memo494.posetracker.diagnostics
 
 import com.memo494.posetracker.capture.FramePipeline
+import com.memo494.posetracker.modelimport.ModelStatusHolder
 import com.memo494.posetracker.overlay.OverlayState
 
 /**
@@ -41,6 +42,7 @@ internal object CaptureStatsHolder {
                 nanRawRows = pipeline.lastNanRawRows,
                 headXImg = pipeline.lastHeadXImg,
                 headYImg = pipeline.lastHeadYImg,
+                model = ModelStatusHolder.latest(),
             )
     }
 }

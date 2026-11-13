@@ -79,6 +79,8 @@ internal class CaptureSession(
     private var contentSizeKnown = false
     private var contentWidthPx = 0
     private var contentHeightPx = 0
+    private var appliedPlan: CapturePlan? = null
+    private var appliedNoUsablePlan = false
 
     private val applyGeometryTask = Runnable { guarded("applying the geometry") { applyGeometry() } }
 
@@ -234,7 +236,12 @@ internal class CaptureSession(
         captureHandler?.postDelayed(hudTick, hudIntervalMs)
     }
 
-    /** Capture thread. Brings the reader and the virtual display in line with the display and content size. */
+    /**
+     * Capture thread. Brings the reader and the virtual display in line with the display and content size.
+     * Does nothing (and logs nothing) when the plan equals the last applied one: `onDisplayChanged` fires for
+     * many unrelated display changes. A changed plan is logged in one line (the geometry history for the
+     * diagnostics zip).
+     */
     private fun applyGeometry() {
         val activePipeline = pipeline
         if (teardown.isStarted || activePipeline == null) return
@@ -243,10 +250,20 @@ internal class CaptureSession(
         val contentHeight = if (contentSizeKnown) contentHeightPx else displayPx.y
         val plan = CapturePlanner.plan(displayPx.x, displayPx.y, contentWidth, contentHeight, config.captureScale)
         if (plan == null) {
+            if (appliedNoUsablePlan) return
+            appliedNoUsablePlan = true
+            appliedPlan = null
             activePipeline.setExpectedSize(null)
             CaptureLog.log("no usable capture size: display $displayPx, content ${contentWidth}x$contentHeight", null)
             return
         }
+        if (!appliedNoUsablePlan && plan == appliedPlan) return
+        val contentText = if (contentSizeKnown) "${contentWidth}x$contentHeight" else "unknown"
+        CaptureLog.log(
+            "capture geometry: display ${displayPx.x}x${displayPx.y}, content $contentText, " +
+                "capture ${plan.size.widthImg}x${plan.size.heightImg}, displaySized ${plan.displaySized}",
+            null,
+        )
         if (plan.size != currentSize) {
             try {
                 createOrResize(plan.size)
@@ -256,6 +273,8 @@ internal class CaptureSession(
                 return
             }
         }
+        appliedPlan = plan
+        appliedNoUsablePlan = false
         activePipeline.setExpectedSize(plan.size)
         activePipeline.setDisplaySized(plan.displaySized)
     }

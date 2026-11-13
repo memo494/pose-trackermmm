@@ -283,6 +283,65 @@ T4 as written is larger than M, so it runs as T4a → T4b → T4c. Findings that
 - no per-frame allocations in our code;
 - the thread table is respected.
 
+#### T5 split (lead, 2026-11-13): two implementer runs, CI after each
+T5 as written is larger than M and most of it cannot be tested in CI, so the logic goes into pure classes first
+(T5a, JVM-tested) and the Android glue stays thin (T5b). Package `com.memo494.posetracker.capture` in `app`.
+Lead decisions:
+- **Teardown never blocks the main thread** (AGENTS rule 2): it starts on main, hops to the capture thread for
+  the reader and the detector, and hops back. A trigger on the capture thread (`onStop`) is posted to main.
+- A detector that cannot be created does not stop the session: the HUD shows a new warning
+  `OverlayWarning.DETECTOR_UNAVAILABLE`, frames are still drained and closed.
+- While the capture is not display-sized (C1-F) the detector is not run (dots are hidden anyway).
+- A static screen delivers no frames, so the session republishes the state at the HUD rate (HUD tick) and the
+  capture fps decays to 0.
+- The notification's Stop action moves here from T7 (the service owns the notification); T7 keeps the activity.
+
+**T5a — capture pipeline, pure seams · M · JUnit4 (`app`)**
+- `FrameImage` (seam for `android.media.Image`; implementations may be reused across frames): `widthImg`,
+  `heightImg`, `timestampNs`, `pixels: ByteBuffer`, `rowStride`, `pixelStride`, `close()`.
+- `FramePipeline` (thread-confined to the capture thread): per frame, in this order — size check against the
+  expected `CaptureSize` (mismatch → close, count, stop) → `RowCopy` into the reused buffer (failure → close,
+  count, stop) → `FrameTimestamp` → **`close()` before inference** (in a `finally`) → `CaptureFrame.set` →
+  `PoseDetector.detect` → fps meter → publish an `OverlayState`. The whole body is wrapped: any `Throwable`
+  (`OutOfMemoryError` included) is logged (first of a streak, then every Nth) and never escapes. Also:
+  `setExpectedSize`, `setContentVisible`, `setDisplaySized`, `onHudTick`, counters for T8 (frames, dropped
+  size-mismatch, copy failures, arrival-timestamp fallbacks, failures).
+- `FpsMeter`: allocation-free ring of frame times; fps = frames inside the window; 0 after an idle gap.
+- `CapturePlanner`: display size + captured-content size + scale → `CaptureSize` and `displaySized`
+  (`null` when the sizes are unusable).
+- `CaptureTeardown`: C1 order as phases `main-1` (remove overlay, release the virtual display) → `capture`
+  (close reader, close detector) → `main-2` (unregister callback, stop projection, quit thread, stop service),
+  with injected executors; idempotent; a failing step is logged and the rest still runs; a capture executor
+  that refuses work (thread already dead) does not stop `main-2`.
+- `OverlayWarning.DETECTOR_UNAVAILABLE` (`core`) with its HUD text in `HudFormatter` (+ tests).
+- **Tests first:** the order copy → close → detect; size-mismatch dropped; copy failure; timestamp source;
+  `OutOfMemoryError` and `RuntimeException` from the detector and from the publisher are contained and the next
+  frame works; no detector → warning; not display-sized → warning and no inference; visibility; HUD tick with
+  decayed fps; buffer reused for the same size and replaced on a new size; FpsMeter (steady, idle, wrap);
+  CapturePlanner (display-sized, partial, rotated, unusable); CaptureTeardown (order, idempotent, failing step,
+  dead capture executor).
+- **Accept:** CI green; `@Test` count up; no `android.*` in the pipeline, planner, meter and teardown classes.
+
+**T5b — Android glue: CaptureService, CaptureSession, manifest, notification · M**
+- Manifest: the four permissions; `CaptureService` not exported, `foregroundServiceType="mediaProjection"`.
+- `CaptureService`: `startIntent(context, resultCode, data)` / `stopIntent(context)`; `running: StateFlow`
+  for T7; null intent → `stopSelf` + `START_NOT_STICKY`; `ServiceCompat.startForeground(…MEDIA_PROJECTION)` in
+  try/catch **before** `getMediaProjection`; low-importance channel, ongoing notification with a Stop action;
+  `onDestroy` runs the teardown.
+- `CaptureSession`: capture `HandlerThread`; `registerCallback(cb, captureHandler)` **before**
+  `createVirtualDisplay` (exactly once, `AUTO_MIRROR`); `ImageReader` RGBA_8888 `maxImages = 2`;
+  `acquireLatestImage` → `FramePipeline`; detector created on the capture thread
+  (`PoseDetectors.fromAssets`, failure → no detector); resize through `CapturePlanner` on
+  `onCapturedContentResize` (34+) and a `DisplayListener` (all levels): new reader → `virtualDisplay.resize` →
+  `setSurface` → old reader closed, never a second virtual display; `onCapturedContentVisibilityChanged`;
+  `onStop` → teardown (posted to main); HUD tick on the capture handler; overlay shown on main, a refused
+  overlay ends the session.
+- No deprecated API without an SDK check (`IntentCompat.getParcelableExtra`, `ServiceCompat.stopForeground`,
+  `WindowManager.getMaximumWindowMetrics` on 30+).
+- **Tests:** none beyond T5a (glue only); every decision that can be pure lives in T5a.
+- **Accept:** CI green (lint included); nothing but `WindowManager`/service calls on the main thread; the thread
+  table is respected; lead reads the glue line by line.
+
 ### T6 — Overlay window + HUD · M
 **Goal:** green boxes + keypoints drawn over other apps without blocking their touches.
 **Files:** `app/.../overlay/OverlayWindow.kt`, `PoseOverlayView.kt`, `HudFormatter.kt`.

@@ -97,6 +97,9 @@ abstract class BasePredictor : Predictor {
     override lateinit var inputSize: Size
     val accelerator: String
         get() = rtModel.accelerator
+    /** True when the model input is planar CHW (NCHW); false when LiteRtModel fell back to assuming NHWC. */
+    val inputUsesNchw: Boolean
+        get() = rtModel.inputUsesNchw
     protected lateinit var modelInputSize: Pair<Int, Int>
     protected fun isInterpreterInitialized() = this::rtModel.isInitialized
 

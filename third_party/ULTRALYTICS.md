@@ -35,6 +35,7 @@
 | `Predictor.kt` | `InferenceModel.create` now returns `LiteRtModel` directly (no `.onnx`/`OrtQnnModel` branch). KDoc no longer mentions QNN/NPU. | `OrtQnnModel` is not vendored (QNN is Qualcomm-only). |
 | `Predictor.kt` | `Predictor.create` keeps only the `POSE` branch; parameter `classifierOptions` removed. | Other predictors are not vendored. |
 | `Predictor.kt` | Removed `BasePredictor.loadModelLabels`. | It calls the dropped `YOLOFileUtils.loadModelMetadata`. Labels are passed to the constructor; `colors` stays empty. |
+| `Predictor.kt` | Added the read-only property `BasePredictor.inputUsesNchw` (returns `rtModel.inputUsesNchw`). | `rtModel` is `protected`; the adapter must refuse a model whose input layout `LiteRtModel` could not read by name (it then assumes NHWC and would feed our NCHW model wrong data). |
 | `Predictor.kt` | Removed `BasePredictor.inputOBBFromModelOBB`, the private `outputCoordinatesAreNormalized(OBB)` and the unused `atan2`/`hypot` imports. | They need the dropped `OBB` class. |
 | `PoseEstimator.kt` | `init` no longer calls `loadModelLabels`; it only warns when no labels were passed. | `loadModelLabels` was removed (above). |
 | `LiteRtModel.kt` | One KDoc line no longer references `[OrtQnnModel]`. | The class is not vendored. |

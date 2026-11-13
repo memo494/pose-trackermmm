@@ -117,7 +117,8 @@ Single-app capture mode (`MediaProjectionConfig` for a single window), gallery-v
 pose-tracker-android/
 ├─ core/        PURE KOTLIN JVM (kotlin("jvm") plugin → android.* cannot compile here)
 │               model types, geometry (Letterbox Img↔Mdl, FitCenter Img↔View), capture math (CaptureSize,
-│               RowCopy, FrameTimestamp), tracking, TrackerConfig, replay I/O
+│               RowCopy, FrameTimestamp), tracking, TrackerConfig, replay I/O, `json` (strict reader),
+│               `modelpack` (ModelInfo, Sha256, ModelStager)
 ├─ detector/    Android library: PoseDetector interface + adapter over vendored Ultralytics code
 │               (com/ultralytics/yolo: LiteRtModel, Predictor, PoseEstimator, utils), Fake impl
 ├─ app/         Capture service (MediaProjection + ImageReader, foreground), overlay window + plain-View
@@ -212,10 +213,12 @@ Dependencies: `app → detector → core`, `app → core`. Nothing else.
 ### 6.1 Detector (`detector/`)
 ```kotlin
 interface PoseDetector : Closeable {
-    val inputSize: Int; val accelerator: Accelerator
-    fun detect(frame: CaptureFrame): DetectionFrame   // RGBA pixels in the reused exact-width buffer, size, timestampNs
+    val inputSize: Int; val accelerator: Accelerator   // model input side (Mdl px, read from the model); what runs
+    val lastInferenceMs: Float                         // model run + output readback of the last detect; 0 before
+    fun detect(frame: CaptureFrame): DetectionFrame    // RGBA pixels in the reused exact-width buffer, size, timestampNs
 }
 ```
+Thread-confined: create, `detect` and `close` on the capture thread (a call from another thread throws).
 - Implemented as an adapter over the vendored Ultralytics `LiteRtModel` + `PoseEstimator` (§2.1). Where upstream
   already does the right thing (output-layout detection, end-to-end vs NMS decoding, GPU→CPU fallback) it is
   reused; the rules below are what we add or enforce on top.
@@ -227,8 +230,15 @@ interface PoseDetector : Closeable {
 - **Accelerator selection:** create with `Options(Accelerator.GPU)` (GPU only). On `LiteRtException`,
   log it and recreate with `Options(Accelerator.CPU)`; HUD shows `CPU` and the red banner appears.
   (A mixed `Options(GPU, CPU)` can silently run on CPU, which would hide problems.)
-- One warm-up inference right after creation (GPU shader compilation must not stall the first frames).
-- Input tensor layout **read from the model** (expected NCHW `(1,3,S,S)`, RGB, 0–1). Never hard-coded.
+- One warm-up inference right after creation (GPU shader compilation must not stall the first frames). It is the
+  vendored one: `LiteRtModel` runs it inside its GPU→CPU ladder, so the adapter adds no second warm-up.
+- **Model file:** packaged as an app asset (the `stage<Variant>ModelAssets` build task, §8), staged at start by
+  `ModelStager` into `noBackupFilesDir/models` (versioned name, temp file + rename) with a sha256 check, and only
+  then opened by LiteRT **by path**; a file that does not match its hash is never opened.
+- Input tensor layout **read from the model** (expected NCHW `(1,3,S,S)`, RGB, 0–1). Never hard-coded. If the
+  vendored `LiteRtModel` could not read the layout by name it silently assumes NHWC; the adapter checks
+  `BasePredictor.inputUsesNchw` and refuses to run (fail closed). It also requires a square input equal to
+  `TrackerConfig.modelInputSize`.
 - Output expected `(1,300,57)`: per row box xyxy, score, cls, 17×(x,y,v). Exact column order and
   pixel-vs-normalised scale are **verified by a golden test** against Python `model.predict()` on the same
   image (fixture committed with the model). Rows with score < 0.15 dropped.
@@ -332,7 +342,7 @@ The overlay is a plain `View` (not `ComposeView`) in a `TYPE_APPLICATION_OVERLAY
 ### 7.1 Config
 `TrackerConfig` (in `core`): every tunable number with unit, default, min, max, KDoc. No magic numbers
 elsewhere. Debug sheet exposes the important ones as sliders + "reset to defaults", plus: model size
-(320/416), capture scale, analysis fps cap (60/30), accelerator override (auto/CPU).
+(`modelInputSize`, 320 or 416, default 416), capture scale, analysis fps cap (60/30), accelerator override (auto/CPU).
 Capture-related entries (M0b): score threshold 0.15, capture scale ½, HUD rate 2 Hz, timestamp guard 100 ms,
 overlay alpha cap fallback 0.8, dot/box stroke widths, lock arm timeout, max `dt` after an idle gap.
 
@@ -347,7 +357,9 @@ step back up after 60 s below the threshold. Every step is logged and shown in t
   `tools/requirements.lock` (pinned ultralytics ≥ 8.4.83 + deps), runs
   `export(format="litert", nms=False, imgsz=S)` for S = 320 and 416, runs Python `predict()` on the fixture
   image to produce golden outputs, writes `model_info.json` (I/O shapes, versions, sha256), opens a PR.
-- Normal builds never run Python. Build fails with a clear message if a model or its sha256 mismatches.
+- Normal builds never run Python. Build fails with a clear message if a model or its sha256 mismatches: the check
+  is the `stage<Variant>ModelAssets` Gradle task of `app`, which verifies every file listed in `model_info.json`
+  and copies only the `.tflite` files and `model_info.json` into the APK assets.
 - No INT8 / w8a16 (loses the end-to-end head; w8a16 falls off the GPU).
 - **Licence: AGPL-3.0 for the whole app** (vendored Ultralytics code + model weights). Fine for private personal use. Any distribution (Play Store, sharing the APK
   publicly) requires open-sourcing app + weights, or an Ultralytics Enterprise licence.
@@ -447,6 +459,11 @@ answers hard questions. Each change is verified in the session with `scripts/ver
 and always by GitHub Actions, which is the source of truth. The owner's laptop is not used for builds.
 
 ## 15. Changes
+- **v0.6.1 (M0b T4):** detector as implemented: `PoseDetector` gained `lastInferenceMs` (source of the HUD's
+  inference time); the model ships as an asset, `ModelStager` stages it into `noBackupFilesDir/models` after a
+  sha256 check and LiteRT opens it by path; the adapter refuses a model whose input is not NCHW (new read-only
+  `BasePredictor.inputUsesNchw`, logged in `third_party/ULTRALYTICS.md`) or not square; the warm-up is the vendored
+  one; `modelInputSize` (default 416) added to §7.1; `core` also holds `json` and `modelpack`.
 - **v0.6:** product changed (owner, 2026-11-10) from a CameraX camera app to a **screen-capture overlay**:
   MediaProjection → ImageReader → YOLO26n-pose → plain-View `TYPE_APPLICATION_OVERLAY` dots over other apps,
   portrait + landscape. CameraX dropped from code (catalog entry stays until a deliberate catalog PR);

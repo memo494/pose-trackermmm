@@ -1,5 +1,7 @@
 package com.memo494.posetracker.core.model
 
+import com.memo494.posetracker.core.TrackerConfig
+
 /**
  * One detected person, in image space (`Img`, ARCHITECTURE §4.2): pixels of the capture content rect,
  * no rotation, no mirror.
@@ -39,6 +41,37 @@ class PoseDetection(
 
     /** Y of keypoint [index], Img pixels. */
     fun keypointYImg(index: Int): Float = keypointsXyImg[index * XY_PER_KEYPOINT + 1]
+
+    /**
+     * X of the head point, Img pixels (the M0b head-ring centre): the mean x of the head keypoints scoring at
+     * least [minScore], or the box centre x when none does. Allocation-free.
+     */
+    fun headXImg(minScore: Float): Float {
+        val headCount = minOf(keypointCount, TrackerConfig.HEAD_KEYPOINT_COUNT)
+        var sum = 0f
+        var used = 0
+        for (k in 0 until headCount) {
+            if (keypointScores[k] >= minScore) {
+                sum += keypointXImg(k)
+                used++
+            }
+        }
+        return if (used > 0) sum / used else (boxLeftImg + boxRightImg) / 2f
+    }
+
+    /** Y of the head point, Img pixels: like [headXImg], falling back to the box top. Allocation-free. */
+    fun headYImg(minScore: Float): Float {
+        val headCount = minOf(keypointCount, TrackerConfig.HEAD_KEYPOINT_COUNT)
+        var sum = 0f
+        var used = 0
+        for (k in 0 until headCount) {
+            if (keypointScores[k] >= minScore) {
+                sum += keypointYImg(k)
+                used++
+            }
+        }
+        return if (used > 0) sum / used else boxTopImg
+    }
 
     private companion object {
         /** Floats per keypoint in [keypointsXyImg] (x and y). */

@@ -52,8 +52,11 @@ Share diagnostics, and say what the camera showed (people, how many, indoors or 
 ### 4. Still picture means almost no frames
 1. Pause the video (or point the camera at a still scene so nothing on the screen moves) and wait 5 seconds.
 
-**Pass:** the `fps` number in the corner falls to about **0 to 2**. When the picture moves again, it rises.
-**If it fails:** it stays high (above about 10) on a still picture: Share diagnostics.
+**Pass:** the `fps` number in the corner falls to **0** within about two seconds and stays there. When the
+picture moves again, it rises. With people in a still picture a small value can remain; that is not a pass
+either, so report it too (the agent needs to know).
+**If it fails:** the number keeps jumping (for example 1, 2, 5…) or stays above 0 on a still picture:
+Share diagnostics.
 
 ### 5. Rotate to landscape
 1. Turn the phone sideways (landscape) and wait up to 1 second. Turn it back.
@@ -67,9 +70,11 @@ diagnostics (right after it happens) and say which way you turned.
 1. With tracking running, press the power button to lock the phone. Wait 5 seconds and unlock it.
 2. Look at the Pose Tracker notification and open the app.
 
-**Pass:** tracking has stopped cleanly (status says **Stopped**, no notification, no corner text). Pressing
-**Start** again asks for the screen-recording permission again; that is expected.
-**If it fails:** the app still says **Running** with no rings, or the phone shows an error: Share
+**Pass:** either of these is fine. (a) Tracking has stopped cleanly: status says **Stopped**, no
+notification, no corner text, and pressing **Start** again asks for the screen-recording permission again
+(that is expected). (b) Tracking simply continues after you unlock (some phones keep the screen recording
+alive).
+**If it fails:** the app says **Running** but there is no corner text, or the phone shows an error: Share
 diagnostics.
 
 ### 7. Warnings on the screen

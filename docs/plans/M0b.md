@@ -361,6 +361,18 @@ device/OS, accelerator, capture size/fps, timestamp-source stats, `model_info.js
   AutoUpdate installed `litert-torch` mid-process and swapped torch → preinstall it in `tools/requirements.txt`.
   That run confirmed shapes: input `(1,3,320,320)` NCHW float, output `(1,300,57)`.
 - **Order change:** T6 (overlay) runs before T4/T5 — it needs only T3 types; T5 wires it in. T4 waits for the model.
+- **T6 done** (2026-11-12) — `dc1123f..b86e5f7`: RedrawPolicy, OverlayState(Holder), HudFormatter, PoseOverlayView,
+  OverlayWindow. Fixes: no redraw on a shown-flag change alone; `setFitInsetsTypes(0)` for lint. CI green.
+- **T4a done** (2026-11-13) — `3590635..7ea8968`: `core` JSON reader, ReplayFixture, CaptureFrame, config.
+  `@Test` 123 → 205. CI green on round 2 (one ktlint fix).
+- **T4b done** — `7a75469..1b98060`: ModelInfo, Sha256, ModelStager, `stage<Variant>ModelAssets`. `@Test` → 242.
+  CI green on round 1. CI log: `Staged model assets: yolo26n-pose_320.tflite, yolo26n-pose_416.tflite,
+  model_info.json`; APK artifact 26.1 MB → 47.4 MB. The APK listing itself could not be read (artifact download
+  blocked in the cloud session).
+- **T4c done** — `6ef02bd..dad3ea9`: PoseDetector, LiteRtPoseDetector, FakePoseDetector, YoloResultMapper,
+  UltralyticsPoseEngine, `PoseDetectors.fromAssets`; vendored `BasePredictor.inputUsesNchw`; ARCHITECTURE v0.6.1.
+  `@Test` → 271. CI green on round 2 (one ktlint fix), run 43380160634. Lead read the Android glue
+  (`UltralyticsPoseEngine`, `PoseDetectors`): it is not JVM-tested, so its first real run is the phone test.
 
 ## Then (lead)
 `android-reviewer` on the full diff → fixes via implementer → PR "M0b: screen-capture overlay" with

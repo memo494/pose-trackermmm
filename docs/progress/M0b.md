@@ -1,42 +1,59 @@
 # M0b — screen-capture overlay (handoff, IN PROGRESS)
 
-**Plan:** `docs/plans/M0b.md` (approved 2026-11-10; D1–D3 accepted). **Branch:** `m0b-screen-overlay`,
-draft PR #3. **Session env:** aarch64 proot on the phone; no local Android builds, so CI is the build.
+**Plan:** `docs/plans/M0b.md` (approved 2026-11-10; T4 split added 2026-11-13). **Branch:** `m0b-screen-overlay`,
+draft PR #3. **Product (owner, 2026-11-12):** dots drawn over other apps on the screen; the first target app is
+the Tuya camera app. **Builds:** no local Gradle in cloud or phone sessions, so CI is the build.
 
-## Session 2026-11-12 (lead: Opus 5.5)
-- Owner confirmed the product: **screen-capture overlay** drawn over the Tuya camera app. The camera-based
-  notes on the unmerged branch `fix-export-model-deps` (2026-11-10 night) are withdrawn; that branch is not
-  to be merged.
-- Merged `main` (PR #4: models) into `m0b-screen-overlay` (merge, no rebase/force push).
-- Consultant is Fable 5.2 (`fable` alias); docs updated, history lines unchanged.
-- T6 finished: RedrawPolicy no longer redraws on a shown-flag change alone (`23888e5`); lint WrongConstant
-  fixed with `setFitInsetsTypes(0)` (`b86e5f7`). **CI green** (run 43252274349).
-- **Next:** T4 (detector adapter + model packaging), then T5, T7, T8. Ask the owner before each task.
+## Status (2026-11-13; lead ran on Fable 5.2 this session, the owner's choice)
+- **Done and green:** T1, T2, T3, T6 and T4 (as T4a, T4b, T4c). Last green run: 43380160634 on `dad3ea9`.
+  `@Test` = 271.
+- **Next:** T5 (screen-capture service) → T7 (control activity, permissions) → T8 (diagnostics + checklist) →
+  android-reviewer on the full diff → PR #3 ready → owner merges → APK on `latest` → phone test.
+  The first on-phone run needs T5 and T7. Ask the owner before each task.
 
-## Done
-- Owner decision: product = **screen-capture overlay** (MediaProjection → pose → floating overlay).
-- C1 consult (Fable): design confirmed with changes A–G, logged in the plan.
-- **T1** ARCHITECTURE v0.6. **T2** Ultralytics pose core vendored (pinned `c97bf34`), AGPL LICENSE,
-  `third_party/ULTRALYTICS.md`. **T3** pure-Kotlin core (TrackerConfig, Letterbox, FitCenter, CaptureSize,
-  RowCopy, FrameTimestamp). **CI green** on PR #3 (run 42834207569), `@Test` = 66.
-- **Model export fixed + run.** PR **#4** (`model-export` → `main`) carries the script fix and
-  `yolo26n-pose_{320,416}.tflite`, goldens and `model_info.json`. Input is `(1,3,S,S)` float32 NCHW;
-  output is `(1,300,57)` float32. CI on #4 was running at pause (run 42835960608).
+## What T4 added
+- `core`: `json/Json` (strict reader, no dependency), `replay/ReplayFixture` (format v1), `capture/CaptureFrame`
+  (reused frame holder), `modelpack/` (`ModelInfo`, `Sha256`, `ModelStager`), `TrackerConfig.modelInputSize`
+  (default 416) and `MAX_DETECTIONS_PER_FRAME`.
+- `app/build.gradle.kts`: `stage<Variant>ModelAssets` checks every model against `model_info.json` (sha256) and
+  packages the two `.tflite` files and `model_info.json` as assets.
+- `detector`: `PoseDetector` (with `lastInferenceMs`), `PoseDetectors.fromAssets(context, config)` (the entry
+  point for T5; call it on the capture thread), `LiteRtPoseDetector` (GPU → CPU ladder, threshold, cap,
+  thread-confined), `UltralyticsPoseEngine` (vendored `PoseEstimator`, reused bitmap), `FakePoseDetector`,
+  `YoloResultMapper`.
+- Vendored change: `BasePredictor.inputUsesNchw` (logged in `third_party/ULTRALYTICS.md`).
 
-## In flight at pause
-- **T6 overlay** implementer was mid-task on `m0b-screen-overlay` (first commit `dc1123f` RedrawPolicy; untracked
-  `app/.../overlay/` files existed). Next session: check `git status` / `git log`, and whether its work was
-  pushed. Then run CI and review against the T6 acceptance criteria.
+## Decisions (lead, 2026-11-13)
+- The model is an asset, staged to `noBackupFilesDir/models` with a sha256 check and then opened by path
+  (litert-runtime skill; vendored `LiteRtModel` takes a path).
+- Own strict JSON reader in `core` instead of a new dependency (the catalog is protected).
+- Default model size 416.
+- Implementers push the branch (plain push, never force) and read `scripts/ci-status.sh`. After a push wait about
+  90 s and check that the run's `head_sha` is the pushed commit; the script otherwise reports the previous run.
 
-## Next steps
-1. Owner merges **PR #4** (models). Then rebase `m0b-screen-overlay` on `main`.
-2. Finish/verify T6 → T4 (detector adapter + model packaging; needs #4) → T5 (capture service) → T7 → T8.
-3. android-reviewer on the full diff → PR #3 ready → owner merges → APK on `latest`.
+## Not verified yet (needs the phone)
+- `UltralyticsPoseEngine` and `PoseDetectors.fromAssets` are Android glue with no JVM test; their first real run
+  is the phone test. Watch for the NCHW guard accepting the real model (input tensor found by the name `args_0`)
+  and for the accelerator shown in the HUD.
+- If the HUD shows **CPU**: upstream's own note in `LiteRtModel.kt` says the GPU may not compile end-to-end
+  graphs. M1 should then export a non-end-to-end model (the vendored decoder already handles the classic layout
+  with NMS) and benchmark both. Measure before changing anything.
+- The APK contents were not listed (artifact download is blocked in cloud sessions). Evidence instead: the CI log
+  line `Staged model assets: yolo26n-pose_320.tflite, yolo26n-pose_416.tflite, model_info.json` and the APK
+  artifact growing by 21 MB.
 
 ## Open items / proposals
-- AGENTS.md rule 5 + ARCHITECTURE §11.5 still use `ResolutionSelector` (CameraX) as the example. Propose a new
-  example in a session-end edit.
-- Snapshots (`DetectionFrame`/`OverlayState`) are allocated per frame. Pool them in M1 together with D2.
-- Optional repo setting: allow GitHub Actions to create PRs (Settings → Actions → General), so
-  `export-model` can open its own PR.
-- `fix-model-export` branch is superseded by `model-export`; delete it after #4 merges.
+- **Small people:** in portrait the Tuya video is about a quarter of the screen, so letterboxing the whole screen
+  to 416 leaves people very small. Plan a crop to the video region (chosen by the owner or detected); ask the
+  consultant when planning M1/M2.
+- Branch `fix-export-model-deps` (2026-11-10 night, unmerged): its camera-based doc notes are withdrawn and it
+  must not be merged. Its export self-check and JSON goldens are useful for the M1 golden test: port them in a
+  separate PR after the owner's OK, then delete the branch. The old merged branches can be deleted by the owner.
+- AGENTS.md proposals (never edited mid-session): rule 5 and ARCHITECTURE §11.5 still cite `ResolutionSelector`
+  (CameraX) as the example; record that ktlint's effective `max_line_length` is 140 and that it joins a body
+  onto its signature line whenever the result fits.
+- `Accelerator.kt` KDoc still says "M0a placeholder" (fix in T5). `TrackerConfig` holds a few JSON-reader
+  constants (radix, escape digits) that are not tunables: the reviewer decides.
+- Per-frame allocations left for M1 (decision D2): the vendored decoder, the `Canvas` in
+  `prepareBitmapForModel`, and the `DetectionFrame` / `PoseDetection` / `OverlayState` snapshots.
+- Optional repo setting: allow GitHub Actions to create PRs, so `export-model` can open its own PR.

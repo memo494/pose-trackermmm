@@ -44,6 +44,17 @@ class PoseEstimator(
     private var isEndToEnd = false
     private lateinit var outputLayout: OutputLayout
 
+    // Diagnostics of the last predict (pose-tracker change, see third_party/ULTRALYTICS.md); -1 = not measured yet.
+    /** Highest raw score over all output rows of the last predict, before any threshold; NaN rows are skipped. */
+    var lastMaxRawScore: Float = -1f
+        private set
+    /** Output rows of the last predict whose raw score passed [confidenceThreshold]. */
+    var lastRawRowsAboveThreshold: Int = -1
+        private set
+    /** Output rows of the last predict whose raw score was NaN. */
+    var lastNanRawRows: Int = -1
+        private set
+
     init {
         if (this.labels.isEmpty()) {
             Log.w("PoseEstimator", "No labels provided; detections may lack class names.")
@@ -157,6 +168,7 @@ class PoseEstimator(
         origWidth: Int,
         origHeight: Int
     ): List<PoseDetection> {
+        recordRawScoreStats(flat, confidenceThreshold)
         if (isEndToEnd) {
             return postProcessEndToEndPose(flat, confidenceThreshold, origWidth, origHeight)
         }
@@ -286,6 +298,25 @@ class PoseEstimator(
             )
         }
         return detections
+    }
+
+    /** Allocation-free scan of the score column of every output row (pose-tracker diagnostics). */
+    private fun recordRawScoreStats(flat: FloatArray, confidenceThreshold: Float) {
+        var maxScore = -1f
+        var above = 0
+        var nanRows = 0
+        for (j in 0 until numAnchors) {
+            val conf = featureValue(flat, 4, j)
+            if (conf.isNaN()) {
+                nanRows++
+                continue
+            }
+            if (conf > maxScore) maxScore = conf
+            if (conf >= confidenceThreshold) above++
+        }
+        lastMaxRawScore = maxScore
+        lastRawRowsAboveThreshold = above
+        lastNanRawRows = nanRows
     }
 
     private fun featureValue(

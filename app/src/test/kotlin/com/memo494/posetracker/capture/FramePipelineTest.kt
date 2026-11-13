@@ -5,6 +5,7 @@ import com.memo494.posetracker.core.TrackerConfig
 import com.memo494.posetracker.core.capture.CaptureFrame
 import com.memo494.posetracker.core.capture.CaptureSize
 import com.memo494.posetracker.core.model.DetectionFrame
+import com.memo494.posetracker.core.model.PoseDetection
 import com.memo494.posetracker.core.model.TimestampSource
 import com.memo494.posetracker.core.overlay.OverlayWarning
 import com.memo494.posetracker.detector.Accelerator
@@ -19,6 +20,9 @@ private const val BYTES_PER_PIXEL = TrackerConfig.RGBA_BYTES_PER_PIXEL
 private const val NOW_NS = 10_000_000_000L
 private const val MS_NS = 1_000_000L
 private const val PIXEL_PATTERN_PERIOD = 251
+private const val DISPLAY_WIDTH_PX = 8
+private const val DISPLAY_HEIGHT_PX = 4
+private const val HEAD_KEYPOINTS = TrackerConfig.HEAD_KEYPOINT_COUNT
 
 /** An image that records its reads and closes in [events]. */
 private class FakeFrameImage(
@@ -59,6 +63,10 @@ private class ScriptedDetector(
     override val inputSize: Int = 320
     override val accelerator: Accelerator = Accelerator.GPU
     override var lastInferenceMs: Float = 7.5f
+    override var lastMaxRawScore: Float = PoseDetector.NOT_MEASURED.toFloat()
+    override var lastRawRowsAboveThreshold: Int = PoseDetector.NOT_MEASURED
+    override var lastNanRawRows: Int = PoseDetector.NOT_MEASURED
+    var people: List<PoseDetection> = emptyList()
     var failure: Throwable? = null
     var calls = 0
     var seenRgba: ByteArray? = null
@@ -82,7 +90,7 @@ private class ScriptedDetector(
                 frame.timestampSource,
                 frame.widthImg,
                 frame.heightImg,
-                emptyList(),
+                people,
             )
         lastResult = result
         return result
@@ -582,5 +590,124 @@ class FramePipelineTest {
 
         assertThat(detector.seenRgba).isNotSameInstanceAs(first)
         assertThat(detector.seenRgba!!.size).isEqualTo((WIDTH + 2) * HEIGHT * BYTES_PER_PIXEL)
+    }
+
+    // Phone bug "nothing drawn in landscape": the overlay maps with the display size of the capture plan,
+    // so every published state must carry the display size that belongs to its capture size.
+
+    @Test
+    fun publishedFrames_carryTheDisplaySizeOfTheCapturePlan() {
+        val pipeline = pipeline()
+        pipeline.setDisplaySizePx(DISPLAY_WIDTH_PX, DISPLAY_HEIGHT_PX)
+
+        pipeline.onFrame(image(), acquireNs())
+
+        val state = states.last()
+        assertThat(state.displayWidthPx).isEqualTo(DISPLAY_WIDTH_PX)
+        assertThat(state.displayHeightPx).isEqualTo(DISPLAY_HEIGHT_PX)
+    }
+
+    @Test
+    fun afterARotation_framesCarryTheNewDisplaySizeAndTheOldDetectionsAreDropped() {
+        val pipeline = pipeline()
+        pipeline.setDisplaySizePx(DISPLAY_WIDTH_PX, DISPLAY_HEIGHT_PX)
+        detector.people = listOf(person(headXImg = 1f, headYImg = 1f))
+        pipeline.onFrame(image(), acquireNs())
+
+        pipeline.setDisplaySizePx(DISPLAY_HEIGHT_PX, DISPLAY_WIDTH_PX)
+        val republished = states.last()
+        pipeline.setExpectedSize(CaptureSize(HEIGHT, WIDTH))
+        pipeline.onFrame(image(widthImg = HEIGHT, heightImg = WIDTH), acquireNs())
+
+        assertThat(republished.frame).isNull()
+        val rotated = states.last()
+        assertThat(rotated.captureWidthImg).isEqualTo(HEIGHT)
+        assertThat(rotated.displayWidthPx).isEqualTo(DISPLAY_HEIGHT_PX)
+        assertThat(rotated.displayHeightPx).isEqualTo(DISPLAY_WIDTH_PX)
+    }
+
+    @Test
+    fun theFirstDisplaySize_publishesNothing() {
+        val pipeline = pipeline()
+
+        pipeline.setDisplaySizePx(DISPLAY_WIDTH_PX, DISPLAY_HEIGHT_PX)
+
+        assertThat(states).isEmpty()
+    }
+
+    @Test
+    fun withoutADetector_theStateStillCarriesTheDisplaySize() {
+        val pipeline = pipeline(detector = null)
+        pipeline.setDisplaySizePx(DISPLAY_WIDTH_PX, DISPLAY_HEIGHT_PX)
+
+        pipeline.onFrame(image(), acquireNs())
+
+        assertThat(states.last().displayWidthPx).isEqualTo(DISPLAY_WIDTH_PX)
+    }
+
+    // Diagnostics counters (phone bug: the zip had no detection count or score).
+
+    @Test
+    fun detectionCounters_beforeAnyFrame_sayNotMeasured() {
+        val pipeline = pipeline()
+
+        assertThat(pipeline.lastDetections).isEqualTo(OverlayState.NOT_MEASURED_COUNT)
+        assertThat(pipeline.framesWithDetections).isEqualTo(0L)
+        assertThat(pipeline.peakMaxRawScore).isEqualTo(OverlayState.NOT_MEASURED_SCORE)
+        assertThat(pipeline.lastHeadXImg.isNaN()).isTrue()
+    }
+
+    @Test
+    fun aFrameWithPeople_updatesTheCountersAndTheHeadPoint() {
+        val pipeline = pipeline()
+        detector.people = listOf(person(headXImg = 3f, headYImg = 1f), person(headXImg = 1f, headYImg = 0f))
+        detector.lastMaxRawScore = 0.89f
+        detector.lastRawRowsAboveThreshold = 3
+        detector.lastNanRawRows = 0
+
+        pipeline.onFrame(image(), acquireNs())
+
+        val state = states.last()
+        assertThat(state.maxRawScore).isEqualTo(0.89f)
+        assertThat(state.rawRowsAboveThreshold).isEqualTo(3)
+        assertThat(pipeline.lastDetections).isEqualTo(2)
+        assertThat(pipeline.framesWithDetections).isEqualTo(1L)
+        assertThat(pipeline.peakMaxRawScore).isEqualTo(0.89f)
+        assertThat(pipeline.lastNanRawRows).isEqualTo(0)
+        assertThat(pipeline.lastHeadXImg).isEqualTo(3f)
+        assertThat(pipeline.lastHeadYImg).isEqualTo(1f)
+    }
+
+    @Test
+    fun anEmptyFrame_countsZeroPeopleKeepsThePeakAndTheLastHeadPoint() {
+        val pipeline = pipeline()
+        detector.people = listOf(person(headXImg = 3f, headYImg = 1f))
+        detector.lastMaxRawScore = 0.89f
+        pipeline.onFrame(image(), acquireNs())
+        detector.people = emptyList()
+        detector.lastMaxRawScore = 0.01f
+        detector.lastNanRawRows = 300
+
+        pipeline.onFrame(image(), acquireNs())
+
+        assertThat(pipeline.lastDetections).isEqualTo(0)
+        assertThat(pipeline.framesWithDetections).isEqualTo(1L)
+        assertThat(pipeline.peakMaxRawScore).isEqualTo(0.89f)
+        assertThat(states.last().maxRawScore).isEqualTo(0.01f)
+        assertThat(pipeline.lastNanRawRows).isEqualTo(300)
+        assertThat(pipeline.lastHeadXImg).isEqualTo(3f)
+    }
+
+    /** A person whose five head keypoints all sit at ([headXImg], [headYImg]) with full confidence. */
+    private fun person(
+        headXImg: Float,
+        headYImg: Float,
+    ): PoseDetection {
+        val xy = FloatArray(HEAD_KEYPOINTS * 2)
+        for (k in 0 until HEAD_KEYPOINTS) {
+            xy[k * 2] = headXImg
+            xy[k * 2 + 1] = headYImg
+        }
+        return PoseDetection(0f, 0f, WIDTH.toFloat(), HEIGHT.toFloat(), 0.9f, xy, FloatArray(HEAD_KEYPOINTS) { 1f })
     }
 }

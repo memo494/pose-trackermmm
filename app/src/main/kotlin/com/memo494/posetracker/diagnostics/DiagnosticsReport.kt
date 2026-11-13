@@ -97,6 +97,16 @@ internal object DiagnosticsReport {
         line(out, "copyFailures", stats.copyFailures)
         line(out, "arrivalFallbacks", stats.arrivalFallbacks)
         line(out, "failures", stats.failures)
+        line(out, "displayWidthPx", stats.displayWidthPx)
+        line(out, "displayHeightPx", stats.displayHeightPx)
+        line(out, "detections", stats.detections)
+        line(out, "framesWithDetections", stats.framesWithDetections)
+        line(out, "maxRawScore", stats.maxRawScore)
+        line(out, "peakMaxRawScore", stats.peakMaxRawScore)
+        line(out, "rawRowsAboveThreshold", stats.rawRowsAboveThreshold)
+        line(out, "nanRawRows", stats.nanRawRows)
+        line(out, "headXImg", stats.headXImg)
+        line(out, "headYImg", stats.headYImg)
     }
 
     private fun line(

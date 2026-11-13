@@ -40,6 +40,7 @@
 | `PoseEstimator.kt` | `init` no longer calls `loadModelLabels`; it only warns when no labels were passed. | `loadModelLabels` was removed (above). |
 | `LiteRtModel.kt` | One KDoc line no longer references `[OrtQnnModel]`. | The class is not vendored. |
 | `ImageUtils.kt` | Removed `toBitmap`, `yuvImageToBitmap`, `yuv420888ToNv21`, `imageToByteBuffer` and the `ImageProxy`/`ByteArrayOutputStream` imports. | CameraX-only (`androidx.camera.core.ImageProxy`) and allocates per frame; our capture adapter row-copies frames itself (ARCHITECTURE §6.1). `letterboxTransform`, `prepareBitmapForModel` and the float-array copy stay. |
+| `PoseEstimator.kt` | Added read-only diagnostics `lastMaxRawScore`, `lastRawRowsAboveThreshold`, `lastNanRawRows` and the private allocation-free `recordRawScoreStats`, called at the start of `postProcessPose` (both layouts). | Phone bug "nothing detected": the diagnostics zip could not tell an empty model output from detections lost later. The scan reads only the score column; it changes no decoded result. |
 | `Utils.kt` | Unchanged. | n/a |
 
 Build-side changes outside the vendored directory: root `LICENSE` (AGPL-3.0, from upstream), `detector/build.gradle.kts`

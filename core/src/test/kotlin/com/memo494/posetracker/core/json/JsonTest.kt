@@ -383,6 +383,23 @@ class JsonTest {
     }
 
     @Test
+    fun arrayInt_readsAnIntegerElement() {
+        assertThat(sample.array("a").int(0)).isEqualTo(1)
+    }
+
+    @Test
+    fun arrayInt_nonIntegerWrongTypeOrOutOfRange_failsWithTheIndex() {
+        val array = sample.array("a")
+
+        assertThat(assertThrows(JsonParseException::class.java) { array.int(1) }.message).contains("element 1")
+        assertThat(assertThrows(JsonParseException::class.java) { array.int(2) }.message).contains("element 2")
+        assertThat(assertThrows(JsonParseException::class.java) { array.int(4) }.message).contains("4")
+        assertThrows(JsonParseException::class.java) { array.int(-1) }
+        val big = Json.parse("[3000000000]") as JsonArray
+        assertThat(assertThrows(JsonParseException::class.java) { big.int(0) }.message).contains("element 0")
+    }
+
+    @Test
     fun jsonParseException_isAnIllegalArgumentException() {
         assertThat(JsonParseException("x", 0)).isInstanceOf(IllegalArgumentException::class.java)
     }

@@ -59,6 +59,12 @@ data class JsonArray(
     /** Element [index] as a [Double]; fails closed (naming the index) when out of range or not a number. */
     fun double(index: Int): Double = asDouble(element(index), elementLabel(index))
 
+    /**
+     * Element [index] as an exact [Int]; fails closed (naming the index) when out of range, not a number,
+     * not an integer lexeme or outside the Int range.
+     */
+    fun int(index: Int): Int = asInt(element(index), elementLabel(index))
+
     private fun element(index: Int): JsonValue =
         elements.getOrNull(index)
             ?: throw JsonParseException("element $index is out of range (size $size)", JsonParseException.NO_OFFSET)

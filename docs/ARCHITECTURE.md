@@ -302,6 +302,9 @@ The overlay is a plain `View` (not `ComposeView`) in a `TYPE_APPLICATION_OVERLAY
   free-running loop**; call `invalidate()` only when a new snapshot differs from the drawn one by more than a
   sub-pixel deadband (a pure function, unit tested); HUD text updates at most 2 Hz (`TrackerConfig`).
   A paused video must show capture fps ≈ 0.
+  **HUD idle rule:** the HUD's own refresh causes up to `hudRateHz + 1` frames per second, so a capture rate below
+  `TrackerConfig.hudIdleFps` (`hudRateHz` + 2) prints as 0 fps and its fps and inference-time changes do not
+  refresh the HUD text; only a leave from or entry into idle, or any other field, does.
 - **Draw phase:** `onDraw` allocates nothing: preallocated `Paint`s, a reused `CharArray` per HUD line
   (`drawText(char[], …)`), no lambdas or temporaries. Origin and size come from `getLocationOnScreen` /
   `onSizeChanged` → `FitCenter` (§4.2).
@@ -466,6 +469,11 @@ answers hard questions. Each change is verified in the session with `scripts/ver
 and always by GitHub Actions, which is the source of truth. The owner's laptop is not used for builds.
 
 ## 15. Changes
+- **v0.6.3 (M0b review R1):** (A) HUD idle rule in §6.5 (fps below `hudIdleFps` shows 0 and no longer feeds back
+  into the capture); (B) every capture-thread entry point is wrapped so no `Error` reaches the `HandlerThread`;
+  (C) a changed expected capture size republishes the state without its old detections; (E) a failed start
+  (`startForeground` refused, no consent result or projection, failed session) is counted in
+  `CaptureService.startFailures` and shown on the control screen as `START_FAILED`.
 - **v0.6.2 (M0b T5):** capture glue as implemented: `CaptureService` (foreground service, `START_NOT_STICKY`, Stop
   action in its notification) owns one `CaptureSession` (capture `HandlerThread`, one `VirtualDisplay` per session,
   `ImageReader` recreated on rotation); the tested decisions live in `FramePipeline`, `CapturePlanner` and

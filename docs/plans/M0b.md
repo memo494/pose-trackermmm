@@ -478,6 +478,24 @@ device/OS, accelerator, capture size/fps, timestamp-source stats, `model_info.js
   Two suppressions: lint `WrongConstant` for `ImageReader` + `PixelFormat.RGBA_8888`, and `getRealSize` below
   API 30. Not run on a device yet. Reviewer to look at: `applyGeometry` runs on every `onDisplayChanged`
   (cheap, but it republishes the state each time).
+- **T7 done** — `f34d19b..4b262d1`: `ControlReducer` (pure, 24 tests), `ControlScreen`, `MainActivity`
+  (activity-level result launchers; the consent Intent is passed straight to `startForegroundService`).
+  `@Test` → 357. CI green on round 1.
+- **T8 done** — `49ec4a5..f839881`: RingLog, DiagnosticsReport, CaptureStats (pure, 28 tests), AppLog,
+  CrashStore, PoseTrackerApp, DiagnosticsZip + FileProvider, Share diagnostics / log view / crash notice,
+  `docs/TEST_CHECKLIST.md`. `@Test` → 385. CI green (two ktlint rounds on the way).
+- **Review** (android-reviewer, Opus, full diff `main...HEAD`, 112 files): start order, resize, teardown from
+  every trigger, copy → close → detect, bitmap byte order, Img coordinates, overlay flags and alpha, consent
+  handling, staging and AGENTS rules all checked and correct. Findings: **1 critical** — HUD feedback loop (each
+  HUD refresh is captured, causes a frame and an inference, whose numbers refresh the HUD again: about 2
+  inferences/s forever on a still screen); **2 warnings** — an `Error` on the capture thread could kill the
+  process; stale detections drawn with the new geometry after a rotation; plus suggestions.
+- **R1 done** — `e7baf86..bfe5ba7`: A HUD idle rule (lead's design: fps below `hudRateHz + 2` prints 0 and
+  does not refresh the numbers; test replays the loop), B every capture-thread entry point guarded, C frame
+  dropped on a real size change, D geometry applied and logged only on change, E `startFailures` + notice
+  `START_FAILED`, F JSON grammar constants moved to `Json.kt`, G checklist wording (fps must reach 0; lock
+  screen has two passing outcomes), H ARCHITECTURE v0.6.3. `@Test` → 404. CI green on round 1, run
+  43392588721. Not taken: `Throwable` in the detector ladder (see the handoff).
 
 ## Then (lead)
 `android-reviewer` on the full diff → fixes via implementer → PR "M0b: screen-capture overlay" with

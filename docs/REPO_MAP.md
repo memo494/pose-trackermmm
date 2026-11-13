@@ -7,7 +7,7 @@ A one-screen map so agents open the right file without a wide search. Full desig
 |---|---|---|---|
 | `core/` | Kotlin JVM (no `android.*`) | model types, geometry, capture math, redraw policy, `TrackerConfig`, `json`, `replay`, `modelpack` | `TrackerConfig`, `capture/CaptureFrame`, `capture/RowCopy`, `geometry/FitCenter`, `overlay/RedrawPolicy`, `replay/ReplayFixture`, `modelpack/ModelStager` |
 | `detector/` | Android library | `PoseDetector` + adapter over vendored Ultralytics code (`com/ultralytics/yolo`), Fake impl | `PoseDetectors.fromAssets`, `PoseDetector`, `LiteRtPoseDetector`, `FakePoseDetector` |
-| `app/` | Android application (Compose) | overlay window + HUD; capture service, control activity and diagnostics arrive in T5/T7/T8 | `MainActivity`, `overlay/OverlayWindow`, `overlay/OverlayStateHolder`, `overlay/PoseOverlayView` |
+| `app/` | Android application (Compose) | `capture/` (service, session, frame pipeline, teardown), `overlay/` (window, view, HUD), `control/` (reducer + screen), `diagnostics/` (log, crash file, share zip) | `MainActivity`, `PoseTrackerApp`, `capture/CaptureService`, `capture/CaptureSession`, `capture/FramePipeline`, `overlay/OverlayWindow`, `control/ControlReducer`, `diagnostics/DiagnosticsZip` |
 
 Package root: `com.memo494.posetracker`. `applicationId` = `com.memo494.posetracker`.
 

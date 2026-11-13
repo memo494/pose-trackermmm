@@ -202,9 +202,16 @@ Dependencies: `app → detector → core`, `app → core`. Nothing else.
   and a short last row) into the reused buffer and call `image.close()` **before** inference, so the reader never
   starves. The close is in a `finally`. Per-frame work is wrapped so that any `Throwable` (including
   `OutOfMemoryError`) is logged and never crashes the service.
-- Teardown is idempotent and runs in one fixed order (documented in `CaptureSession`, resources released in the
-  reverse order of creation; the model is closed on the capture thread). The projection's `onStop` (lock screen,
-  system "stop sharing") triggers it. A restart always asks for new consent.
+- Teardown is idempotent and runs in three phases that never block the main thread (documented in
+  `CaptureSession`, resources released in the reverse order of creation): **main** (remove the overlay) →
+  **capture** (stop the HUD tick and the listeners, release the virtual display, close the reader, close the
+  model: the capture thread owns them) → **main** (unregister the callback, stop the projection, quit the capture
+  thread, stop the service). Each hop is a `Handler.post`; nothing joins or waits. The projection's `onStop` (lock
+  screen, system "stop sharing") triggers it. A restart always asks for new consent.
+- **HUD tick:** a static screen delivers no frames, so the capture handler republishes the last state at the HUD
+  rate (`hudRateHz`) and the shown capture fps decays to 0.
+- A detector that cannot be created does not stop the session: frames are still drained and closed and the HUD
+  shows `DETECTOR_UNAVAILABLE`.
 
 ---
 
@@ -459,6 +466,11 @@ answers hard questions. Each change is verified in the session with `scripts/ver
 and always by GitHub Actions, which is the source of truth. The owner's laptop is not used for builds.
 
 ## 15. Changes
+- **v0.6.2 (M0b T5):** capture glue as implemented: `CaptureService` (foreground service, `START_NOT_STICKY`, Stop
+  action in its notification) owns one `CaptureSession` (capture `HandlerThread`, one `VirtualDisplay` per session,
+  `ImageReader` recreated on rotation); the tested decisions live in `FramePipeline`, `CapturePlanner` and
+  `CaptureTeardown`; teardown is three phases (main → capture → main) and never blocks main; a missing detector
+  shows `DETECTOR_UNAVAILABLE` instead of ending the session.
 - **v0.6.1 (M0b T4):** detector as implemented: `PoseDetector` gained `lastInferenceMs` (source of the HUD's
   inference time); the model ships as an asset, `ModelStager` stages it into `noBackupFilesDir/models` after a
   sha256 check and LiteRT opens it by path; the adapter refuses a model whose input is not NCHW (new read-only

@@ -29,7 +29,19 @@ import com.memo494.posetracker.control.ControlEvent
 import com.memo494.posetracker.control.ControlReducer
 import com.memo494.posetracker.control.ControlScreen
 import com.memo494.posetracker.control.ControlState
+import com.memo494.posetracker.core.TrackerConfig
+import com.memo494.posetracker.diagnostics.AppLog
+import com.memo494.posetracker.diagnostics.CrashNotice
+import com.memo494.posetracker.diagnostics.CrashStore
+import com.memo494.posetracker.diagnostics.DiagnosticsNotice
+import com.memo494.posetracker.diagnostics.DiagnosticsSection
+import com.memo494.posetracker.diagnostics.DiagnosticsShare
+import com.memo494.posetracker.diagnostics.DiagnosticsUiState
+import com.memo494.posetracker.diagnostics.DiagnosticsZip
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
  * Control screen: permissions, screen-capture consent, Start and Stop (ARCHITECTURE §1, §14).
@@ -37,6 +49,7 @@ import kotlinx.coroutines.launch
  */
 class MainActivity : ComponentActivity() {
     private val controlState = mutableStateOf(ControlState())
+    private val diagnosticsState = mutableStateOf(DiagnosticsUiState())
 
     // Registered at activity level so a result that arrives after a recreation still reaches the new instance.
     private val consentLauncher =
@@ -59,6 +72,21 @@ class MainActivity : ComponentActivity() {
                     onStartClick = { dispatch(ControlEvent.StartClicked) },
                     onStopClick = { dispatch(ControlEvent.StopClicked) },
                     onOpenOverlaySettingsClick = { dispatch(ControlEvent.OpenOverlaySettingsClicked) },
+                    crashContent = {
+                        CrashNotice(
+                            state = diagnosticsState.value,
+                            onShareClick = { shareDiagnostics() },
+                            onDismissClick = { dismissCrashNotice() },
+                        )
+                    },
+                    diagnosticsContent = {
+                        DiagnosticsSection(
+                            state = diagnosticsState.value,
+                            onShareClick = { shareDiagnostics() },
+                            onToggleLogClick = { toggleLog() },
+                            onRefreshLogClick = { refreshLog() },
+                        )
+                    },
                 )
             }
         }
@@ -67,6 +95,7 @@ class MainActivity : ComponentActivity() {
                 CaptureService.running.collect { dispatch(ControlEvent.RunningChanged(it)) }
             }
         }
+        showCrashNoticeIfAny()
     }
 
     override fun onResume() {
@@ -180,4 +209,67 @@ class MainActivity : ComponentActivity() {
             CaptureLog.log("stopping the capture service failed", e)
         }
     }
+
+    private fun updateDiagnostics(change: (DiagnosticsUiState) -> DiagnosticsUiState) {
+        diagnosticsState.value = change(diagnosticsState.value)
+    }
+
+    /** Reads the saved crash off the main thread and shows the notice when there is one. */
+    private fun showCrashNoticeIfAny() {
+        lifecycleScope.launch {
+            val crash = withContext(Dispatchers.IO) { CrashStore.read(applicationContext) }
+            if (crash != null) updateDiagnostics { it.copy(crashNotice = true) }
+        }
+    }
+
+    private fun dismissCrashNotice() {
+        updateDiagnostics { it.copy(crashNotice = false) }
+        clearSavedCrash()
+    }
+
+    private fun clearSavedCrash() {
+        lifecycleScope.launch { withContext(Dispatchers.IO) { CrashStore.clear(applicationContext) } }
+    }
+
+    /** Writes the zip off the main thread, then opens the share sheet; any failure becomes a short notice. */
+    private fun shareDiagnostics() {
+        if (diagnosticsState.value.sharing) return
+        updateDiagnostics { it.copy(sharing = true, notice = null) }
+        lifecycleScope.launch {
+            val file = withContext(Dispatchers.IO) { writeZipOrNull() }
+            val notice = if (file == null) DiagnosticsNotice.PREPARE_FAILED else openShareSheet(file)
+            updateDiagnostics { it.copy(sharing = false, notice = notice) }
+            if (file != null && notice == null && diagnosticsState.value.crashNotice) dismissCrashNotice()
+        }
+    }
+
+    private fun writeZipOrNull(): File? =
+        try {
+            DiagnosticsZip.write(applicationContext)
+        } catch (e: Throwable) {
+            AppLog.log("writing the diagnostics zip failed", e)
+            null
+        }
+
+    /** Starts the chooser for [file]; returns `null` on success or the notice to show. */
+    private fun openShareSheet(file: File): DiagnosticsNotice? =
+        try {
+            startActivity(DiagnosticsShare.chooser(this, file, getString(R.string.diagnostics_share_title)))
+            null
+        } catch (e: Exception) {
+            AppLog.log("opening the share sheet failed", e)
+            DiagnosticsNotice.SHARE_FAILED
+        }
+
+    private fun toggleLog() {
+        val show = !diagnosticsState.value.logVisible
+        updateDiagnostics { it.copy(logVisible = show, logText = if (show) logText() else "") }
+    }
+
+    private fun refreshLog() {
+        updateDiagnostics { it.copy(logText = logText()) }
+    }
+
+    /** The newest log lines, newest last. */
+    private fun logText(): String = AppLog.lines().takeLast(TrackerConfig.LOG_SCREEN_LINES).joinToString("\n")
 }

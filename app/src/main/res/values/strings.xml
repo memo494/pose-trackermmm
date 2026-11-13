@@ -16,4 +16,16 @@
     <string name="control_stop">Stop</string>
     <string name="control_allow_overlay">Allow display over other apps</string>
     <string name="control_description">Pose Tracker looks at your screen and draws a dot on the head of each person it finds. Everything stays on this phone. Every start asks for screen-capture permission again.</string>
+
+    <!-- Diagnostics (DiagnosticsSection). -->
+    <string name="diagnostics_share">Share diagnostics</string>
+    <string name="diagnostics_share_title">Send diagnostics</string>
+    <string name="diagnostics_log_show">Show log</string>
+    <string name="diagnostics_log_hide">Hide log</string>
+    <string name="diagnostics_log_refresh">Refresh</string>
+    <string name="diagnostics_log_empty">(log is empty)</string>
+    <string name="diagnostics_crash_notice">The app stopped unexpectedly last time. Please share the diagnostics so the problem can be fixed.</string>
+    <string name="diagnostics_dismiss">Dismiss</string>
+    <string name="diagnostics_notice_prepare_failed">Could not prepare the diagnostics. Please try again.</string>
+    <string name="diagnostics_notice_share_failed">Could not open the share sheet. Please try again.</string>
 </resources>

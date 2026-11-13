@@ -26,6 +26,9 @@ private val ITEM_SPACING = 16.dp
  * The control screen: status, the build label, Start or Stop, and the way to the overlay permission.
  * Stateless: [state] comes in, user actions go out through the callbacks. The [Scaffold] insets keep
  * everything clear of the system bars and the cutout (edge-to-edge).
+ *
+ * @param crashContent shown below the status when the last run crashed (the diagnostics notice); empty by default.
+ * @param diagnosticsContent shown at the bottom of the scrolling column (Share diagnostics and the log).
  */
 @Composable
 internal fun ControlScreen(
@@ -35,6 +38,8 @@ internal fun ControlScreen(
     onStopClick: () -> Unit,
     onOpenOverlaySettingsClick: () -> Unit,
     modifier: Modifier = Modifier,
+    crashContent: @Composable () -> Unit = {},
+    diagnosticsContent: @Composable () -> Unit = {},
 ) {
     Scaffold(modifier = modifier.fillMaxSize()) { innerPadding ->
         val insets = Modifier.fillMaxSize().padding(innerPadding)
@@ -46,6 +51,7 @@ internal fun ControlScreen(
             Text(buildLabel, style = MaterialTheme.typography.bodySmall)
             val statusRes = if (state.running) R.string.control_status_running else R.string.control_status_stopped
             Text(stringResource(statusRes), style = MaterialTheme.typography.titleMedium)
+            crashContent()
 
             val notice = state.notice
             if (notice != null) {
@@ -77,6 +83,7 @@ internal fun ControlScreen(
             }
 
             Text(stringResource(R.string.control_description), style = MaterialTheme.typography.bodyMedium)
+            diagnosticsContent()
         }
     }
 }

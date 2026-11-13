@@ -261,6 +261,9 @@ data class TrackerConfig(
         /** Most stack-trace lines the diagnostics log keeps after an error line. */
         const val LOG_STACK_LINES = 8
 
+        /** Most log lines the in-app log screen shows (the newest ones). */
+        const val LOG_SCREEN_LINES = 200
+
         /** Ultralytics `LetterBox` leading/trailing pad rounding bias, in pixels (padX = round(pad/2 - bias)). */
         const val LETTERBOX_PAD_BIAS_MDL = 0.1f
 

@@ -5,4 +5,15 @@
     <string name="capture_notification_title">Pose Tracker is running</string>
     <string name="capture_notification_text">Tracking people on your screen</string>
     <string name="capture_notification_stop">Stop</string>
+
+    <!-- Control screen (MainActivity). -->
+    <string name="control_title">Pose Tracker</string>
+    <string name="control_status_running">Running: tracking people on your screen</string>
+    <string name="control_status_stopped">Stopped</string>
+    <string name="control_notice_overlay_needed">Allow display over other apps first, then press Start again.</string>
+    <string name="control_notice_consent_denied">Screen capture was not allowed, so tracking did not start. You can try again.</string>
+    <string name="control_start">Start</string>
+    <string name="control_stop">Stop</string>
+    <string name="control_allow_overlay">Allow display over other apps</string>
+    <string name="control_description">Pose Tracker looks at your screen and draws a dot on the head of each person it finds. Everything stays on this phone. Every start asks for screen-capture permission again.</string>
 </resources>

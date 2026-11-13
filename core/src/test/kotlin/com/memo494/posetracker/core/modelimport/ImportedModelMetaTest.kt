@@ -137,7 +137,18 @@ class ImportedModelMetaTest {
             listOf(
                 "bytes=" to
                     listOf(
-                        "", "0", "-1", "+5", "007", "1.5", "1e6", "abc", "0x10", " 5", "5 ", "99999999999999999999",
+                        "",
+                        "0",
+                        "-1",
+                        "+5",
+                        "007",
+                        "1.5",
+                        "1e6",
+                        "abc",
+                        "0x10",
+                        " 5",
+                        "5 ",
+                        "99999999999999999999",
                         "${TrackerConfig.MAX_IMPORT_BYTES_LIMIT + 1L}",
                     ),
                 "inputSize=" to

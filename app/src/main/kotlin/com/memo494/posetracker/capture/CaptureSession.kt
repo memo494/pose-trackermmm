@@ -81,7 +81,7 @@ internal class CaptureSession(
 
     private val applyGeometryTask = Runnable { applyGeometry() }
 
-    private val hudTick =
+    private val hudTick: Runnable =
         object : Runnable {
             override fun run() {
                 if (teardown.isStarted) return
@@ -92,7 +92,7 @@ internal class CaptureSession(
 
     private val imageListener = ImageReader.OnImageAvailableListener { reader -> onImageAvailable(reader) }
 
-    private val displayListener =
+    private val displayListener: DisplayManager.DisplayListener =
         object : DisplayManager.DisplayListener {
             override fun onDisplayAdded(displayId: Int) = Unit
 
@@ -104,7 +104,7 @@ internal class CaptureSession(
         }
 
     // Runs on the capture handler.
-    private val projectionCallback =
+    private val projectionCallback: MediaProjection.Callback =
         object : MediaProjection.Callback() {
             override fun onStop() {
                 stop()
@@ -125,7 +125,7 @@ internal class CaptureSession(
             }
         }
 
-    private val teardown =
+    private val teardown: CaptureTeardown =
         CaptureTeardown(
             mainFirst = listOf(TeardownStep("remove overlay") { overlayWindow.remove() }),
             onCapture =

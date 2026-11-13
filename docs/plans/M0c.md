@@ -74,7 +74,7 @@ People of 12 to 15 % of the video height stay undetected. Version 1 accepts one 
 - **D6 Protected files named explicitly:** `.github/workflows/export-model.yml` (T1 only). Nothing else that is
   protected changes. No new dependency (`ActivityResultContracts.OpenDocument` is in the activity library
   already used; `SharedPreferences` and files are the platform's).
-- **D8 Marks (T7, pending the owner's yes):** ring and corner brackets by default, box and keypoint dots behind a
+- **D8 Marks (T7, approved by the owner):** ring and corner brackets by default, box and keypoint dots behind a
   debug switch; evidence in "Measured after T1".
 - **D7 Not in M0c:** rectangular models, other output layouts, several imported models, a benchmark screen
   (M1), the area crop (M0d), Arabic texts.
@@ -178,7 +178,7 @@ for built-in and imported; the report fields.
 **Tests first:** the reducer for every new event in the stopped, running and importing states; a rejection keeps
 the previous model; `UseBuiltInClicked` clears the notice.
 
-### T7 — App: marks that do not hide the person from the model · S/M · runs after T5, before T6 · **waits for the owner's yes**
+### T7 — App: marks that do not hide the person from the model · S/M · runs after T5, before T6 · approved by the owner in chat, 2026-11-13
 **Files:** `TrackerConfig.kt` (`minHeadRingRadiusDp` = 12, `boxCornerRatio` = 0.18), new pure helper
 `core/overlay/HeadRing.kt`, `app/overlay/PoseOverlayView.kt`, `app/control/{ControlState,ControlScreen}.kt`,
 `MainActivity.kt`, a persisted "debug marks" switch read when a session starts, `res/values/strings.xml`,
@@ -229,5 +229,5 @@ before merging.
 | T4a | — | | store, importer, choice |
 | T4b | — | | session wiring, HUD, diagnostics |
 | T5 | — | | |
-| T7 | — | | waits for the owner's yes |
+| T7 | — | | approved by the owner |
 | T6 | — | | |

@@ -80,18 +80,21 @@ internal class CaptureSession(
     private var contentWidthPx = 0
     private var contentHeightPx = 0
 
-    private val applyGeometryTask = Runnable { applyGeometry() }
+    private val applyGeometryTask = Runnable { guarded("applying the geometry") { applyGeometry() } }
 
     private val hudTick: Runnable =
         object : Runnable {
             override fun run() {
-                if (teardown.isStarted) return
-                val activePipeline = pipeline
-                if (activePipeline != null) {
-                    activePipeline.onHudTick()
-                    CaptureStatsHolder.publish(overlayWindow.stateHolder.latest(), activePipeline)
+                guarded("HUD tick") {
+                    if (teardown.isStarted) return
+                    // Scheduled first so one failing tick does not end the HUD refresh for good.
+                    captureHandler?.postDelayed(this, hudIntervalMs)
+                    val activePipeline = pipeline
+                    if (activePipeline != null) {
+                        activePipeline.onHudTick()
+                        CaptureStatsHolder.publish(overlayWindow.stateHolder.latest(), activePipeline)
+                    }
                 }
-                captureHandler?.postDelayed(this, hudIntervalMs)
             }
         }
 
@@ -104,7 +107,9 @@ internal class CaptureSession(
             override fun onDisplayRemoved(displayId: Int) = Unit
 
             override fun onDisplayChanged(displayId: Int) {
-                if (displayId == Display.DEFAULT_DISPLAY) applyGeometry()
+                guarded("display change") {
+                    if (displayId == Display.DEFAULT_DISPLAY) applyGeometry()
+                }
             }
         }
 
@@ -112,21 +117,23 @@ internal class CaptureSession(
     private val projectionCallback: MediaProjection.Callback =
         object : MediaProjection.Callback() {
             override fun onStop() {
-                stop()
+                guarded("projection stop callback") { stop() }
             }
 
             override fun onCapturedContentResize(
                 width: Int,
                 height: Int,
             ) {
-                contentSizeKnown = true
-                contentWidthPx = width
-                contentHeightPx = height
-                applyGeometry()
+                guarded("content resize callback") {
+                    contentSizeKnown = true
+                    contentWidthPx = width
+                    contentHeightPx = height
+                    applyGeometry()
+                }
             }
 
             override fun onCapturedContentVisibilityChanged(isVisible: Boolean) {
-                pipeline?.setContentVisible(isVisible)
+                guarded("content visibility callback") { pipeline?.setContentVisible(isVisible) }
             }
         }
 
@@ -193,7 +200,17 @@ internal class CaptureSession(
         captureHandler?.post(applyGeometryTask)
     }
 
+    /** Capture thread. Any failure ends the session instead of reaching the `HandlerThread`. */
     private fun startOnCaptureThread() {
+        try {
+            startCapture()
+        } catch (e: Throwable) {
+            CaptureLog.log("starting the capture failed", e)
+            stop()
+        }
+    }
+
+    private fun startCapture() {
         if (teardown.isStarted) return
         val newDetector =
             try {
@@ -303,31 +320,49 @@ internal class CaptureSession(
 
     /** Capture thread. Hands the newest image to the pipeline, which closes it. */
     private fun onImageAvailable(reader: ImageReader) {
-        val activePipeline = pipeline ?: return
-        val image = acquireOrNull(reader) ?: return
-        val acquireNs = System.nanoTime()
-        try {
-            imageFrame.attach(image)
-        } catch (e: Throwable) {
-            CaptureLog.log("reading the image failed", e)
-            closeQuietly(image)
-            return
+        guarded("image callback") {
+            val activePipeline = pipeline ?: return
+            val image = acquireOrNull(reader) ?: return
+            val acquireNs = System.nanoTime()
+            try {
+                imageFrame.attach(image)
+            } catch (e: Throwable) {
+                CaptureLog.log("reading the image failed", e)
+                closeQuietly(image)
+                return
+            }
+            activePipeline.onFrame(imageFrame, acquireNs)
         }
-        activePipeline.onFrame(imageFrame, acquireNs)
+    }
+
+    /**
+     * Runs [block] and contains every failure, `Error`s such as `OutOfMemoryError` included: an exception that
+     * reaches the capture `HandlerThread` kills the process. Inline, so no lambda object is made per call; the
+     * message is built only when [block] failed.
+     */
+    private inline fun guarded(
+        what: String,
+        block: () -> Unit,
+    ) {
+        try {
+            block()
+        } catch (e: Throwable) {
+            CaptureLog.log("$what failed", e)
+        }
     }
 
     /** The newest image, or `null` when there is none or the reader is closed or exhausted. */
     private fun acquireOrNull(reader: ImageReader): Image? =
         try {
             reader.acquireLatestImage()
-        } catch (e: RuntimeException) {
+        } catch (e: Throwable) {
             null
         }
 
     private fun closeQuietly(image: Image) {
         try {
             image.close()
-        } catch (e: RuntimeException) {
+        } catch (e: Throwable) {
             CaptureLog.log("closing the image failed", e)
         }
     }

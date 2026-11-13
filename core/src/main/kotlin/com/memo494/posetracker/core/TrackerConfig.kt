@@ -234,6 +234,12 @@ data class TrackerConfig(
         /** Largest per-axis deviation, in pixels, accepted to keep the capture aspect exactly equal to the display's. */
         const val CAPTURE_EXACT_ASPECT_TOLERANCE_PX = 1.0f
 
+        /**
+         * Capacity of the capture `ImageReader`: one image being copied while the next one is acquired
+         * (Consult C1-D); a larger value only adds latency.
+         */
+        const val CAPTURE_MAX_IMAGES = 2
+
         /** Length of the window the capture fps is counted over: 1 s, in nanoseconds (a duration). */
         const val FPS_WINDOW_NS = 1_000_000_000L
 

@@ -133,7 +133,10 @@ class ModelImporter(
                 is ProbeResult.Tensors -> probed
             }
         return when (val check = ImportedModelRules.check(tensors.inputs, tensors.outputs, config)) {
-            is ImportCheck.Rejected -> ImportOutcome.Rejected(RejectionKind.Layout(check.reason), check.details)
+            is ImportCheck.Rejected -> {
+                ImportOutcome.Rejected(RejectionKind.Layout(check.reason), check.details)
+            }
+
             is ImportCheck.Accepted -> {
                 val meta =
                     ImportedModelMeta(
@@ -218,8 +221,7 @@ class ModelImporter(
 
     private fun describe(t: Throwable): String = t.javaClass.simpleName + (t.message?.let { ": $it" } ?: "")
 
-    private fun toHex(digest: ByteArray): String =
-        BigInteger(1, digest).toString(HEX_RADIX).padStart(TrackerConfig.SHA256_HEX_LENGTH, '0')
+    private fun toHex(digest: ByteArray): String = BigInteger(1, digest).toString(HEX_RADIX).padStart(TrackerConfig.SHA256_HEX_LENGTH, '0')
 
     private companion object {
         const val HASH_ALGORITHM = "SHA-256"

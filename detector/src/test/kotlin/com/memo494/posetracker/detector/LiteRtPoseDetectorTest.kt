@@ -15,6 +15,9 @@ class LiteRtPoseDetectorTest {
         override val inputSize: Int = INPUT_SIZE,
         var detections: List<PoseDetection> = emptyList(),
         override var lastInferenceMs: Float = 0f,
+        override var lastMaxRawScore: Float = PoseDetector.NOT_MEASURED.toFloat(),
+        override var lastRawRowsAboveThreshold: Int = PoseDetector.NOT_MEASURED,
+        override var lastNanRawRows: Int = PoseDetector.NOT_MEASURED,
     ) : PoseEngine {
         var detectCalls = 0
         var closeCalls = 0
@@ -272,6 +275,25 @@ class LiteRtPoseDetectorTest {
         assertThat(outcome.exceptionOrNull()).isInstanceOf(IllegalStateException::class.java)
         assertThat(engine.closeCalls).isEqualTo(0)
         assertThat(detector.detect(captureFrame()).detections).isEmpty()
+    }
+
+    @Test
+    fun rawScoreDiagnosticsComeFromTheEngine() {
+        val engine = FakeEngine(lastMaxRawScore = 0.89f, lastRawRowsAboveThreshold = 3, lastNanRawRows = 0)
+        val detector = detectorOver(engine)
+
+        assertThat(detector.lastMaxRawScore).isEqualTo(0.89f)
+        assertThat(detector.lastRawRowsAboveThreshold).isEqualTo(3)
+        assertThat(detector.lastNanRawRows).isEqualTo(0)
+    }
+
+    @Test
+    fun aDetectorThatDoesNotMeasureRawScoresSaysNotMeasured() {
+        val fake = FakePoseDetector(emptyList(), INPUT_SIZE, Accelerator.GPU)
+
+        assertThat(fake.lastMaxRawScore).isLessThan(0f)
+        assertThat(fake.lastRawRowsAboveThreshold).isEqualTo(PoseDetector.NOT_MEASURED)
+        assertThat(fake.lastNanRawRows).isEqualTo(PoseDetector.NOT_MEASURED)
     }
 
     private companion object {

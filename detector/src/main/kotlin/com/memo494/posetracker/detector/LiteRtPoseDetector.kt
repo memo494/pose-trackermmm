@@ -32,6 +32,15 @@ class LiteRtPoseDetector private constructor(
     override val lastInferenceMs: Float
         get() = engine.lastInferenceMs
 
+    override val lastMaxRawScore: Float
+        get() = engine.lastMaxRawScore
+
+    override val lastRawRowsAboveThreshold: Int
+        get() = engine.lastRawRowsAboveThreshold
+
+    override val lastNanRawRows: Int
+        get() = engine.lastNanRawRows
+
     override fun detect(frame: CaptureFrame): DetectionFrame {
         checkOwnerThread("detect")
         check(!closed) { "LiteRtPoseDetector is closed" }

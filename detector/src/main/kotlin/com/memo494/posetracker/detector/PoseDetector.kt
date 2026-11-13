@@ -24,6 +24,22 @@ interface PoseDetector : Closeable {
     val lastInferenceMs: Float
 
     /**
+     * Diagnostics of the last [detect] call: the highest raw person score over all model output rows, before
+     * any threshold (unitless; NaN rows are skipped). [NOT_MEASURED] (negative) when the detector does not
+     * measure it or before the first call.
+     */
+    val lastMaxRawScore: Float
+        get() = NOT_MEASURED.toFloat()
+
+    /** Diagnostics: model output rows of the last [detect] call whose raw score passed the score threshold; [NOT_MEASURED] if unknown. */
+    val lastRawRowsAboveThreshold: Int
+        get() = NOT_MEASURED
+
+    /** Diagnostics: model output rows of the last [detect] call with a NaN score (garbage output); [NOT_MEASURED] if unknown. */
+    val lastNanRawRows: Int
+        get() = NOT_MEASURED
+
+    /**
      * Detects the people in [frame].
      *
      * The result is in Img space (pixels of the capture content rect) and carries the timestamp, its source and
@@ -34,4 +50,9 @@ interface PoseDetector : Closeable {
      * @throws IllegalStateException when called after [close] or from a thread other than the owner.
      */
     fun detect(frame: CaptureFrame): DetectionFrame
+
+    companion object {
+        /** Value of the diagnostics properties when they are not measured. */
+        const val NOT_MEASURED = -1
+    }
 }

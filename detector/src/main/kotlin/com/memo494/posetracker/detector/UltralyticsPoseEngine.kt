@@ -37,6 +37,15 @@ internal class UltralyticsPoseEngine private constructor(
     override val lastInferenceMs: Float
         get() = inferenceMs
 
+    override val lastMaxRawScore: Float
+        get() = estimator.lastMaxRawScore
+
+    override val lastRawRowsAboveThreshold: Int
+        get() = estimator.lastRawRowsAboveThreshold
+
+    override val lastNanRawRows: Int
+        get() = estimator.lastNanRawRows
+
     override fun detect(frame: CaptureFrame): List<PoseDetection> {
         check(!closed) { "UltralyticsPoseEngine is closed" }
         val bitmap = sourceBitmapFor(frame.widthImg, frame.heightImg)

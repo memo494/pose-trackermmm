@@ -154,6 +154,11 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
+    testOptions {
+        // JVM tests run against the stubbed android.jar: Looper.getMainLooper() etc. return null instead of throwing.
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 // One staging task per variant (stage<Variant>ModelAssets); AGP assigns outputDir and packages it as assets.

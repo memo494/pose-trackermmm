@@ -10,8 +10,10 @@ import org.junit.Test
 class HudFormatterTest {
     private val buffer = CharArray(64)
 
+    private val idleFps = TrackerConfig().hudIdleFps
+
     private fun stats(state: OverlayState): String {
-        val length = HudFormatter.formatStats(state, buffer)
+        val length = HudFormatter.formatStats(state, buffer, idleFps)
         return String(buffer, 0, length)
     }
 
@@ -39,7 +41,7 @@ class HudFormatterTest {
     fun stats_returnsTheLengthAndLeavesTheRestOfTheBufferUntouched() {
         buffer.fill('#')
 
-        val length = HudFormatter.formatStats(sample, buffer)
+        val length = HudFormatter.formatStats(sample, buffer, idleFps)
 
         assertThat(length).isEqualTo("GPU 12.3 ms 58 fps 610x1356 ts=img".length)
         assertThat(buffer[length]).isEqualTo('#')
@@ -84,7 +86,7 @@ class HudFormatterTest {
     fun stats_aBufferThatIsTooSmallIsCutNotOverrun() {
         val small = CharArray(8)
 
-        val length = HudFormatter.formatStats(sample, small)
+        val length = HudFormatter.formatStats(sample, small, idleFps)
 
         assertThat(length).isEqualTo(8)
         assertThat(String(small, 0, length)).isEqualTo("GPU 12.3")
@@ -145,23 +147,78 @@ class HudFormatterTest {
     fun hudChanged_ignoresChangesThatDoNotShowInTheText() {
         val same = sample.copy(captureFps = 58.1f, inferenceMs = 12.26f)
 
-        assertThat(HudFormatter.hudChanged(sample, same)).isFalse()
+        assertThat(HudFormatter.hudChanged(sample, same, idleFps)).isFalse()
     }
 
     @Test
     fun hudChanged_seesEveryVisibleField() {
-        assertThat(HudFormatter.hudChanged(sample, sample.copy(captureFps = 59f))).isTrue()
-        assertThat(HudFormatter.hudChanged(sample, sample.copy(inferenceMs = 12.4f))).isTrue()
-        assertThat(HudFormatter.hudChanged(sample, sample.copy(accelerator = Accelerator.CPU))).isTrue()
-        assertThat(HudFormatter.hudChanged(sample, sample.copy(captureWidthImg = 1356))).isTrue()
-        assertThat(HudFormatter.hudChanged(sample, sample.copy(captureHeightImg = 610))).isTrue()
-        assertThat(HudFormatter.hudChanged(sample, sample.copy(timestampSource = TimestampSource.ARRIVAL))).isTrue()
-        assertThat(HudFormatter.hudChanged(sample, sample.copy(dotsVisible = false))).isTrue()
+        assertThat(HudFormatter.hudChanged(sample, sample.copy(captureFps = 59f), idleFps)).isTrue()
+        assertThat(HudFormatter.hudChanged(sample, sample.copy(inferenceMs = 12.4f), idleFps)).isTrue()
+        assertThat(HudFormatter.hudChanged(sample, sample.copy(accelerator = Accelerator.CPU), idleFps)).isTrue()
+        assertThat(HudFormatter.hudChanged(sample, sample.copy(captureWidthImg = 1356), idleFps)).isTrue()
+        assertThat(HudFormatter.hudChanged(sample, sample.copy(captureHeightImg = 610), idleFps)).isTrue()
+        assertThat(HudFormatter.hudChanged(sample, sample.copy(timestampSource = TimestampSource.ARRIVAL), idleFps)).isTrue()
+        assertThat(HudFormatter.hudChanged(sample, sample.copy(dotsVisible = false), idleFps)).isTrue()
         val warned = sample.copy(warning = OverlayWarning.CAPTURE_NOT_DISPLAY_SIZED)
-        assertThat(HudFormatter.hudChanged(sample, warned)).isTrue()
+        assertThat(HudFormatter.hudChanged(sample, warned, idleFps)).isTrue()
         val unavailable = sample.copy(warning = OverlayWarning.DETECTOR_UNAVAILABLE)
-        assertThat(HudFormatter.hudChanged(sample, unavailable)).isTrue()
-        assertThat(HudFormatter.hudChanged(warned, unavailable)).isTrue()
+        assertThat(HudFormatter.hudChanged(sample, unavailable, idleFps)).isTrue()
+        assertThat(HudFormatter.hudChanged(warned, unavailable, idleFps)).isTrue()
+    }
+
+    @Test
+    fun stats_fpsBelowTheIdleThresholdPrintsZero() {
+        val state = sample.copy(captureFps = idleFps - 0.1f)
+
+        assertThat(stats(state)).isEqualTo("GPU 12.3 ms 0 fps 610x1356 ts=img")
+    }
+
+    @Test
+    fun stats_fpsAtTheIdleThresholdPrintsTheValue() {
+        val state = sample.copy(captureFps = idleFps)
+
+        assertThat(stats(state)).isEqualTo("GPU 12.3 ms 4 fps 610x1356 ts=img")
+    }
+
+    @Test
+    fun hudChanged_twoIdleStatesWithDifferentInferenceTimeAreTheSame() {
+        val idle = sample.copy(captureFps = 0f, inferenceMs = 9.0f)
+        val idleAgain = idle.copy(inferenceMs = 31.7f)
+
+        assertThat(HudFormatter.hudChanged(idle, idleAgain, idleFps)).isFalse()
+    }
+
+    @Test
+    fun hudChanged_twoIdleStatesWithDifferentFpsAreTheSame() {
+        val idle = sample.copy(captureFps = 1f, inferenceMs = 9.0f)
+        val idleAgain = sample.copy(captureFps = 2f, inferenceMs = 31.7f)
+
+        assertThat(HudFormatter.hudChanged(idle, idleAgain, idleFps)).isFalse()
+    }
+
+    @Test
+    fun hudChanged_goingIdleIsAChange() {
+        assertThat(HudFormatter.hudChanged(sample, sample.copy(captureFps = 0f), idleFps)).isTrue()
+    }
+
+    @Test
+    fun hudChanged_leavingIdleIsAChange() {
+        assertThat(HudFormatter.hudChanged(sample.copy(captureFps = 0f), sample, idleFps)).isTrue()
+    }
+
+    @Test
+    fun hudChanged_inferenceTimeStillCountsWhileActive() {
+        val other = sample.copy(captureFps = 30f, inferenceMs = 20.0f)
+
+        assertThat(HudFormatter.hudChanged(sample.copy(captureFps = 30f), other, idleFps)).isTrue()
+    }
+
+    @Test
+    fun hudChanged_otherFieldsStillCountWhileIdle() {
+        val idle = sample.copy(captureFps = 0f)
+
+        assertThat(HudFormatter.hudChanged(idle, idle.copy(accelerator = Accelerator.CPU), idleFps)).isTrue()
+        assertThat(HudFormatter.hudChanged(idle, idle.copy(dotsVisible = false), idleFps)).isTrue()
     }
 
     @Test

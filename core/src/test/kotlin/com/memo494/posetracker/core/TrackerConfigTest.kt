@@ -57,6 +57,12 @@ class TrackerConfigTest {
     }
 
     @Test
+    fun hudIdleFps_isTheHudRatePlusTheMargin() {
+        assertThat(TrackerConfig().hudIdleFps).isEqualTo(4f)
+        assertThat(TrackerConfig(hudRateHz = 5f).hudIdleFps).isEqualTo(5f + TrackerConfig.HUD_IDLE_FPS_MARGIN)
+    }
+
+    @Test
     fun construction_belowMin_isRejected() {
         assertThrows(IllegalArgumentException::class.java) {
             TrackerConfig(scoreThreshold = TrackerConfig.MIN_SCORE_THRESHOLD - 0.001f)

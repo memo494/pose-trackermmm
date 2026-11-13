@@ -32,18 +32,20 @@ object HudFormatter {
     /**
      * Writes the stats line, e.g. `GPU 12.3 ms 58 fps 610x1356 ts=img`: accelerator, inference time (one
      * decimal), capture fps (rounded), capture size, timestamp source. Unknown values print as `--`.
+     * A capture fps below [idleFps] prints as `0` (the capture is idle, see [hudChanged]).
      * Returns the number of characters written to [out].
      */
     fun formatStats(
         state: OverlayState,
         out: CharArray,
+        idleFps: Float,
     ): Int {
         var pos = 0
         pos = putText(out, pos, acceleratorText(state.accelerator))
         pos = putText(out, pos, " ")
         pos = putTenths(out, pos, quantize(state.inferenceMs, TENTHS_PER_UNIT))
         pos = putText(out, pos, " ms ")
-        pos = putWhole(out, pos, quantize(state.captureFps, WHOLE_PER_UNIT))
+        pos = putWhole(out, pos, shownFps(state, idleFps))
         pos = putText(out, pos, " fps ")
         pos = putWhole(out, pos, state.captureWidthImg)
         pos = putText(out, pos, "x")
@@ -70,10 +72,15 @@ object HudFormatter {
     /**
      * Whether the HUD text of [after] differs from that of [before], using the same rounding as
      * [formatStats] (so jitter below the printed precision does not count). Pure, allocation-free.
+     *
+     * The overlay is part of the capture, so a HUD refresh causes a frame whose numbers would change the
+     * text again. To break that loop the fps is compared as displayed (every fps below [idleFps] is 0) and
+     * a difference in the inference time is ignored while [after] is idle.
      */
     fun hudChanged(
         before: OverlayState,
         after: OverlayState,
+        idleFps: Float,
     ): Boolean {
         if (before.accelerator != after.accelerator) return true
         if (before.timestampSource != after.timestampSource) return true
@@ -81,9 +88,22 @@ object HudFormatter {
         if (before.captureHeightImg != after.captureHeightImg) return true
         if (before.dotsVisible != after.dotsVisible) return true
         if (before.warning != after.warning) return true
-        if (quantize(before.captureFps, WHOLE_PER_UNIT) != quantize(after.captureFps, WHOLE_PER_UNIT)) return true
+        if (shownFps(before, idleFps) != shownFps(after, idleFps)) return true
+        if (isIdle(after, idleFps)) return false
         return quantize(before.inferenceMs, TENTHS_PER_UNIT) != quantize(after.inferenceMs, TENTHS_PER_UNIT)
     }
+
+    /** Whether the capture of [state] is idle: its fps is a valid number below [idleFps]. */
+    private fun isIdle(
+        state: OverlayState,
+        idleFps: Float,
+    ): Boolean = state.captureFps >= 0f && state.captureFps < idleFps
+
+    /** The fps as printed: 0 while idle, else rounded; [NOT_AVAILABLE] for an invalid value. */
+    private fun shownFps(
+        state: OverlayState,
+        idleFps: Float,
+    ): Int = if (isIdle(state, idleFps)) 0 else quantize(state.captureFps, WHOLE_PER_UNIT)
 
     private fun acceleratorText(accelerator: Accelerator?): String =
         when (accelerator) {

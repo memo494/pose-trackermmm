@@ -89,6 +89,14 @@ data class TrackerConfig(
     val hudIntervalNs: Long
         get() = (NANOS_PER_SECOND / hudRateHz).toLong()
 
+    /**
+     * Capture rate, in frames per second, below which the HUD shows 0 fps and does not refresh its numbers.
+     * The HUD's own refreshes redraw the captured overlay and so cause up to `hudRateHz + 1` frames per
+     * second on a still screen; below this value the capture counts as idle.
+     */
+    val hudIdleFps: Float
+        get() = hudRateHz + HUD_IDLE_FPS_MARGIN
+
     companion object {
         /** Default [scoreThreshold]: unitless confidence. */
         const val DEFAULT_SCORE_THRESHOLD = 0.15f
@@ -116,6 +124,9 @@ data class TrackerConfig(
 
         /** Highest accepted [hudRateHz], in hertz. */
         const val MAX_HUD_RATE_HZ = 10.0f
+
+        /** Margin, in frames per second, added to [hudRateHz] to get [hudIdleFps]. */
+        const val HUD_IDLE_FPS_MARGIN = 2f
 
         /** Default [timestampGuardNs]: 100 ms, in nanoseconds. */
         const val DEFAULT_TIMESTAMP_GUARD_NS = 100_000_000L

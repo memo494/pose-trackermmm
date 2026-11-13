@@ -33,12 +33,13 @@ class OverlayStateHolderTest {
     private fun state(
         shiftX: Float = 0f,
         captureFps: Float = 30f,
+        inferenceMs: Float = 10f,
     ): OverlayState =
         OverlayState(
             frame = DetectionFrame(1L, TimestampSource.IMAGE, 610, 1356, listOf(person(shiftX))),
             accelerator = Accelerator.GPU,
             captureFps = captureFps,
-            inferenceMs = 10f,
+            inferenceMs = inferenceMs,
             captureWidthImg = 610,
             captureHeightImg = 1356,
             timestampSource = TimestampSource.IMAGE,
@@ -159,6 +160,32 @@ class OverlayStateHolderTest {
 
         assertThat(hudUpdates).isAtMost(3)
         assertThat(redraws).isEqualTo(31)
+    }
+
+    @Test
+    fun anIdleScreen_hudFeedbackFramesDoNotKeepTheHudRefreshing() {
+        holder.publish(state(captureFps = 30f, inferenceMs = 10f))
+        assertThat(redraws).isEqualTo(1)
+
+        nowNs += intervalNs
+        holder.publish(state(captureFps = 0f, inferenceMs = 10f))
+        assertThat(redraws).isEqualTo(2)
+        assertThat(holder.hud().captureFps).isEqualTo(0f)
+
+        nowNs += intervalNs
+        holder.publish(state(captureFps = 1f, inferenceMs = 12.5f))
+        assertThat(redraws).isEqualTo(2)
+
+        nowNs += intervalNs
+        holder.publish(state(captureFps = 2f, inferenceMs = 14.1f))
+        assertThat(redraws).isEqualTo(2)
+        assertThat(holder.hud().captureFps).isEqualTo(0f)
+        assertThat(holder.hud().inferenceMs).isEqualTo(10f)
+
+        nowNs += intervalNs
+        holder.publish(state(captureFps = 30f, inferenceMs = 10f))
+        assertThat(redraws).isEqualTo(3)
+        assertThat(holder.hud().captureFps).isEqualTo(30f)
     }
 
     @Test

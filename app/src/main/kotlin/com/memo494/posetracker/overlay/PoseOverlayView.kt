@@ -202,7 +202,7 @@ class PoseOverlayView(
         canvas: Canvas,
         hud: OverlayState,
     ) {
-        val statsLength = HudFormatter.formatStats(hud, statsLine)
+        val statsLength = HudFormatter.formatStats(hud, statsLine, config.hudIdleFps)
         val warningLength = HudFormatter.formatWarning(hud, warningLine)
         var widest = max(hudTextPaint.measureText(versionLine, 0, versionLine.size), hudTextPaint.measureText(statsLine, 0, statsLength))
         var lines = 2

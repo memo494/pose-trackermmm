@@ -61,7 +61,7 @@ class OverlayStateHolder(
         val nowNs = clockNs()
         val shownHud = hudState
         val urgent = state.warning != shownHud.warning || state.dotsVisible != shownHud.dotsVisible
-        val changed = HudFormatter.hudChanged(shownHud, state)
+        val changed = HudFormatter.hudChanged(shownHud, state, config.hudIdleFps)
         val hudDue = urgent || RedrawPolicy.hudDue(nowNs, lastHudNs, config.hudIntervalNs, changed)
         if (hudDue) {
             hudState = state

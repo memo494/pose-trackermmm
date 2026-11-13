@@ -225,8 +225,7 @@ class DiagnosticsReportTest {
 
     private val importedMeta = ImportedModelMeta("my-model.tflite", "0123456789abcdef".repeat(4), 12_345_678L, 640, 300)
 
-    private fun modelLines(model: ModelStatus?): List<String> =
-        build(stats = stats.copy(model = model)).text("summary.txt").split("\n")
+    private fun modelLines(model: ModelStatus?): List<String> = build(stats = stats.copy(model = model)).text("summary.txt").split("\n")
 
     @Test
     fun summary_builtInModel_isDescribedWithoutAFile() {

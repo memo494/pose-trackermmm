@@ -59,6 +59,7 @@ internal fun ControlScreen(
                     when (notice) {
                         ControlNotice.OVERLAY_PERMISSION_NEEDED -> R.string.control_notice_overlay_needed
                         ControlNotice.CONSENT_DENIED -> R.string.control_notice_consent_denied
+                        ControlNotice.START_FAILED -> R.string.control_notice_start_failed
                     }
                 Text(
                     text = stringResource(noticeRes),

@@ -15,6 +15,7 @@ import com.memo494.posetracker.core.TrackerConfig
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 
 /**
  * Foreground service that owns one [CaptureSession] (ARCHITECTURE §5). Everything here runs on the main
@@ -74,6 +75,7 @@ class CaptureService : Service() {
         } catch (e: Exception) {
             // SecurityException or ForegroundServiceStartNotAllowedException: no foreground, no capture.
             CaptureLog.log("startForeground refused", e)
+            _startFailures.update { it + 1 }
             stopSelf()
             return
         }
@@ -84,6 +86,7 @@ class CaptureService : Service() {
         val projection = createProjection(intent)
         if (projection == null) {
             CaptureLog.log("capture not started: no media projection", null)
+            _startFailures.update { it + 1 }
             ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
             stopSelf()
             return
@@ -110,11 +113,12 @@ class CaptureService : Service() {
         }
     }
 
-    /** Called by the session on the main thread when its teardown is complete. */
-    private fun onSessionFinished() {
+    /** Called by the session on the main thread when its teardown is complete ([failed]: its own failure ended it). */
+    private fun onSessionFinished(failed: Boolean) {
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         session = null
         _running.value = false
+        if (failed) _startFailures.update { it + 1 }
         stopSelf()
     }
 
@@ -128,6 +132,15 @@ class CaptureService : Service() {
 
         /** `true` from the moment a capture session is created until its teardown has finished. */
         val running: StateFlow<Boolean> = _running.asStateFlow()
+
+        private val _startFailures = MutableStateFlow(0)
+
+        /**
+         * Counter that grows by one for every start that failed: `startForeground` refused, the consent
+         * result or the projection missing, or the session ended by a failure of its own. The control screen
+         * shows a notice when it sees the counter grow.
+         */
+        val startFailures: StateFlow<Int> = _startFailures.asStateFlow()
 
         /**
          * Intent that starts a capture session with the consent result of `createScreenCaptureIntent`

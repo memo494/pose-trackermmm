@@ -49,13 +49,15 @@ import java.util.concurrent.TimeUnit
  * @param context the service; it adds the overlay window and is the source for the detector's assets.
  * @param projection the consented projection; this session stops it.
  * @param config settings (defaults for now).
- * @param onFinished called on the main thread when the teardown is complete.
+ * @param onFinished called on the main thread when the teardown is complete; its argument is `true` when the
+ *   session ended because of a failure of its own (overlay refused, capture setup failed), `false` when the
+ *   user or the system stopped it. A session without a detector is not a failure (the HUD shows a warning).
  */
 internal class CaptureSession(
     private val context: Context,
     private val projection: MediaProjection,
     private val config: TrackerConfig,
-    private val onFinished: () -> Unit,
+    private val onFinished: (failed: Boolean) -> Unit,
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val overlayWindow = OverlayWindow(context, config)
@@ -68,6 +70,9 @@ internal class CaptureSession(
 
     @Volatile
     private var captureHandler: Handler? = null
+
+    @Volatile
+    private var failed = false
 
     // Capture thread only (see the class KDoc).
     private val imageFrame = ImageFrame()
@@ -160,7 +165,7 @@ internal class CaptureSession(
                     },
                     TeardownStep("stop projection") { projection.stop() },
                     TeardownStep("quit capture thread") { captureThread?.quitSafely() },
-                    TeardownStep("finish") { onFinished() },
+                    TeardownStep("finish") { onFinished(failed) },
                 ),
             postToMain = { runnable -> mainHandler.post(runnable) },
             postToCapture = { runnable -> captureHandler?.post(runnable) ?: false },
@@ -182,19 +187,25 @@ internal class CaptureSession(
             projection.registerCallback(projectionCallback, handler)
             if (!overlayWindow.show()) {
                 CaptureLog.log("overlay refused (permission revoked?), ending the session", null)
-                stop()
+                failAndStop()
                 return
             }
             handler.post { startOnCaptureThread() }
         } catch (e: Throwable) {
             CaptureLog.log("capture session failed to start", e)
-            stop()
+            failAndStop()
         }
     }
 
     /** Ends the session. Any thread; only starts the teardown, which is idempotent and never blocks. */
     fun stop() {
         teardown.start()
+    }
+
+    /** Ends the session because of a failure of its own: [onFinished] then gets `failed = true`. Any thread. */
+    private fun failAndStop() {
+        failed = true
+        stop()
     }
 
     /** The configuration (rotation, size) changed. Main thread; the work happens on the capture thread. */
@@ -208,7 +219,7 @@ internal class CaptureSession(
             startCapture()
         } catch (e: Throwable) {
             CaptureLog.log("starting the capture failed", e)
-            stop()
+            failAndStop()
         }
     }
 
@@ -269,7 +280,7 @@ internal class CaptureSession(
                 createOrResize(plan.size)
             } catch (e: Throwable) {
                 CaptureLog.log("creating or resizing the capture failed", e)
-                stop()
+                failAndStop()
                 return
             }
         }

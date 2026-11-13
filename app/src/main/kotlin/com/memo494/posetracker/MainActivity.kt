@@ -50,6 +50,7 @@ import java.io.File
 class MainActivity : ComponentActivity() {
     private val controlState = mutableStateOf(ControlState())
     private val diagnosticsState = mutableStateOf(DiagnosticsUiState())
+    private var seenStartFailures = 0
 
     // Registered at activity level so a result that arrives after a recreation still reaches the new instance.
     private val consentLauncher =
@@ -90,9 +91,15 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+        // Failures before this activity existed (for example before a rotation) are not shown again.
+        seenStartFailures = CaptureService.startFailures.value
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-                CaptureService.running.collect { dispatch(ControlEvent.RunningChanged(it)) }
+                launch { CaptureService.running.collect { dispatch(ControlEvent.RunningChanged(it)) } }
+                CaptureService.startFailures.collect { failures ->
+                    if (failures > seenStartFailures) dispatch(ControlEvent.StartFailed)
+                    seenStartFailures = failures
+                }
             }
         }
         showCrashNoticeIfAny()

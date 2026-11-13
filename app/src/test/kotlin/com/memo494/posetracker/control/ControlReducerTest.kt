@@ -234,6 +234,88 @@ class ControlReducerTest {
         assertThat(step.state.awaitingConsent).isTrue()
     }
 
+    // Rule 10b: a start that failed (refused foreground, no projection, overlay refused, capture setup failed).
+
+    @Test
+    fun startFailed_showsTheNoticeAndStopsWaitingWithoutEffect() {
+        val state = ready.copy(awaitingConsent = true)
+
+        val step = reduce(state, ControlEvent.StartFailed)
+
+        assertThat(step.state.awaitingConsent).isFalse()
+        assertThat(step.state.notice).isEqualTo(ControlNotice.START_FAILED)
+        assertThat(step.effect).isNull()
+    }
+
+    @Test
+    fun startFailed_whileRunning_keepsRunningAsItIs() {
+        val running = reduce(ready.copy(running = true), ControlEvent.StartFailed)
+        val stopped = reduce(ready.copy(running = false), ControlEvent.StartFailed)
+
+        assertThat(running.state.running).isTrue()
+        assertThat(running.state.notice).isEqualTo(ControlNotice.START_FAILED)
+        assertThat(stopped.state.running).isFalse()
+    }
+
+    @Test
+    fun startFailed_inEveryState_showsTheNoticeWithoutEffect() {
+        val flags = listOf(true, false)
+        for (overlay in flags) {
+            for (running in flags) {
+                for (awaiting in flags) {
+                    for (asked in flags) {
+                        for (notice in listOf(null) + ControlNotice.entries) {
+                            val state = ControlState(overlay, running, awaiting, asked, notice)
+
+                            val step = reduce(state, ControlEvent.StartFailed)
+
+                            val expected = state.copy(awaitingConsent = false, notice = ControlNotice.START_FAILED)
+                            assertThat(step.state).isEqualTo(expected)
+                            assertThat(step.effect).isNull()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun start_clearsTheStartFailedNotice() {
+        val state = ready.copy(notice = ControlNotice.START_FAILED)
+
+        val step = reduce(state, ControlEvent.StartClicked)
+
+        assertThat(step.state.notice).isNull()
+        assertThat(step.effect).isEqualTo(ControlEffect.LAUNCH_CONSENT)
+    }
+
+    @Test
+    fun start_askingTheNotificationPermission_clearsTheStartFailedNotice() {
+        val state = ready.copy(notice = ControlNotice.START_FAILED)
+
+        val step = reduce(state, ControlEvent.StartClicked, notificationPermissionMissing = true)
+
+        assertThat(step.state.notice).isNull()
+    }
+
+    @Test
+    fun runningTrue_clearsTheStartFailedNotice() {
+        val state = ready.copy(notice = ControlNotice.START_FAILED)
+
+        val step = reduce(state, ControlEvent.RunningChanged(true))
+
+        assertThat(step.state.notice).isNull()
+    }
+
+    @Test
+    fun runningFalse_keepsTheStartFailedNotice() {
+        val state = ready.copy(running = true, notice = ControlNotice.START_FAILED)
+
+        val step = reduce(state, ControlEvent.RunningChanged(false))
+
+        assertThat(step.state.notice).isEqualTo(ControlNotice.START_FAILED)
+    }
+
     // Rule 11: Stop.
 
     @Test
@@ -271,6 +353,7 @@ class ControlReducerTest {
                 ControlEvent.RunningChanged(false),
                 ControlEvent.StopClicked,
                 ControlEvent.OpenOverlaySettingsClicked,
+                ControlEvent.StartFailed,
             )
         val flags = listOf(true, false)
         val notices = listOf(null) + ControlNotice.entries

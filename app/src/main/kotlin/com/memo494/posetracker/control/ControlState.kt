@@ -21,6 +21,9 @@ internal enum class ControlNotice {
 
     /** The screen-capture consent was denied or cancelled, or the service could not be started. */
     CONSENT_DENIED,
+
+    /** The capture service could not start or its setup failed; the diagnostics hold the reason. */
+    START_FAILED,
 }
 
 /** Everything that can happen on the control screen. */
@@ -50,6 +53,9 @@ internal sealed interface ControlEvent {
 
     /** The user pressed Stop. */
     data object StopClicked : ControlEvent
+
+    /** A start failed after the consent (`CaptureService.startFailures` grew). */
+    data object StartFailed : ControlEvent
 
     /** The user pressed the button that opens the "display over other apps" settings. */
     data object OpenOverlaySettingsClicked : ControlEvent
@@ -89,6 +95,7 @@ internal object ControlReducer {
             is ControlEvent.ConsentResult -> onConsent(state, event.granted)
             is ControlEvent.RunningChanged -> onRunning(state, event.running)
             ControlEvent.StopClicked -> onStop(state)
+            ControlEvent.StartFailed -> onStartFailed(state)
         }
 
     private fun onOverlayChecked(
@@ -137,6 +144,9 @@ internal object ControlReducer {
         if (!running) return ControlStep(state.copy(running = false), null)
         return ControlStep(state.copy(running = true, awaitingConsent = false, notice = null), null)
     }
+
+    private fun onStartFailed(state: ControlState): ControlStep =
+        ControlStep(state.copy(awaitingConsent = false, notice = ControlNotice.START_FAILED), null)
 
     private fun onStop(state: ControlState): ControlStep {
         if (!state.running) return ControlStep(state, null)

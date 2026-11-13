@@ -77,7 +77,7 @@ class JsonTest {
     }
 
     @Test
-    fun nonAsciiAndEscapedSlashInStrings_arePreserved() {
+    fun nonAsciiCharactersInStrings_arePreserved() {
         assertThat((Json.parse("\"h\u00e9llo \u4e16\"") as JsonString).value).isEqualTo("h\u00e9llo \u4e16")
     }
 

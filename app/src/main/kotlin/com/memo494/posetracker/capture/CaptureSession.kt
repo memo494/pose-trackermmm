@@ -19,6 +19,7 @@ import com.memo494.posetracker.core.TrackerConfig
 import com.memo494.posetracker.core.capture.CaptureSize
 import com.memo494.posetracker.detector.PoseDetector
 import com.memo494.posetracker.detector.PoseDetectors
+import com.memo494.posetracker.diagnostics.CaptureStatsHolder
 import com.memo494.posetracker.overlay.OverlayWindow
 import java.util.concurrent.TimeUnit
 
@@ -85,7 +86,11 @@ internal class CaptureSession(
         object : Runnable {
             override fun run() {
                 if (teardown.isStarted) return
-                pipeline?.onHudTick()
+                val activePipeline = pipeline
+                if (activePipeline != null) {
+                    activePipeline.onHudTick()
+                    CaptureStatsHolder.publish(overlayWindow.stateHolder.latest(), activePipeline)
+                }
                 captureHandler?.postDelayed(this, hudIntervalMs)
             }
         }

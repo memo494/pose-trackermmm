@@ -1,0 +1,290 @@
+package com.memo494.posetracker.modelimport
+
+import android.annotation.SuppressLint
+import android.content.Context
+import android.content.SharedPreferences
+import com.memo494.posetracker.core.modelimport.ImportGuard
+import com.memo494.posetracker.core.modelimport.ImportGuardState
+import com.memo494.posetracker.core.modelimport.ImportedModelMeta
+import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
+import java.util.concurrent.atomic.AtomicBoolean
+
+/**
+ * What is stored about the one imported model (M0c D1, D4).
+ *
+ * @property meta the stored description, or `null` when there is none or it does not decode.
+ * @property fileExists whether `model.tflite` exists; it is only meaningful together with [meta].
+ * @property guard the crash marker, with the app-start step already applied (a stale `Pending` is `Tripped`).
+ */
+data class StoredModelState(
+    val meta: ImportedModelMeta?,
+    val fileExists: Boolean,
+    val guard: ImportGuardState,
+)
+
+/** The one string value that holds the encoded [ImportGuardState]; the Android shell is [SharedPreferences]. */
+internal interface GuardPrefs {
+    /** The stored text, or `null` when nothing is stored. */
+    fun read(): String?
+
+    /** Stores [text] synchronously; `false` when it could not be written. */
+    fun write(text: String): Boolean
+}
+
+/**
+ * The one owner of everything on disk for the imported model: the directory `noBackupFilesDir/imported/` with
+ * `model.tflite`, one temporary file for the import in progress and `meta.txt`, plus the crash-marker value in
+ * `SharedPreferences`.
+ *
+ * Threading: every method does disk work, so each one throws [IllegalStateException] when called on the main
+ * thread; call them from a worker thread (even the constructor is free of disk work, so it may be built anywhere).
+ * Methods are serialised by one process-wide lock, so calls from the import thread and a capture thread are safe.
+ *
+ * Crash safety of [accept]: the store never leaves a `meta.txt` that describes a different file. It deletes the old
+ * meta first, then renames the model into place, then renames the new meta into place. A process death between
+ * the steps leaves no meta, which [state] reports as "no imported model". The order "model first, meta second"
+ * would leave the old meta next to the new file; the order "new meta first" would leave the new meta next to the old
+ * file. When the model rename itself fails, the old meta is written back, so the previous model stays usable.
+ * (`PoseDetectors.fromImported` re-checks length and hash anyway.)
+ */
+class ImportedModelStore private constructor(
+    private val directoryLazy: Lazy<File>,
+    private val prefsLazy: Lazy<GuardPrefs>,
+    private val appStartApplied: AtomicBoolean,
+    private val rename: (File, File) -> Boolean,
+) {
+    /** The production store: files under `noBackupFilesDir/imported/`, the marker in private preferences. */
+    constructor(context: Context) : this(
+        lazy { File(context.applicationContext.noBackupFilesDir, DIRECTORY_NAME) },
+        lazy {
+            SharedPreferencesGuardPrefs(
+                context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE),
+            )
+        },
+        PROCESS_APP_START_APPLIED,
+        File::renameTo,
+    )
+
+    /**
+     * For tests: [directory] is the store's own directory, [guardPrefs] the marker value, [appStartApplied] the
+     * "this process already applied the app-start step" flag (a fresh `AtomicBoolean(false)` is a fresh process)
+     * and [rename] the file move used by [accept] (`false` means it failed).
+     */
+    internal constructor(
+        directory: File,
+        guardPrefs: GuardPrefs,
+        appStartApplied: AtomicBoolean = AtomicBoolean(false),
+        rename: (File, File) -> Boolean = File::renameTo,
+    ) : this(lazyOf(directory), lazyOf(guardPrefs), appStartApplied, rename)
+
+    /** The stored model file `model.tflite`; it may not exist. */
+    val modelFile: File
+        get() {
+            WorkerThreadCheck.require()
+            return File(directoryLazy.value, MODEL_NAME)
+        }
+
+    /**
+     * What is stored now. The first call in a process (this or any other method) applies [ImportGuard.onAppStart]
+     * once and stores the result: a `Pending` left by a crashed run becomes `Tripped`. A meta that does not decode
+     * or a missing file is simply "no imported model"; this never throws for bad data.
+     */
+    fun state(): StoredModelState {
+        WorkerThreadCheck.require()
+        synchronized(LOCK) {
+            val guard = currentGuard()
+            val directory = directoryLazy.value
+            return StoredModelState(readMeta(File(directory, META_NAME)), isFile(File(directory, MODEL_NAME)), guard)
+        }
+    }
+
+    /**
+     * A fresh, empty temporary file inside the store's directory (the same file system as [modelFile], so
+     * [accept] can rename it). Any leftover from an earlier run is deleted first.
+     *
+     * @throws IOException when the directory cannot be created or the leftover cannot be deleted.
+     */
+    fun newTempFile(): File {
+        WorkerThreadCheck.require()
+        synchronized(LOCK) {
+            val directory = ensureDirectory() ?: throw IOException("Cannot create $DIRECTORY_NAME directory")
+            val temp = File(directory, TEMP_NAME)
+            if (temp.exists() && !temp.delete()) throw IOException("Cannot delete the old temporary file")
+            return temp
+        }
+    }
+
+    /**
+     * Makes [temp] (from [newTempFile]) the stored model with the description [meta]; see the class comment for
+     * the order. Returns `false` when it failed; the previous model and meta are then unchanged (or, in the rare
+     * case that even restoring the old meta failed, there is no meta: "no imported model"). [temp] is left for the
+     * caller to delete on failure. Never leaves a meta that describes a different file.
+     */
+    fun accept(
+        temp: File,
+        meta: ImportedModelMeta,
+    ): Boolean {
+        WorkerThreadCheck.require()
+        synchronized(LOCK) {
+            currentGuard()
+            return try {
+                acceptLocked(temp, meta)
+            } catch (e: IOException) {
+                false
+            } catch (e: SecurityException) {
+                false
+            }
+        }
+    }
+
+    /**
+     * Deletes the model, the temporary file and the meta, and sets the guard to `Idle` (lifting a trip).
+     * Returns `true` only when everything is gone and the guard was stored.
+     */
+    fun clear(): Boolean {
+        WorkerThreadCheck.require()
+        synchronized(LOCK) {
+            currentGuard()
+            val directory = directoryLazy.value
+            // The meta goes first: a meta without a file is harmless, a file with a stale meta is not.
+            var done = true
+            for (name in listOf(META_NAME, META_TEMP_NAME, MODEL_NAME, TEMP_NAME)) {
+                done = deleteIfExists(File(directory, name)) && done
+            }
+            return prefsLazy.value.write(ImportGuard.encode(ImportGuard.clear())) && done
+        }
+    }
+
+    /** Stores the crash marker synchronously, before the caller goes on; `false` when it could not be written. */
+    fun setGuard(state: ImportGuardState): Boolean {
+        WorkerThreadCheck.require()
+        synchronized(LOCK) {
+            currentGuard()
+            return prefsLazy.value.write(ImportGuard.encode(state))
+        }
+    }
+
+    // ---- everything below runs under LOCK ----
+
+    /** The stored guard; the first call of the process turns a stale `Pending` into `Tripped` and stores that. */
+    private fun currentGuard(): ImportGuardState {
+        val prefs = prefsLazy.value
+        val stored = ImportGuard.decode(prefs.read())
+        if (!appStartApplied.compareAndSet(false, true)) return stored
+        val applied = ImportGuard.onAppStart(stored)
+        // If the trip cannot be stored, apply it again on the next call: a stale Pending must not read as usable.
+        if (applied != stored && !prefs.write(ImportGuard.encode(applied))) appStartApplied.set(false)
+        return applied
+    }
+
+    private fun acceptLocked(
+        temp: File,
+        meta: ImportedModelMeta,
+    ): Boolean {
+        val directory = ensureDirectory() ?: return false
+        val modelFile = File(directory, MODEL_NAME)
+        val metaFile = File(directory, META_NAME)
+        val metaTemp = File(directory, META_TEMP_NAME)
+        val previousMeta = if (metaFile.isFile) readText(metaFile) else null
+
+        if (!writeSynced(metaTemp, meta.encode())) return false
+        if (metaFile.exists() && !metaFile.delete()) {
+            metaTemp.delete()
+            return false
+        }
+        if (!rename(temp, modelFile)) {
+            metaTemp.delete()
+            if (previousMeta != null) writeAtomically(metaFile, metaTemp, previousMeta)
+            return false
+        }
+        // The new model is in place; without the meta rename there is simply no usable imported model.
+        if (!rename(metaTemp, metaFile)) {
+            metaTemp.delete()
+            return false
+        }
+        return true
+    }
+
+    private fun writeAtomically(
+        target: File,
+        scratch: File,
+        text: String,
+    ): Boolean {
+        if (!writeSynced(scratch, text)) return false
+        if (rename(scratch, target)) return true
+        scratch.delete()
+        return false
+    }
+
+    private fun ensureDirectory(): File? {
+        val directory = directoryLazy.value
+        return if (directory.isDirectory || directory.mkdirs() || directory.isDirectory) directory else null
+    }
+
+    private fun readMeta(file: File): ImportedModelMeta? {
+        val text = if (isFile(file)) readText(file) else null
+        return text?.let(ImportedModelMeta::decode)
+    }
+
+    /** Reading a damaged file must never crash a session, so even an `Error` (a huge file: OOM) means "no text". */
+    @Suppress("TooGenericExceptionCaught")
+    private fun readText(file: File): String? =
+        try {
+            file.readText(Charsets.UTF_8)
+        } catch (t: Throwable) {
+            null
+        }
+
+    private fun isFile(file: File): Boolean =
+        try {
+            file.isFile
+        } catch (e: SecurityException) {
+            false
+        }
+
+    private fun writeSynced(
+        file: File,
+        text: String,
+    ): Boolean =
+        try {
+            FileOutputStream(file).use { output ->
+                output.write(text.toByteArray(Charsets.UTF_8))
+                output.fd.sync()
+            }
+            true
+        } catch (e: IOException) {
+            file.delete()
+            false
+        }
+
+    private fun deleteIfExists(file: File): Boolean = !file.exists() || file.delete()
+
+    /** The Android shell of [GuardPrefs]: one string in private preferences. */
+    private class SharedPreferencesGuardPrefs(
+        private val preferences: SharedPreferences,
+    ) : GuardPrefs {
+        override fun read(): String? = preferences.getString(KEY_GUARD, null)
+
+        // commit(), not apply(): the marker must be on disk before LiteRT touches the file, in case it kills us.
+        @SuppressLint("ApplySharedPref")
+        override fun write(text: String): Boolean = preferences.edit().putString(KEY_GUARD, text).commit()
+    }
+
+    private companion object {
+        const val DIRECTORY_NAME = "imported"
+        const val MODEL_NAME = "model.tflite"
+        const val TEMP_NAME = "import.tmp"
+        const val META_NAME = "meta.txt"
+        const val META_TEMP_NAME = "meta.tmp"
+        const val PREFS_NAME = "imported_model"
+        const val KEY_GUARD = "guard"
+
+        /** One lock for the whole process: every store instance shares the same files and preferences. */
+        val LOCK = Any()
+
+        /** Set once the app-start step ran in this process. */
+        val PROCESS_APP_START_APPLIED = AtomicBoolean(false)
+    }
+}

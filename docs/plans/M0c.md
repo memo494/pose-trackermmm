@@ -226,7 +226,7 @@ before merging.
 | T1 | done, not yet run in CI | a8f943a, 0efa029 | script and workflow written; not run here (no Ultralytics); lead dispatches sizes=640 publish_tag=models |
 | T2 | done, android CI green | 35640c3, cfd0b67 | `core/modelimport/*` + import limits in `TrackerConfig`; guard text form `idle`/`pending:<stage>`/`tripped:<stage>`; KDoc of `ImportGuard` says who calls what |
 | T3 | done, android CI green | feda3bc | `ModelProbe.probe(file): ProbeResult` (CPU `CompiledModel`, never throws); `PoseDetectors.fromImported` + internal `verifyImportedFile` (missing: `FileNotFoundException`; length/hash: `ModelIntegrityException`) |
-| T4a | — | | store, importer, choice |
+| T4a | done, android CI pending | (this push) | `app/modelimport/{ImportedModelStore,ModelImporter,ModelChoice,WorkerThreadCheck}`; accept order: delete old meta, rename model, rename new meta (never a meta for another file); a refused import keeps a `Tripped` guard, only an accept clears it |
 | T4b | — | | session wiring, HUD, diagnostics |
 | T5 | — | | |
 | T7 | — | | approved by the owner |

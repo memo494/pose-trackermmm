@@ -17,19 +17,18 @@ class CaptureTeardownTest {
         fun step(
             name: String,
             fails: Boolean = false,
-        ): TeardownStep {
-            return TeardownStep(name) {
+        ): TeardownStep =
+            TeardownStep(name) {
                 events.add(name)
                 if (fails) throw IllegalStateException("boom $name")
             }
-        }
 
         fun teardown(
             mainFirst: List<TeardownStep> = listOf(step("overlay"), step("display")),
             onCapture: List<TeardownStep> = listOf(step("reader"), step("detector")),
             mainLast: List<TeardownStep> = listOf(step("callback"), step("projection"), step("service")),
-        ): CaptureTeardown {
-            return CaptureTeardown(
+        ): CaptureTeardown =
+            CaptureTeardown(
                 mainFirst,
                 onCapture,
                 mainLast,
@@ -41,7 +40,6 @@ class CaptureTeardownTest {
                 { onMain },
                 { message, _ -> logs.add(message) },
             )
-        }
 
         fun drainMain() {
             while (mainQueue.isNotEmpty()) mainQueue.removeFirst().run()

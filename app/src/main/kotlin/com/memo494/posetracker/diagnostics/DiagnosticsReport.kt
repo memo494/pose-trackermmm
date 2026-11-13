@@ -68,9 +68,9 @@ internal object DiagnosticsReport {
     ): String {
         val out = StringBuilder()
         out.append("[app]\n")
-        appInfo.forEach { (key, value) -> out.append(key).append('=').append(value).append('\n') }
+        appInfo.forEach { (key, value) -> line(out, key, value) }
         out.append("[device]\n")
-        deviceInfo.forEach { (key, value) -> out.append(key).append('=').append(value).append('\n') }
+        deviceInfo.forEach { (key, value) -> line(out, key, value) }
         out.append("[capture]\n")
         if (stats == null) {
             out.append(NO_SESSION).append('\n')
@@ -104,7 +104,7 @@ internal object DiagnosticsReport {
         key: String,
         value: Any,
     ) {
-        out.append(key).append('=').append(value).append('\n')
+        out.append("$key=$value\n")
     }
 
     private fun withNewline(text: String): String = if (text.endsWith("\n")) text else "$text\n"

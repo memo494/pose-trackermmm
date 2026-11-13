@@ -91,9 +91,8 @@ class DiagnosticsReportTest {
     @Test
     fun summary_hasOneKeyValueLinePerCaptureStat() {
         val lines = build().text("summary.txt").split("\n")
-
-        assertThat(lines)
-            .containsAtLeast(
+        val expected =
+            listOf(
                 "accelerator=GPU",
                 "captureFps=31.5",
                 "inferenceMs=12.25",
@@ -108,6 +107,8 @@ class DiagnosticsReportTest {
                 "arrivalFallbacks=3",
                 "failures=4",
             )
+
+        assertThat(lines).containsAtLeastElementsIn(expected)
     }
 
     @Test

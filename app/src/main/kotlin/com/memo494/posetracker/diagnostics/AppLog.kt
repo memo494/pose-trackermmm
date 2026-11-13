@@ -50,7 +50,7 @@ internal object AppLog {
         out.append(LocalTime.now().format(timeFormat)).append(' ')
         out.append(if (error != null) LEVEL_WARN else LEVEL_INFO).append(' ').append(message)
         if (error != null) {
-            out.append(" | ").append(error.javaClass.name).append(": ").append(error.message)
+            out.append(" | ${error.javaClass.name}: ${error.message}")
             for (frame in error.stackTrace.take(TrackerConfig.LOG_STACK_LINES)) {
                 out.append("\n    at ").append(frame)
             }

@@ -365,8 +365,7 @@ private fun wrongType(
     label: String,
     expected: String,
     value: JsonValue,
-): Nothing =
-    throw JsonParseException("$label must be $expected but is ${typeName(value)}", JsonParseException.NO_OFFSET)
+): Nothing = throw JsonParseException("$label must be $expected but is ${typeName(value)}", JsonParseException.NO_OFFSET)
 
 private fun asObject(
     value: JsonValue,

@@ -252,6 +252,15 @@ data class TrackerConfig(
         /** A repeating frame failure is logged for the first failure of a streak and then every this many failures. */
         const val FAILURE_LOG_INTERVAL = 100
 
+        /** Number of log lines the in-app diagnostics log keeps (a ring: the oldest line is dropped when full). */
+        const val LOG_RING_CAPACITY = 500
+
+        /** Longest diagnostics log line, in characters; a longer line is cut. */
+        const val LOG_LINE_MAX_CHARS = 2000
+
+        /** Most stack-trace lines the diagnostics log keeps after an error line. */
+        const val LOG_STACK_LINES = 8
+
         /** Ultralytics `LetterBox` leading/trailing pad rounding bias, in pixels (padX = round(pad/2 - bias)). */
         const val LETTERBOX_PAD_BIAS_MDL = 0.1f
 

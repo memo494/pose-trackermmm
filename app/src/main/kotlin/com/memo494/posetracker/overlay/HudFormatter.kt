@@ -17,6 +17,7 @@ object HudFormatter {
     const val CPU_BANNER = "Running on CPU"
 
     private const val WARNING_CAPTURE_SIZE = "Capture not display-sized: dots hidden"
+    private const val WARNING_DETECTOR_UNAVAILABLE = "Model not loaded: no detection"
     private const val WARNING_NOT_VISIBLE = "Content not visible: dots hidden"
 
     private const val UNKNOWN = "--"
@@ -60,6 +61,7 @@ object HudFormatter {
         state: OverlayState,
         out: CharArray,
     ): Int {
+        if (state.warning == OverlayWarning.DETECTOR_UNAVAILABLE) return putText(out, 0, WARNING_DETECTOR_UNAVAILABLE)
         if (state.warning == OverlayWarning.CAPTURE_NOT_DISPLAY_SIZED) return putText(out, 0, WARNING_CAPTURE_SIZE)
         if (!state.dotsVisible) return putText(out, 0, WARNING_NOT_VISIBLE)
         return 0

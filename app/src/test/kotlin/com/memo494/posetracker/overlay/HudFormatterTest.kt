@@ -1,6 +1,7 @@
 package com.memo494.posetracker.overlay
 
 import com.google.common.truth.Truth.assertThat
+import com.memo494.posetracker.core.TrackerConfig
 import com.memo494.posetracker.core.model.TimestampSource
 import com.memo494.posetracker.core.overlay.OverlayWarning
 import com.memo494.posetracker.detector.Accelerator
@@ -102,6 +103,31 @@ class HudFormatterTest {
     }
 
     @Test
+    fun warning_namesTheMissingModel() {
+        val state = sample.copy(warning = OverlayWarning.DETECTOR_UNAVAILABLE)
+
+        assertThat(warning(state)).isEqualTo("Model not loaded: no detection")
+    }
+
+    @Test
+    fun warning_everyWarningFitsTheHudLine() {
+        val roomy = CharArray(TrackerConfig.HUD_LINE_CAPACITY_CHARS * 2)
+        for (value in OverlayWarning.entries) {
+            val length = HudFormatter.formatWarning(sample.copy(warning = value), roomy)
+
+            assertThat(length).isGreaterThan(0)
+            assertThat(length).isAtMost(TrackerConfig.HUD_LINE_CAPACITY_CHARS)
+        }
+    }
+
+    @Test
+    fun warning_theMissingModelWinsOverInvisibleContent() {
+        val state = sample.copy(dotsVisible = false, warning = OverlayWarning.DETECTOR_UNAVAILABLE)
+
+        assertThat(warning(state)).isEqualTo("Model not loaded: no detection")
+    }
+
+    @Test
     fun warning_saysWhenTheContentIsNotVisible() {
         val state = sample.copy(dotsVisible = false)
 
@@ -133,6 +159,9 @@ class HudFormatterTest {
         assertThat(HudFormatter.hudChanged(sample, sample.copy(dotsVisible = false))).isTrue()
         val warned = sample.copy(warning = OverlayWarning.CAPTURE_NOT_DISPLAY_SIZED)
         assertThat(HudFormatter.hudChanged(sample, warned)).isTrue()
+        val unavailable = sample.copy(warning = OverlayWarning.DETECTOR_UNAVAILABLE)
+        assertThat(HudFormatter.hudChanged(sample, unavailable)).isTrue()
+        assertThat(HudFormatter.hudChanged(warned, unavailable)).isTrue()
     }
 
     @Test

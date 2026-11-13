@@ -234,6 +234,18 @@ data class TrackerConfig(
         /** Largest per-axis deviation, in pixels, accepted to keep the capture aspect exactly equal to the display's. */
         const val CAPTURE_EXACT_ASPECT_TOLERANCE_PX = 1.0f
 
+        /** Length of the window the capture fps is counted over: 1 s, in nanoseconds (a duration). */
+        const val FPS_WINDOW_NS = 1_000_000_000L
+
+        /**
+         * Number of frame times the fps meter remembers (a ring). It caps the measurable rate at this many
+         * frames per [FPS_WINDOW_NS]: 256 frames in the 1 s window, far above any display refresh rate.
+         */
+        const val FPS_RING_CAPACITY = 256
+
+        /** A repeating frame failure is logged for the first failure of a streak and then every this many failures. */
+        const val FAILURE_LOG_INTERVAL = 100
+
         /** Ultralytics `LetterBox` leading/trailing pad rounding bias, in pixels (padX = round(pad/2 - bias)). */
         const val LETTERBOX_PAD_BIAS_MDL = 0.1f
 

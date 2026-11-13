@@ -26,9 +26,18 @@ package com.memo494.posetracker.core
  * @property hudTextSizeSp text size of the debug HUD, in sp.
  * @property headRingRadiusRatio radius of the head ring as a fraction of the person box width
  *   (unitless).
- * @property modelInputSize side of the square model input, in pixels (Mdl space); only
- *   [MODEL_INPUT_SIZE_SMALL] (320) or [MODEL_INPUT_SIZE_LARGE] (416) is accepted because only those
- *   two model files are shipped.
+ * @property modelInputSize side of the square model input, in pixels (Mdl space), of the BUILT-IN
+ *   models; only [MODEL_INPUT_SIZE_SMALL] (320) or [MODEL_INPUT_SIZE_LARGE] (416) is accepted because only
+ *   those two model files are shipped. An imported model brings its own size, limited by
+ *   [importMinInputSize]..[importMaxInputSize] (it is not described by this field).
+ * @property importMinBytes smallest accepted size of an imported model file, in bytes (a smaller file
+ *   cannot be a pose model).
+ * @property importMaxBytes largest accepted size of an imported model file, in bytes (the copy into
+ *   app storage is cut off at this size).
+ * @property importMinInputSize smallest accepted side of an imported model's square input, in pixels
+ *   (Mdl space); a multiple of [IMPORT_INPUT_SIZE_STEP].
+ * @property importMaxInputSize largest accepted side of an imported model's square input, in pixels
+ *   (Mdl space); a multiple of [IMPORT_INPUT_SIZE_STEP].
  */
 data class TrackerConfig(
     val scoreThreshold: Float = DEFAULT_SCORE_THRESHOLD,
@@ -43,6 +52,10 @@ data class TrackerConfig(
     val hudTextSizeSp: Float = DEFAULT_HUD_TEXT_SIZE_SP,
     val headRingRadiusRatio: Float = DEFAULT_HEAD_RING_RADIUS_RATIO,
     val modelInputSize: Int = DEFAULT_MODEL_INPUT_SIZE,
+    val importMinBytes: Long = DEFAULT_IMPORT_MIN_BYTES,
+    val importMaxBytes: Long = DEFAULT_IMPORT_MAX_BYTES,
+    val importMinInputSize: Int = DEFAULT_IMPORT_MIN_INPUT_SIZE,
+    val importMaxInputSize: Int = DEFAULT_IMPORT_MAX_INPUT_SIZE,
 ) {
     init {
         require(scoreThreshold in MIN_SCORE_THRESHOLD..MAX_SCORE_THRESHOLD) {
@@ -82,6 +95,28 @@ data class TrackerConfig(
         }
         require(modelInputSize == MODEL_INPUT_SIZE_SMALL || modelInputSize == MODEL_INPUT_SIZE_LARGE) {
             "modelInputSize $modelInputSize is neither $MODEL_INPUT_SIZE_SMALL nor $MODEL_INPUT_SIZE_LARGE"
+        }
+        require(importMinBytes in MIN_IMPORT_BYTES_LIMIT..MAX_IMPORT_BYTES_LIMIT) {
+            "importMinBytes $importMinBytes outside [$MIN_IMPORT_BYTES_LIMIT, $MAX_IMPORT_BYTES_LIMIT]"
+        }
+        require(importMaxBytes in MIN_IMPORT_BYTES_LIMIT..MAX_IMPORT_BYTES_LIMIT) {
+            "importMaxBytes $importMaxBytes outside [$MIN_IMPORT_BYTES_LIMIT, $MAX_IMPORT_BYTES_LIMIT]"
+        }
+        require(importMinBytes <= importMaxBytes) {
+            "importMinBytes $importMinBytes is above importMaxBytes $importMaxBytes"
+        }
+        require(importMinInputSize in MIN_IMPORT_INPUT_SIZE_LIMIT..MAX_IMPORT_INPUT_SIZE_LIMIT) {
+            "importMinInputSize $importMinInputSize outside [$MIN_IMPORT_INPUT_SIZE_LIMIT, $MAX_IMPORT_INPUT_SIZE_LIMIT]"
+        }
+        require(importMaxInputSize in MIN_IMPORT_INPUT_SIZE_LIMIT..MAX_IMPORT_INPUT_SIZE_LIMIT) {
+            "importMaxInputSize $importMaxInputSize outside [$MIN_IMPORT_INPUT_SIZE_LIMIT, $MAX_IMPORT_INPUT_SIZE_LIMIT]"
+        }
+        require(importMinInputSize <= importMaxInputSize) {
+            "importMinInputSize $importMinInputSize is above importMaxInputSize $importMaxInputSize"
+        }
+        require(importMinInputSize % IMPORT_INPUT_SIZE_STEP == 0 && importMaxInputSize % IMPORT_INPUT_SIZE_STEP == 0) {
+            "importMinInputSize $importMinInputSize and importMaxInputSize $importMaxInputSize " +
+                "must be multiples of $IMPORT_INPUT_SIZE_STEP"
         }
     }
 
@@ -277,5 +312,60 @@ data class TrackerConfig(
 
         /** Leading characters of the model's SHA-256 that go into the staged file name (`<base>-<prefix>.<ext>`). */
         const val STAGED_MODEL_SHA_PREFIX_LENGTH = 16
+
+        /** Default [importMinBytes]: 100 000 bytes; the smallest real pose model is a few megabytes. */
+        const val DEFAULT_IMPORT_MIN_BYTES = 100_000L
+
+        /** Default [importMaxBytes]: 200 MiB, in bytes. */
+        const val DEFAULT_IMPORT_MAX_BYTES = 209_715_200L
+
+        /** Lowest accepted [importMinBytes] / [importMaxBytes], in bytes. */
+        const val MIN_IMPORT_BYTES_LIMIT = 1L
+
+        /** Highest accepted [importMinBytes] / [importMaxBytes]: 1 GiB, in bytes (also the sanity cap of stored metadata). */
+        const val MAX_IMPORT_BYTES_LIMIT = 1_073_741_824L
+
+        /** Default [importMinInputSize], in pixels (Mdl). */
+        const val DEFAULT_IMPORT_MIN_INPUT_SIZE = 160
+
+        /** Default [importMaxInputSize], in pixels (Mdl). */
+        const val DEFAULT_IMPORT_MAX_INPUT_SIZE = 1280
+
+        /** Lowest accepted [importMinInputSize] / [importMaxInputSize], in pixels (Mdl). */
+        const val MIN_IMPORT_INPUT_SIZE_LIMIT = 32
+
+        /** Highest accepted [importMinInputSize] / [importMaxInputSize], in pixels (Mdl; also the sanity cap of stored metadata). */
+        const val MAX_IMPORT_INPUT_SIZE_LIMIT = 4096
+
+        /** An imported model's input side must be a multiple of this, in pixels (the largest YOLO stride). */
+        const val IMPORT_INPUT_SIZE_STEP = 32
+
+        /** Most rows (`N`) of an imported model's output that stored metadata may claim; a sanity cap, not a tuning value. */
+        const val IMPORT_META_MAX_OUTPUT_ROWS = 1_000_000
+
+        /** Longest stored display name of an imported model, in characters. */
+        const val IMPORT_NAME_MAX_CHARS = 64
+
+        /** Display name used when a picked file's name has nothing usable left after cleaning. */
+        const val IMPORT_FALLBACK_NAME = "model.tflite"
+
+        /** Box values per output row of a pose model: x, y, w, h (or x1, y1, x2, y2). */
+        const val POSE_BOX_VALUES = 4
+
+        /** Score values per output row of a pose model: the person confidence. */
+        const val POSE_SCORE_VALUES = 1
+
+        /** Class values per output row of a pose model: the class index. */
+        const val POSE_CLASS_VALUES = 1
+
+        /** Keypoints per person in the COCO pose layout. */
+        const val POSE_KEYPOINT_COUNT = 17
+
+        /** Values per keypoint: x, y and confidence. */
+        const val POSE_VALUES_PER_KEYPOINT = 3
+
+        /** Columns per output row of an accepted pose model: 4 box + 1 score + 1 class + 17 * 3 keypoint values = 57. */
+        const val POSE_OUTPUT_COLUMNS =
+            POSE_BOX_VALUES + POSE_SCORE_VALUES + POSE_CLASS_VALUES + POSE_KEYPOINT_COUNT * POSE_VALUES_PER_KEYPOINT
     }
 }

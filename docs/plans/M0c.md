@@ -175,7 +175,7 @@ before merging.
 | Task | Status | Commit | Notes |
 |---|---|---|---|
 | T1 | done, not yet run in CI | a8f943a, 0efa029 | script and workflow written; not run here (no Ultralytics); lead dispatches sizes=640 publish_tag=models |
-| T2 | — | | |
+| T2 | done, CI pending | (see PR) | `core/modelimport/*` + import limits in `TrackerConfig`; guard text form `idle`/`pending:<stage>`/`tripped:<stage>`; KDoc of `ImportGuard` says who calls what |
 | T3 | — | | |
 | T4 | — | | |
 | T5 | — | | |

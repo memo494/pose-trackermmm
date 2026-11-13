@@ -476,6 +476,31 @@ class FramePipelineTest {
     }
 
     @Test
+    fun setExpectedSize_toAnotherSize_republishesWithoutTheOldDetections() {
+        val pipeline = pipeline()
+        pipeline.onFrame(image(), acquireNs())
+        assertThat(states.last().frame).isNotNull()
+        val before = states.size
+
+        pipeline.setExpectedSize(CaptureSize(HEIGHT, WIDTH))
+
+        assertThat(states).hasSize(before + 1)
+        assertThat(states.last().frame).isNull()
+    }
+
+    @Test
+    fun setExpectedSize_toTheSameSize_publishesNothing() {
+        val pipeline = pipeline()
+        pipeline.onFrame(image(), acquireNs())
+        val before = states.size
+
+        pipeline.setExpectedSize(CaptureSize(WIDTH, HEIGHT))
+
+        assertThat(states).hasSize(before)
+        assertThat(states.last().frame).isNotNull()
+    }
+
+    @Test
     fun setDisplaySized_withoutADetector_keepsTheMissingModelWarning() {
         val pipeline = pipeline(detector = null)
 

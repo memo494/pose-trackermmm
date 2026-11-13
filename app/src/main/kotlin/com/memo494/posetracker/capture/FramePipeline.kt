@@ -73,9 +73,13 @@ internal class FramePipeline(
     /**
      * Sets the size every frame must have (Img pixels). `null` = unknown: every frame is dropped as a
      * size mismatch (fail closed). The copy buffer is replaced by the next frame of a new size.
+     * Leaving a known size (rotation) republishes the state at once without its detections, which are
+     * positions of the old size and must never be mapped with the new geometry.
      */
     fun setExpectedSize(size: CaptureSize?) {
+        val previous = expectedSize
         expectedSize = size
+        if (previous != null && previous != size) republish(dropFrame = true)
     }
 
     /** Stores whether the captured content is visible and republishes the state at once. */

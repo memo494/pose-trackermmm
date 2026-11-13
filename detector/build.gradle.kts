@@ -21,6 +21,12 @@ android {
                 .toInt()
     }
 
+    testOptions {
+        // The vendored Ultralytics helpers touch android.graphics statics (Paint, Color) on class init;
+        // JVM unit tests of their pure math need those stubs to return defaults instead of throwing.
+        unitTests.isReturnDefaultValues = true
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -35,6 +41,11 @@ kotlin {
 
 dependencies {
     implementation(project(":core"))
+
+    // Vendored Ultralytics pose core (com.ultralytics.yolo): LiteRT CompiledModel + the GPU accelerator.
+    // Same version for both (catalog); never org.tensorflow:* (AGENTS rule 6).
+    implementation(libs.litert)
+    implementation(libs.litert.gpu)
 
     testImplementation(libs.junit4)
     testImplementation(libs.truth)

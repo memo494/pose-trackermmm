@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Pose overlay (PoseOverlayView). The overlay is part of the screen capture, so strokes stay thin. -->
+    <color name="overlay_keypoint_green">#FF00E676</color>
+    <color name="overlay_box_green">#FF00C853</color>
+    <color name="overlay_cpu_banner_red">#FFD32F2F</color>
+    <color name="overlay_hud_background">#B3000000</color>
+    <color name="overlay_hud_text">#FFFFFFFF</color>
+</resources>

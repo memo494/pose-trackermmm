@@ -1,6 +1,6 @@
 ---
 name: consultant
-description: Senior expert on Fable 5.1, used only for hard questions - knowledge the team lacks, conflicting or missing docs, high-risk design decisions (geometry, tracking, latency), or failures the debugger could not fix. Read-only; advises, never edits.
+description: Senior expert on Fable 5.2, used only for hard questions - knowledge the team lacks, conflicting or missing docs, high-risk design decisions (geometry, tracking, latency), or failures the debugger could not fix. Read-only; advises, never edits.
 model: fable
 effort: xhigh
 tools: Read, Grep, Glob, Bash, WebSearch, WebFetch

@@ -1,3 +1,4 @@
+import org.gradle.api.tasks.PathSensitivity
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -28,4 +29,10 @@ dependencies {
 
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
+    // Tests read the committed model files through ../model (working directory = this module). Declaring
+    // the directory as an input re-runs them when a model file changes, instead of reusing a cached result.
+    inputs
+        .dir(rootProject.file("model"))
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+        .withPropertyName("committedModelFiles")
 }

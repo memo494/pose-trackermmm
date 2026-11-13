@@ -3,11 +3,11 @@
 A one-screen map so agents open the right file without a wide search. Full design: `ARCHITECTURE.md`.
 
 ## Modules (dependencies: `app → detector → core`, `app → core`)
-| Module | Type | Holds | Entry points (M0a) |
+| Module | Type | Holds | Entry points (M0b so far) |
 |---|---|---|---|
-| `core/` | Kotlin JVM (no `android.*`) | model types, geometry, tracking, `TrackerConfig`, replay I/O | `com.memo494.posetracker.core.CoreMath` |
-| `detector/` | Android library | `PoseDetector` + adapter over vendored Ultralytics code, Fake impl | `com.memo494.posetracker.detector.Accelerator` |
-| `app/` | Android application (Compose) | camera/screen frames, overlay, HUD, benchmark, diagnostics, DI | `com.memo494.posetracker.MainActivity` |
+| `core/` | Kotlin JVM (no `android.*`) | model types, geometry, capture math, redraw policy, `TrackerConfig`, `json`, `replay`, `modelpack` | `TrackerConfig`, `capture/CaptureFrame`, `capture/RowCopy`, `geometry/FitCenter`, `overlay/RedrawPolicy`, `replay/ReplayFixture`, `modelpack/ModelStager` |
+| `detector/` | Android library | `PoseDetector` + adapter over vendored Ultralytics code (`com/ultralytics/yolo`), Fake impl | `PoseDetectors.fromAssets`, `PoseDetector`, `LiteRtPoseDetector`, `FakePoseDetector` |
+| `app/` | Android application (Compose) | `capture/` (service, session, frame pipeline, teardown), `overlay/` (window, view, HUD), `control/` (reducer + screen), `diagnostics/` (log, crash file, share zip) | `MainActivity`, `PoseTrackerApp`, `capture/CaptureService`, `capture/CaptureSession`, `capture/FramePipeline`, `overlay/OverlayWindow`, `control/ControlReducer`, `diagnostics/DiagnosticsZip` |
 
 Package root: `com.memo494.posetracker`. `applicationId` = `com.memo494.posetracker`.
 
@@ -18,6 +18,8 @@ Package root: `com.memo494.posetracker`. `applicationId` = `com.memo494.posetrac
 - `scripts/ci-status.sh` — polls GitHub Actions for the current branch.
 - `.github/workflows/android.yml` — CI; `export-model.yml` — manual model export.
 - `signing/debug.keystore` — committed debug key (PROTECTED). `model/` — exported models (PROTECTED).
+- `app/build.gradle.kts` — `stage<Variant>ModelAssets`: sha256 check of `model/` against `model_info.json`,
+  then the `.tflite` files and `model_info.json` become APK assets.
 
 ## AI team
 `.claude/settings.json` (lead = Opus, subagents = Sonnet), `.claude/agents/*` (implementer,

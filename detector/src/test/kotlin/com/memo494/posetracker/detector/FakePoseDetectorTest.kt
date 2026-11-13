@@ -34,8 +34,7 @@ class FakePoseDetectorTest {
         return frame
     }
 
-    private fun fixtureDetector(): FakePoseDetector =
-        FakePoseDetector(ReplayFixture.parse(fixtureJson), INPUT_SIZE, Accelerator.GPU)
+    private fun fixtureDetector(): FakePoseDetector = FakePoseDetector(ReplayFixture.parse(fixtureJson), INPUT_SIZE, Accelerator.GPU)
 
     @Test
     fun replaysTheFixtureFramesInOrderAndLoops() {

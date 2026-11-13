@@ -53,6 +53,7 @@ class ImportedModelStore private constructor(
     private val directoryLazy: Lazy<File>,
     private val prefsLazy: Lazy<GuardPrefs>,
     private val appStartApplied: AtomicBoolean,
+    private val threadCheck: () -> Unit,
     private val rename: (File, File) -> Boolean,
 ) {
     /** The production store: files under `noBackupFilesDir/imported/`, the marker in private preferences. */
@@ -64,25 +65,29 @@ class ImportedModelStore private constructor(
             )
         },
         PROCESS_APP_START_APPLIED,
+        { WorkerThreadCheck.require() },
         File::renameTo,
     )
 
     /**
      * For tests: [directory] is the store's own directory, [guardPrefs] the marker value, [appStartApplied] the
-     * "this process already applied the app-start step" flag (a fresh `AtomicBoolean(false)` is a fresh process)
+     * "this process already applied the app-start step" flag (a fresh `AtomicBoolean(false)` is a fresh process),
+     * [threadCheck] the "not on the main thread" check that every method runs first (the production one is
+     * `WorkerThreadCheck.require`, which needs a real `Looper`; it throws [IllegalStateException] when it objects)
      * and [rename] the file move used by [accept] (`false` means it failed).
      */
     internal constructor(
         directory: File,
         guardPrefs: GuardPrefs,
-        appStartApplied: AtomicBoolean = AtomicBoolean(false),
+        appStartApplied: AtomicBoolean,
+        threadCheck: () -> Unit,
         rename: (File, File) -> Boolean = File::renameTo,
-    ) : this(lazyOf(directory), lazyOf(guardPrefs), appStartApplied, rename)
+    ) : this(lazyOf(directory), lazyOf(guardPrefs), appStartApplied, threadCheck, rename)
 
     /** The stored model file `model.tflite`; it may not exist. */
     val modelFile: File
         get() {
-            WorkerThreadCheck.require()
+            threadCheck()
             return File(directoryLazy.value, MODEL_NAME)
         }
 
@@ -92,7 +97,7 @@ class ImportedModelStore private constructor(
      * or a missing file is simply "no imported model"; this never throws for bad data.
      */
     fun state(): StoredModelState {
-        WorkerThreadCheck.require()
+        threadCheck()
         synchronized(LOCK) {
             val guard = currentGuard()
             val directory = directoryLazy.value
@@ -107,7 +112,7 @@ class ImportedModelStore private constructor(
      * @throws IOException when the directory cannot be created or the leftover cannot be deleted.
      */
     fun newTempFile(): File {
-        WorkerThreadCheck.require()
+        threadCheck()
         synchronized(LOCK) {
             val directory = ensureDirectory() ?: throw IOException("Cannot create $DIRECTORY_NAME directory")
             val temp = File(directory, TEMP_NAME)
@@ -126,7 +131,7 @@ class ImportedModelStore private constructor(
         temp: File,
         meta: ImportedModelMeta,
     ): Boolean {
-        WorkerThreadCheck.require()
+        threadCheck()
         synchronized(LOCK) {
             currentGuard()
             return try {
@@ -144,7 +149,7 @@ class ImportedModelStore private constructor(
      * Returns `true` only when everything is gone and the guard was stored.
      */
     fun clear(): Boolean {
-        WorkerThreadCheck.require()
+        threadCheck()
         synchronized(LOCK) {
             currentGuard()
             val directory = directoryLazy.value
@@ -159,7 +164,7 @@ class ImportedModelStore private constructor(
 
     /** Stores the crash marker synchronously, before the caller goes on; `false` when it could not be written. */
     fun setGuard(state: ImportGuardState): Boolean {
-        WorkerThreadCheck.require()
+        threadCheck()
         synchronized(LOCK) {
             currentGuard()
             return prefsLazy.value.write(ImportGuard.encode(state))

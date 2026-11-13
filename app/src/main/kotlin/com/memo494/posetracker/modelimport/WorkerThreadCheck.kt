@@ -7,11 +7,12 @@ import android.os.Looper
  * must never run on the main thread (AGENTS.md hard rule 2).
  */
 internal object WorkerThreadCheck {
-    /** Throws [IllegalStateException] when called on the main looper's thread. */
+    /**
+     * Throws [IllegalStateException] when called on the main looper's thread. Needs a real `Looper` (not callable
+     * in JVM tests): the store and the importer take it as an injectable check, see their constructors.
+     */
     fun require() {
-        val main = Looper.getMainLooper()
-        // main is null only in JVM unit tests (stubbed Android); there is no main thread to protect then.
-        check(main == null || Looper.myLooper() !== main) { MESSAGE }
+        check(Looper.myLooper() !== Looper.getMainLooper()) { MESSAGE }
     }
 
     /** The decision itself, for tests: throws [IllegalStateException] when [onMainThread] is true. */

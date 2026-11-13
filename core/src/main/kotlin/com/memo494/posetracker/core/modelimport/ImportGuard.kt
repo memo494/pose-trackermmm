@@ -41,9 +41,12 @@ sealed interface ImportGuardState {
  *   `state = onAppStart(decode(text))`, store `encode(state)` if it changed. [ImportGuardState.Pending]
  *   becomes [ImportGuardState.Tripped]; while the state is Tripped the imported model must not be used
  *   (the app uses the built-in model and tells the owner which [ImportStage] failed).
- * - **Import** (worker thread), only when the state is not Tripped: store `begin(PROBE)` before LiteRT opens
- *   the copied file. When the probe returns normally, even with a refusal by the rules, the file did not
- *   crash, so store `succeed()` (also after a probe that threw a catchable error: no crash happened).
+ * - **Import** (worker thread): may start in any state except Pending (another attempt is open), also while
+ *   Tripped, because a new file gets a new chance. Store `begin(PROBE)` before LiteRT opens the copied file.
+ *   When the probe returns normally, even with a refusal by the rules, the file did not crash; also after a
+ *   probe that threw a catchable error no crash happened. The marker then goes back to what it was before:
+ *   `succeed()` from Idle, and Tripped again when it was Tripped. Only an accepted import (or [clear]) returns
+ *   to Idle.
  * - **Start of a capture session**, only for an imported model and only when the state is Idle: store
  *   `begin(LOAD)` before `PoseDetectors.fromImported`; store `succeed()` once the detector is built, and
  *   also when the load failed with a catchable error (the session falls back to the built-in model).

@@ -16,6 +16,7 @@ class ImportedModelStoreTest {
     val tmp = TemporaryFolder()
 
     private val prefs = FakeGuardPrefs()
+    private val thread = FakeMainThread()
     private val oldBytes = ByteArray(300) { (it % 7).toByte() }
     private val newBytes = ByteArray(400) { (it % 11).toByte() }
     private val oldMeta = meta("old.tflite", 'a', oldBytes.size)
@@ -36,7 +37,7 @@ class ImportedModelStoreTest {
     ) = ImportedModelMeta(name, digit.toString().repeat(64), bytes.toLong(), 640, 300)
 
     private fun newStore(appStartApplied: AtomicBoolean = AtomicBoolean(false)) =
-        ImportedModelStore(directory, prefs, appStartApplied) { from, to ->
+        ImportedModelStore(directory, prefs, appStartApplied, thread::check) { from, to ->
             if (to.name == dieOnRenameOf) throw IllegalStateException("the process died")
             to.name != failRenameOf && from.renameTo(to)
         }
@@ -290,5 +291,35 @@ class ImportedModelStoreTest {
         assertThat(accepted).isFalse()
         assertThat(store.state().meta).isEqualTo(oldMeta)
         assertThat(store.modelFile.readBytes()).isEqualTo(oldBytes)
+    }
+
+    // ---- the injected main-thread check ----
+
+    @Test
+    fun everyMethod_refusesTheMainThread_andTouchesNothing() {
+        val store = newStore()
+        val temp = stage(store, newBytes)
+        thread.onMainThread = true
+
+        assertThrows(IllegalStateException::class.java) { store.state() }
+        assertThrows(IllegalStateException::class.java) { store.modelFile }
+        assertThrows(IllegalStateException::class.java) { store.newTempFile() }
+        assertThrows(IllegalStateException::class.java) { store.accept(temp, newMeta) }
+        assertThrows(IllegalStateException::class.java) { store.clear() }
+        assertThrows(IllegalStateException::class.java) { store.setGuard(ImportGuardState.Idle) }
+
+        assertThat(temp.exists()).isTrue()
+        assertThat(prefs.writes).isEmpty()
+        thread.onMainThread = false
+        assertThat(store.state().meta).isNull()
+    }
+
+    @Test
+    fun offTheMainThread_theCheckLetsEveryMethodRun() {
+        val store = newStore()
+
+        assertThat(store.accept(stage(store, newBytes), newMeta)).isTrue()
+        assertThat(store.setGuard(ImportGuardState.Idle)).isTrue()
+        assertThat(store.clear()).isTrue()
     }
 }

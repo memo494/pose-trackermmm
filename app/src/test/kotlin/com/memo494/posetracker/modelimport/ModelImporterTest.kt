@@ -12,6 +12,7 @@ import com.memo494.posetracker.core.modelimport.SniffRejection
 import com.memo494.posetracker.core.modelimport.TensorDescription
 import com.memo494.posetracker.core.modelpack.Sha256
 import com.memo494.posetracker.detector.ProbeResult
+import org.junit.Assert.assertThrows
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -27,6 +28,7 @@ class ModelImporterTest {
 
     private val config = TrackerConfig(importMinBytes = 100L, importMaxBytes = 10_000L)
     private val prefs = FakeGuardPrefs()
+    private val thread = FakeMainThread()
 
     /** What the fake probe answers; set it before importing. */
     private var probeResult: ProbeResult = ProbeResult.Tensors(listOf(tensor(1, 3, 640, 640)), listOf(tensor(1, 300, 57)))
@@ -41,13 +43,13 @@ class ModelImporterTest {
 
     // Lazy: the TemporaryFolder rule creates the folder after the constructor ran.
     private val store by lazy {
-        ImportedModelStore(directory, prefs, AtomicBoolean(false)) { from, to ->
+        ImportedModelStore(directory, prefs, AtomicBoolean(false), thread::check) { from, to ->
             to.name != failRenameOf && from.renameTo(to)
         }
     }
 
     private val importer by lazy {
-        ModelImporter(store, config) { file ->
+        ModelImporter(store, config, thread::check) { file ->
             probeCalls++
             guardDuringProbe = store.state().guard
             assertThat(file.exists()).isTrue()
@@ -132,7 +134,7 @@ class ModelImporterTest {
     fun modelLargerThanOneBuffer_isCopiedAndHashedCompletely() {
         val bytes = tfliteBytes(TrackerConfig.MODEL_IO_BUFFER_BYTES * 2 + 123)
         val bigConfig = TrackerConfig(importMinBytes = 100L, importMaxBytes = 500_000L)
-        val bigImporter = ModelImporter(store, bigConfig) { probeResult }
+        val bigImporter = ModelImporter(store, bigConfig, thread::check) { probeResult }
 
         val outcome = bigImporter.import({ ByteArrayInputStream(bytes) }, "big.tflite", null)
 
@@ -448,6 +450,27 @@ class ModelImporterTest {
         override fun close() {
             closed = true
         }
+    }
+
+    @Test
+    fun onTheMainThread_importRefusesBeforeReadingAnything() {
+        var opened = false
+        thread.onMainThread = true
+
+        assertThrows(IllegalStateException::class.java) {
+            importer.import(
+                {
+                    opened = true
+                    ByteArrayInputStream(ByteArray(0))
+                },
+                "model.tflite",
+                null,
+            )
+        }
+
+        assertThat(opened).isFalse()
+        assertThat(probeCalls).isEqualTo(0)
+        assertThat(prefs.writes).isEmpty()
     }
 
     /** Serves [failAfter] bytes, then throws [error]. */

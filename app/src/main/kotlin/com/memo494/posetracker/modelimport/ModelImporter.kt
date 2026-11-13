@@ -70,11 +70,14 @@ sealed interface ImportOutcome {
  * [IllegalStateException] on the main thread. It never throws otherwise: every `Throwable` (`OutOfMemoryError`
  * included) becomes [ImportOutcome.Failed].
  *
+ * @param threadCheck throws [IllegalStateException] on the main thread; the production default needs a real
+ *   `Looper`, tests pass a fake.
  * @param probe reads the tensors of a file; the real one is `ModelProbe.probe`, tests pass a fake.
  */
 class ModelImporter(
     private val store: ImportedModelStore,
     private val config: TrackerConfig = TrackerConfig(),
+    private val threadCheck: () -> Unit = { WorkerThreadCheck.require() },
     private val probe: (File) -> ProbeResult = ModelProbe::probe,
 ) {
     /**
@@ -90,7 +93,7 @@ class ModelImporter(
         rawDisplayName: String?,
         declaredBytes: Long?,
     ): ImportOutcome {
-        WorkerThreadCheck.require()
+        threadCheck()
         if (declaredBytes != null && declaredBytes > config.importMaxBytes) return tooLarge("declared $declaredBytes bytes")
         val temp =
             try {

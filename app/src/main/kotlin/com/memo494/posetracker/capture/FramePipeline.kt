@@ -5,6 +5,7 @@ import com.memo494.posetracker.core.capture.CaptureFrame
 import com.memo494.posetracker.core.capture.CaptureSize
 import com.memo494.posetracker.core.capture.FrameTimestamp
 import com.memo494.posetracker.core.capture.RowCopy
+import com.memo494.posetracker.core.model.DetectionFrame
 import com.memo494.posetracker.core.model.TimestampSource
 import com.memo494.posetracker.core.overlay.OverlayWarning
 import com.memo494.posetracker.detector.PoseDetector
@@ -38,6 +39,8 @@ internal class FramePipeline(
     private val captureFrame = CaptureFrame()
     private val fpsMeter = FpsMeter()
     private var expectedSize: CaptureSize? = null
+    private var displayWidthPx = 0
+    private var displayHeightPx = 0
     private var buffer: ByteArray? = null
     private var contentVisible = true
     private var displaySized = true
@@ -48,6 +51,36 @@ internal class FramePipeline(
     /** Frames that went through detection and were published. */
     @Volatile
     var frames: Long = 0L
+        private set
+
+    /** Frames whose detection returned at least one person. */
+    @Volatile
+    var framesWithDetections: Long = 0L
+        private set
+
+    /** People in the newest detected frame, count; [OverlayState.NOT_MEASURED_COUNT] before the first. */
+    @Volatile
+    var lastDetections: Int = OverlayState.NOT_MEASURED_COUNT
+        private set
+
+    /** Highest [OverlayState.maxRawScore] seen in this session; negative = never measured. */
+    @Volatile
+    var peakMaxRawScore: Float = OverlayState.NOT_MEASURED_SCORE
+        private set
+
+    /** Model output rows with a NaN score in the newest frame (garbage output), count; negative = not measured. */
+    @Volatile
+    var lastNanRawRows: Int = OverlayState.NOT_MEASURED_COUNT
+        private set
+
+    /** Head point of the first person of the newest frame with people, Img pixels; NaN = none yet. */
+    @Volatile
+    var lastHeadXImg: Float = Float.NaN
+        private set
+
+    /** Head point y, see [lastHeadXImg]. */
+    @Volatile
+    var lastHeadYImg: Float = Float.NaN
         private set
 
     /** Frames dropped because their size was not the expected capture size (or none was set). */
@@ -80,6 +113,23 @@ internal class FramePipeline(
         val previous = expectedSize
         expectedSize = size
         if (previous != null && previous != size) republish(dropFrame = true)
+    }
+
+    /**
+     * Sets the display size, in pixels, that the capture size was planned for. Every published state carries
+     * it and the overlay maps Img to View with it, so the mapping always belongs to the same rotation as the
+     * capture size. Leaving a known size drops the old detections like [setExpectedSize] does. Call it before
+     * [setExpectedSize] when both change.
+     */
+    fun setDisplaySizePx(
+        widthPx: Int,
+        heightPx: Int,
+    ) {
+        val wasKnown = displayWidthPx > 0 && displayHeightPx > 0
+        val changed = widthPx != displayWidthPx || heightPx != displayHeightPx
+        displayWidthPx = widthPx
+        displayHeightPx = heightPx
+        if (wasKnown && changed) republish(dropFrame = true)
     }
 
     /** Stores whether the captured content is visible and republishes the state at once. */
@@ -162,6 +212,8 @@ internal class FramePipeline(
         if (!captureFrame.set(rgba, widthImg, heightImg, timestampNs, source)) error("capture frame rejected the copy")
         val result = detector.detect(captureFrame)
         fpsMeter.onFrame(acquireNs)
+        val maxRawScore = detector.lastMaxRawScore
+        recordDetections(result, maxRawScore, detector.lastNanRawRows)
         publish(
             OverlayState(
                 frame = result,
@@ -173,6 +225,10 @@ internal class FramePipeline(
                 timestampSource = source,
                 dotsVisible = contentVisible,
                 warning = null,
+                displayWidthPx = displayWidthPx,
+                displayHeightPx = displayHeightPx,
+                maxRawScore = maxRawScore,
+                rawRowsAboveThreshold = detector.lastRawRowsAboveThreshold,
             ),
         )
         frames++
@@ -196,8 +252,27 @@ internal class FramePipeline(
                 timestampSource = null,
                 dotsVisible = contentVisible,
                 warning = currentWarning(),
+                displayWidthPx = displayWidthPx,
+                displayHeightPx = displayHeightPx,
             ),
         )
+    }
+
+    /** Updates the detection counters from one detected frame. Allocation-free. */
+    private fun recordDetections(
+        result: DetectionFrame,
+        maxRawScore: Float,
+        nanRawRows: Int,
+    ) {
+        val people = result.detections.size
+        lastDetections = people
+        lastNanRawRows = nanRawRows
+        if (maxRawScore > peakMaxRawScore) peakMaxRawScore = maxRawScore
+        if (people == 0) return
+        framesWithDetections++
+        val first = result.detections[0]
+        lastHeadXImg = first.headXImg(config.keypointMinScore)
+        lastHeadYImg = first.headYImg(config.keypointMinScore)
     }
 
     /** The fail-closed warning for the current flags; a missing detector wins over a wrong capture size. */
@@ -216,6 +291,8 @@ internal class FramePipeline(
                     frame = if (dropFrame) null else base.frame,
                     dotsVisible = contentVisible,
                     warning = currentWarning(),
+                    displayWidthPx = displayWidthPx,
+                    displayHeightPx = displayHeightPx,
                 ),
             )
         } catch (e: Throwable) {

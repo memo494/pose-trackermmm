@@ -24,6 +24,7 @@ object HudFormatter {
     private const val NOT_AVAILABLE = -1
     private const val DECIMAL_BASE = 10
     private const val TENTHS_PER_UNIT = 10f
+    private const val HUNDREDTHS_PER_UNIT = 100f
     private const val WHOLE_PER_UNIT = 1f
 
     /** Largest number shown; anything above (or non-finite, or negative) prints as [UNKNOWN]. */
@@ -53,6 +54,23 @@ object HudFormatter {
         pos = putText(out, pos, " ts=")
         pos = putText(out, pos, timestampSourceText(state.timestampSource))
         return pos
+    }
+
+    /**
+     * Writes the detection line, e.g. `det 2/3 max 0.89`: people in the newest frame after filtering, model
+     * output rows whose raw score passed the threshold, and the highest raw score (two decimals). Unknown
+     * values print as `--`. Returns the number of characters written to [out].
+     */
+    fun formatDetections(
+        state: OverlayState,
+        out: CharArray,
+    ): Int {
+        var pos = putText(out, 0, "det ")
+        pos = putWhole(out, pos, detectionCount(state))
+        pos = putText(out, pos, "/")
+        pos = putWhole(out, pos, state.rawRowsAboveThreshold)
+        pos = putText(out, pos, " max ")
+        return putHundredths(out, pos, quantize(state.maxRawScore, HUNDREDTHS_PER_UNIT))
     }
 
     /**
@@ -88,10 +106,14 @@ object HudFormatter {
         if (before.captureHeightImg != after.captureHeightImg) return true
         if (before.dotsVisible != after.dotsVisible) return true
         if (before.warning != after.warning) return true
+        if (detectionCount(before) != detectionCount(after)) return true
         if (shownFps(before, idleFps) != shownFps(after, idleFps)) return true
         if (isIdle(after, idleFps)) return false
         return quantize(before.inferenceMs, TENTHS_PER_UNIT) != quantize(after.inferenceMs, TENTHS_PER_UNIT)
     }
+
+    /** People in the newest frame of [state]; [NOT_AVAILABLE] when there is no frame. */
+    private fun detectionCount(state: OverlayState): Int = state.frame?.detections?.size ?: NOT_AVAILABLE
 
     /** Whether the capture of [state] is idle: its fps is a valid number below [idleFps]. */
     private fun isIdle(
@@ -162,6 +184,19 @@ object HudFormatter {
             divisor /= DECIMAL_BASE
         }
         return next
+    }
+
+    /** Writes [hundredths] hundredths of a unit as `whole.ff`; a negative value prints [UNKNOWN]. */
+    private fun putHundredths(
+        out: CharArray,
+        pos: Int,
+        hundredths: Int,
+    ): Int {
+        if (hundredths < 0) return putText(out, pos, UNKNOWN)
+        var next = putWhole(out, pos, hundredths / (DECIMAL_BASE * DECIMAL_BASE))
+        next = putChar(out, next, '.')
+        next = putChar(out, next, '0' + (hundredths / DECIMAL_BASE) % DECIMAL_BASE)
+        return putChar(out, next, '0' + hundredths % DECIMAL_BASE)
     }
 
     /** Writes [tenths] tenths of a unit as `whole.fraction`; a negative value prints [UNKNOWN]. */

@@ -2,6 +2,8 @@ package com.memo494.posetracker.overlay
 
 import com.google.common.truth.Truth.assertThat
 import com.memo494.posetracker.core.TrackerConfig
+import com.memo494.posetracker.core.model.DetectionFrame
+import com.memo494.posetracker.core.model.PoseDetection
 import com.memo494.posetracker.core.model.TimestampSource
 import com.memo494.posetracker.core.overlay.OverlayWarning
 import com.memo494.posetracker.detector.Accelerator
@@ -15,6 +17,16 @@ class HudFormatterTest {
     private fun stats(state: OverlayState): String {
         val length = HudFormatter.formatStats(state, buffer, idleFps)
         return String(buffer, 0, length)
+    }
+
+    private fun detections(state: OverlayState): String {
+        val length = HudFormatter.formatDetections(state, buffer)
+        return String(buffer, 0, length)
+    }
+
+    private fun frameWith(people: Int): DetectionFrame {
+        val person = PoseDetection(0f, 0f, 1f, 1f, 0.9f, FloatArray(0), FloatArray(0))
+        return DetectionFrame(0L, TimestampSource.IMAGE, 610, 1356, List(people) { person })
     }
 
     private fun warning(state: OverlayState): String {
@@ -224,5 +236,32 @@ class HudFormatterTest {
     @Test
     fun cpuBanner_isTheDocumentedText() {
         assertThat(HudFormatter.CPU_BANNER).isEqualTo("Running on CPU")
+    }
+
+    @Test
+    fun detections_writesPeopleRawRowsAndTheMaxRawScore() {
+        val state = sample.copy(frame = frameWith(2), rawRowsAboveThreshold = 3, maxRawScore = 0.8921f)
+
+        assertThat(detections(state)).isEqualTo("det 2/3 max 0.89")
+    }
+
+    @Test
+    fun detections_unknownValuesPrintAsDashes() {
+        assertThat(detections(sample)).isEqualTo("det --/-- max --")
+    }
+
+    @Test
+    fun detections_lowScoresKeepTheirLeadingZeroDigit() {
+        val state = sample.copy(frame = frameWith(0), rawRowsAboveThreshold = 0, maxRawScore = 0.034f)
+
+        assertThat(detections(state)).isEqualTo("det 0/0 max 0.03")
+    }
+
+    @Test
+    fun hudChanged_whenThePeopleCountChanges() {
+        val before = sample.copy(frame = frameWith(0))
+        val after = sample.copy(frame = frameWith(1))
+
+        assertThat(HudFormatter.hudChanged(before, after, idleFps)).isTrue()
     }
 }

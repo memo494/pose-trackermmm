@@ -19,6 +19,14 @@ import com.memo494.posetracker.detector.Accelerator
  * @property dotsVisible `false` while the captured content is not visible
  *   (`onCapturedContentVisibilityChanged(false)`); detections are then not drawn.
  * @property warning why detections are hidden and the HUD shows a warning (fail closed); `null` = none.
+ * @property displayWidthPx width of the display the capture was planned for, pixels; 0 = unknown. The
+ *   Img -> View mapping uses this, never a size the view reads itself, so the mapping always belongs to
+ *   the same rotation as [captureWidthImg] x [captureHeightImg].
+ * @property displayHeightPx height of the display the capture was planned for, pixels; 0 = unknown.
+ * @property maxRawScore highest raw person score of the newest frame over all model output rows, before
+ *   any threshold, unitless; negative = not measured.
+ * @property rawRowsAboveThreshold model output rows of the newest frame whose raw score passed the score
+ *   threshold, count; negative = not measured.
  */
 data class OverlayState(
     val frame: DetectionFrame? = null,
@@ -30,12 +38,22 @@ data class OverlayState(
     val timestampSource: TimestampSource? = null,
     val dotsVisible: Boolean = true,
     val warning: OverlayWarning? = null,
+    val displayWidthPx: Int = 0,
+    val displayHeightPx: Int = 0,
+    val maxRawScore: Float = NOT_MEASURED_SCORE,
+    val rawRowsAboveThreshold: Int = NOT_MEASURED_COUNT,
 ) {
     /** Whether [frame] may be drawn: content visible and no fail-closed warning. */
     val detectionsShown: Boolean
         get() = dotsVisible && warning == null
 
     companion object {
+        /** [maxRawScore] when the detector did not measure it. */
+        const val NOT_MEASURED_SCORE = -1f
+
+        /** [rawRowsAboveThreshold] when the detector did not measure it. */
+        const val NOT_MEASURED_COUNT = -1
+
         /** Nothing known yet: draws no detections and a mostly empty HUD. */
         val EMPTY = OverlayState()
     }

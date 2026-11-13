@@ -286,6 +286,7 @@ internal class CaptureSession(
         }
         appliedPlan = plan
         appliedNoUsablePlan = false
+        activePipeline.setDisplaySizePx(displayPx.x, displayPx.y)
         activePipeline.setExpectedSize(plan.size)
         activePipeline.setDisplaySized(plan.displaySized)
     }

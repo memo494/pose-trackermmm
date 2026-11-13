@@ -182,4 +182,38 @@ class DiagnosticsReportTest {
 
         assertThat(first).isEqualTo(second)
     }
+
+    @Test
+    fun summary_listsTheDetectionDiagnostics() {
+        val withDetections =
+            stats.copy(
+                displayWidthPx = 2712,
+                displayHeightPx = 1220,
+                detections = 2,
+                framesWithDetections = 7L,
+                maxRawScore = 0.5f,
+                peakMaxRawScore = 0.75f,
+                rawRowsAboveThreshold = 3,
+                nanRawRows = 0,
+                headXImg = 100.5f,
+                headYImg = 40.25f,
+            )
+
+        val lines = build(stats = withDetections).text("summary.txt").split("\n")
+        val expected =
+            listOf(
+                "displayWidthPx=2712",
+                "displayHeightPx=1220",
+                "detections=2",
+                "framesWithDetections=7",
+                "maxRawScore=0.5",
+                "peakMaxRawScore=0.75",
+                "rawRowsAboveThreshold=3",
+                "nanRawRows=0",
+                "headXImg=100.5",
+                "headYImg=40.25",
+            )
+
+        assertThat(lines).containsAtLeastElementsIn(expected)
+    }
 }

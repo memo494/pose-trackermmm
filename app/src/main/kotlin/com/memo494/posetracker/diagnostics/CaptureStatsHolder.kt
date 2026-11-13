@@ -31,6 +31,16 @@ internal object CaptureStatsHolder {
                 copyFailures = pipeline.copyFailures,
                 arrivalFallbacks = pipeline.arrivalFallbacks,
                 failures = pipeline.failures,
+                displayWidthPx = state.displayWidthPx,
+                displayHeightPx = state.displayHeightPx,
+                detections = pipeline.lastDetections,
+                framesWithDetections = pipeline.framesWithDetections,
+                maxRawScore = state.maxRawScore,
+                peakMaxRawScore = pipeline.peakMaxRawScore,
+                rawRowsAboveThreshold = state.rawRowsAboveThreshold,
+                nanRawRows = pipeline.lastNanRawRows,
+                headXImg = pipeline.lastHeadXImg,
+                headYImg = pipeline.lastHeadYImg,
             )
     }
 }

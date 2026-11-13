@@ -380,6 +380,25 @@ Lead decisions:
 **Tests first (JUnit4):** the `ControlState` reducer covers every permission/consent transition.
 **Accept:** CI green; edge-to-edge-safe layout (edge-to-edge skill).
 
+#### T7 details (lead, 2026-11-13)
+- The Stop action of the notification is already in T5b; T7 is the activity only.
+- `control/ControlState.kt`, pure: `ControlState` (overlay permission, running, awaiting consent, notification
+  permission already asked, notice), `ControlEvent` (overlay permission checked, start clicked, notification
+  permission result, consent result, running changed, stop clicked, open settings clicked), `ControlEffect`
+  (open overlay settings, request notification permission, launch consent, start service, stop service),
+  `ControlReducer.reduce(state, event, notificationPermissionMissing): ControlStep(state, effect?)`.
+- Rules: Start without the overlay permission → a notice and a settings button, no consent dialog; the
+  notification permission is asked at most once per activity and its result never blocks (granted or denied →
+  consent); consent granted → `START_SERVICE` at once, inside the result callback, with the result's own Intent
+  (never stored); consent denied or cancelled → a notice, Start stays available; running → only Stop; Start
+  while running or while a consent dialog is open does nothing.
+- `MainActivity`: `registerForActivityResult` at activity level (results survive recreation); `onResume`
+  re-checks `Settings.canDrawOverlays`; collects `CaptureService.running` with `repeatOnLifecycle`; consent intent
+  `createScreenCaptureIntent(MediaProjectionConfig.createConfigForDefaultDisplay())` on API 34+ and the plain
+  one below; `ContextCompat.startForegroundService(CaptureService.startIntent(...))`; Stop sends
+  `CaptureService.stopIntent`. Compose + Material 3, edge-to-edge safe (`Scaffold` insets), texts in
+  `strings.xml`, the build label (version + SHA) stays visible.
+
 ### T8 — Diagnostics + on-phone checklist · M
 **Goal:** the owner can send a useful bug report from the phone.
 **Files:** `app/.../diagnostics/` (ring-buffer logger that also writes to logcat, uncaught-exception handler
@@ -400,6 +419,23 @@ device/OS, accelerator, capture size/fps, timestamp-source stats, `model_info.js
 
 **Tests first (JUnit4):** ring-buffer wrap; zip entry list builder (pure).
 **Accept:** CI green.
+
+#### T8 details (lead, 2026-11-13)
+- Pure, JVM-tested: `diagnostics/RingLog` (fixed capacity from `TrackerConfig`, thread-safe, oldest lines
+  dropped, `snapshot()`), `diagnostics/DiagnosticsReport` (builds the ordered list of zip entries — name and
+  text — from: log lines, device/app info, capture stats, `TrackerConfig`, `model_info.json` text, last crash
+  text; missing parts become an entry that says so, never a silent omission), `diagnostics/CaptureStats`
+  (immutable snapshot: accelerator, capture fps, inference ms, capture size, timestamp source, the
+  `FramePipeline` counters).
+- Android glue: `AppLog` (RingLog + logcat; `CaptureLog` routes to it), `PoseTrackerApp : Application`
+  (installs the uncaught-exception handler: writes the stack trace to `filesDir/diagnostics/last_crash.txt`,
+  then calls the previous handler), `CaptureStatsHolder` (a `@Volatile` latest snapshot, updated by the session
+  at the HUD tick), `DiagnosticsZip` (writes the zip to `cacheDir/diagnostics/` off the main thread),
+  `FileProvider` (authority `${applicationId}.diagnostics`, `res/xml` paths) and an `ACTION_SEND` chooser.
+- UI in `MainActivity`: a "Share diagnostics" button, a log screen (last lines, newest last), and a notice with
+  the same button when a crash file from the previous run exists (cleared after sharing or dismissing).
+- `docs/TEST_CHECKLIST.md`: M0b section with the checks above, pass criteria, how to install the APK from the
+  `latest` release, and what to send back (the diagnostics zip + what was on screen).
 
 ## Progress
 - **T1 done** — `2581d57`, ARCHITECTURE v0.6; docs only. Accepted extras: §7.1/§7.2/§3 camera wording removed;
@@ -432,6 +468,16 @@ device/OS, accelerator, capture size/fps, timestamp-source stats, `model_info.js
   UltralyticsPoseEngine, `PoseDetectors.fromAssets`; vendored `BasePredictor.inputUsesNchw`; ARCHITECTURE v0.6.1.
   `@Test` → 271. CI green on round 2 (one ktlint fix), run 43380160634. Lead read the Android glue
   (`UltralyticsPoseEngine`, `PoseDetectors`): it is not JVM-tested, so its first real run is the phone test.
+- **T5a done** — `9eb5656..3dee063`: FrameImage, NanoClock, FpsMeter, CapturePlanner, CaptureTeardown,
+  FramePipeline, `OverlayWarning.DETECTOR_UNAVAILABLE`. `@Test` → 333. CI green on round 2 (one ktlint fix).
+- **T5b done** — `6ba0e21..e61aff8`: CaptureService, CaptureSession, ImageFrame, CaptureNotification, CaptureLog,
+  manifest, ARCHITECTURE v0.6.2. CI green on round 2 (a type-inference cycle), run 43384898737. Lead read
+  CaptureSession and CaptureService line by line against the Android 14+ rules (startForeground before
+  getMediaProjection, callback before the virtual display, one virtual display per token) and against the
+  official `onCapturedContentResize` docs (fires at start and on rotation; size = maximum window metrics).
+  Two suppressions: lint `WrongConstant` for `ImageReader` + `PixelFormat.RGBA_8888`, and `getRealSize` below
+  API 30. Not run on a device yet. Reviewer to look at: `applyGeometry` runs on every `onDisplayChanged`
+  (cheap, but it republishes the state each time).
 
 ## Then (lead)
 `android-reviewer` on the full diff → fixes via implementer → PR "M0b: screen-capture overlay" with

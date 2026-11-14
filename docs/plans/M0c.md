@@ -200,7 +200,10 @@ brings today's marks back.
 sentence left by PR #5; §6.7 new diagnostics fields; §12 rows for M0c and M0d; §15 change entry),
 `docs/TEST_CHECKLIST.md` (section "M0c — import a model" from the acceptance list below).
 
-### T8 — Review fixes (android-reviewer, 2026-11-14) · M · runs after T6
+### T8 — Review fixes (android-reviewer, 2026-11-14) · M · runs after R1
+**Scope after R1 (a parallel session landed R1-1…R1-10 at 1c86102, CI red on spotless only):** first make
+spotless green (`ModelImporterTest.kt` ~508). W1 is done by R1-2 and S3 by R1-5 — only add the two-thread test
+below if R1 has no equivalent. Do W2, S5, S6, S7, S8 only where R1 did not already cover them.
 **Files:** `app/modelimport/{ModelImporter,ImportedModelStore}.kt`, `MainActivity.kt`, control reducer/state if
 needed, `docs/ARCHITECTURE.md` §5, `docs/TEST_CHECKLIST.md` M0c block 5; tests in the matching `*Test.kt`.
 - **W1 one import at a time, process-wide.** A process-wide guard (e.g. `AtomicBoolean` in `ModelImporter`'s

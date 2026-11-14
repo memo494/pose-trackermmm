@@ -57,7 +57,8 @@ People of 12 to 15 % of the video height stay undetected. Version 1 accepts one 
   while the capture is stopped.
 - **D2 Accepted layout, version 1 (fail closed).** Exactly one float32 input `[1, 3, S, S]` (NCHW, square, `S` a
   multiple of 32 inside the limits in `TrackerConfig`) and exactly one float32 output `[1, N, 57]` (end-to-end
-  pose head, 17 keypoints, `N` > 0). This is the layout of the bundled models and of default `yolo26*-pose`
+  pose head, 17 keypoints, 0 < `N` <= 300: the vendored decoder treats 57 columns as end-to-end only up to 300
+  rows; review R1-1). This is the layout of the bundled models and of default `yolo26*-pose`
   LiteRT exports. Anything else (detect models, the classic `[1, 56, N]` head, another keypoint count, NHWC,
   non-square) is refused with a message that names the shapes found. Rectangular inputs come with M1.
 - **D3 The real tensors decide.** Validation reads the tensor shapes from the model itself through LiteRT
@@ -204,6 +205,28 @@ sentence left by PR #5; §6.7 new diagnostics fields; §12 rows for M0c and M0d;
 `docs/progress/M0c.md`, `docs/REPO_MAP.md`, PR text ending with "How to test on the phone" → ask the owner
 before merging.
 
+## Review R1 (android-reviewer, whole diff 32c6fba...5a2207c, 2026-11-14)
+No blockers. Expected verdict for the real 640 file: sniff ok → probe reads `args_0` `[1,3,640,640]` and
+`output_0` `[1,300,57]` → `Accepted(640, 300)` → loads at Start like the bundled 416 model. Not verifiable
+without a phone: whether LiteRT needs the `.tflite` extension, the GPU program cache with equal cache keys, speed.
+
+Fixes taken (one implementer pass):
+| # | Finding | Fix |
+|---|---|---|
+| R1-1 | The rules accept any `N`; the vendored decoder needs `N` <= 300, so such a model would import and then fail at every Start | `IMPORT_MAX_OUTPUT_ROWS` = 300, rejection `OUTPUT_ROWS` |
+| R1-2 | A rotation during an import re-enables Import; two imports share one temp file, the first can accept the second's bytes | single-flight flag in `ModelImporter`, `importing` seeded from it |
+| R1-3 | `RedrawPolicy` redraws on keypoints that are no longer drawn | compare only what is drawn (`keypointsDrawn`) |
+| R1-4 | The probe opens a temp file without the `.tflite` extension | temp name ends in `.tflite` |
+| R1-5 | GPU cache key = file name + byte size: two imports of equal size share it | stored file named by content (`model-<sha16>.tflite`) |
+| R1-6 | An orphan model file after a process death cannot be cleared from the screen | **Use built-in model** is shown whenever a stored file exists |
+| R1-7 | A process death between accept and clearing the guard leaves a stale trip | the guard is cleared inside `accept`, under the same lock |
+| R1-8 | Two failure texts are hard-coded English | typed failure kinds, string resources |
+| R1-9 | A probe trip also switches off the previous imported model; the notice does not say so | notice text |
+| R1-10 | `publish_tag` could clobber assets of any release except `latest` | tag must start with `models` |
+
+Not taken now: format arguments for the numbers repeated in strings (nit). The Stop-during-load race: the
+reviewer could not construct a leak (teardown runs on the same looper after `startCapture`).
+
 ## Acceptance on the phone (becomes the checklist section)
 1. Download `yolo26n-pose_640.tflite` from the `models` release. In the app, stopped: **Import model** → pick the
    file. The screen shows the file name and `640`.
@@ -231,3 +254,4 @@ before merging.
 | T5 | done, android CI green | a421689, 9040b7a | reducer: model block (`activeModel`, `importing`, `importResult`, `modelNotice`), events/effects per plan, `ControlStep.importUri` carries the picked uri; `control/ControlModelMapper` maps outcomes and stored state to pure data and every enum value to one string; `MainActivity` runs import/clear/read on `Dispatchers.IO`; an import lost when the activity dies is documented, no service |
 | T7 | done, android CI green | 5939cc0, 937368c | marks: ring (min 12 dp) + corner brackets by default; switch **Debug marks (box and body points)** persisted off the main thread, passed to the service as an Intent extra; +tests in `HeadRingTest`, `CornerBracketsTest`, `TrackerConfigTest`, `ControlReducerTest` |
 | T6 | done, docs only | see commit | `docs/ARCHITECTURE.md` §6.5, §6.7, §8, §12, §13, §15 and `docs/TEST_CHECKLIST.md` section "M0c — import a model, steadier marks" (7 blocks); the old "dot A/B" bullet now points at the **Debug marks** switch |
+| R1 | — | | review fixes R1-1 … R1-10 |

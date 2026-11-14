@@ -200,6 +200,29 @@ brings today's marks back.
 sentence left by PR #5; §6.7 new diagnostics fields; §12 rows for M0c and M0d; §15 change entry),
 `docs/TEST_CHECKLIST.md` (section "M0c — import a model" from the acceptance list below).
 
+### T8 — Review fixes (android-reviewer, 2026-11-14) · M · runs after T6
+**Files:** `app/modelimport/{ModelImporter,ImportedModelStore}.kt`, `MainActivity.kt`, control reducer/state if
+needed, `docs/ARCHITECTURE.md` §5, `docs/TEST_CHECKLIST.md` M0c block 5; tests in the matching `*Test.kt`.
+- **W1 one import at a time, process-wide.** A process-wide guard (e.g. `AtomicBoolean` in `ModelImporter`'s
+  companion) is taken *before* `newTempFile()` and released in `finally`; a second import while it is held returns
+  `Failed(BUSY)` without touching `import.tmp`. Expose it (`StateFlow<Boolean>` or getter) so a recreated
+  `MainActivity` starts with `importing = true` and Start / **Use built-in model** stay disabled until it ends.
+- **W2 thread table.** ARCHITECTURE §5 rows: probe `CompiledModel` (IO worker, CPU, created and closed in one
+  call); `ImportedModelStore` (any worker, process lock, refuses main); `ModelStatusHolder` (any thread,
+  `AtomicReference`); capture thread hashes the imported file before loading.
+- **S5** delete a leftover `import.tmp` on the first store access of the process (not while an import holds the guard).
+- **S6** sniff the first bytes during the copy and stop early when the file is not TFLite.
+- **S7** checklist block 5: both "too small" and "not a TensorFlow Lite" texts count as a pass.
+- **S8** a saved Debug-marks value read after the user already toggled the switch must not overwrite the toggle.
+
+**Tests first:** two imports on two threads with a blocking fake probe → second is `BUSY`, first's temp file intact;
+recreated-activity state reads `importing = true` while the guard is held; leftover temp deleted on first access but
+not during an import; early stop on a non-TFLite stream (bytes read < file size); reducer ignores a late load after
+a toggle. `@Test` count only goes up.
+**Acceptance:** verify green; rotating during an import cannot start a second one.
+Not in scope (owner/M1): reviewer S3 (GPU cache key by file name+size) and S4 (a PROBE trip also disables the
+previously accepted model — needs the owner's OK).
+
 ## Then (lead)
 `android-reviewer` on the whole diff → fixes through the implementer → PR ready, CI green → handoff
 `docs/progress/M0c.md`, `docs/REPO_MAP.md`, PR text ending with "How to test on the phone" → ask the owner

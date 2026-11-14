@@ -508,7 +508,13 @@ class ModelImporterTest {
 
         assertThat(outcome).isEqualTo(ImportOutcome.Failed(FailureKind.GUARD_NOT_STORED))
         assertThat(probeCalls).isEqualTo(0)
-        assertThat(directory.list()?.toList().orEmpty().filter { it.startsWith("model") }).isEmpty()
+        assertThat(
+            directory
+                .list()
+                ?.toList()
+                .orEmpty()
+                .filter { it.startsWith("model") },
+        ).isEmpty()
     }
 
     @Test

@@ -5,6 +5,7 @@ import com.memo494.posetracker.R
 import com.memo494.posetracker.core.modelimport.ImportRejection
 import com.memo494.posetracker.core.modelimport.SniffRejection
 import com.memo494.posetracker.modelimport.BuiltInReason
+import com.memo494.posetracker.modelimport.FailureKind
 import com.memo494.posetracker.modelimport.ImportOutcome
 import com.memo494.posetracker.modelimport.ModelChoice
 import com.memo494.posetracker.modelimport.ModelFallback
@@ -23,7 +24,15 @@ internal object ControlModelMapper {
         when (outcome) {
             is ImportOutcome.Accepted -> ImportSummary.Accepted(outcome.meta.displayName, outcome.meta.inputSize)
             is ImportOutcome.Rejected -> ImportSummary.Rejected(reason(outcome.kind), outcome.details)
-            is ImportOutcome.Failed -> ImportSummary.Failed(outcome.message)
+            is ImportOutcome.Failed -> ImportSummary.Failed(failure(outcome.kind), outcome.message)
+        }
+
+    /** The one [ImportFailure] of a failure kind. */
+    fun failure(kind: FailureKind): ImportFailure =
+        when (kind) {
+            FailureKind.BUSY -> ImportFailure.BUSY
+            FailureKind.GUARD_NOT_STORED -> ImportFailure.GUARD_NOT_STORED
+            FailureKind.IO -> ImportFailure.IO
         }
 
     /** The one [ModelRejectionReason] of a refusal. */
@@ -54,6 +63,7 @@ internal object ControlModelMapper {
             ImportRejection.OUTPUT_COUNT -> ModelRejectionReason.OUTPUT_COUNT
             ImportRejection.OUTPUT_TYPE -> ModelRejectionReason.OUTPUT_TYPE
             ImportRejection.OUTPUT_CLASSIC_HEAD -> ModelRejectionReason.OUTPUT_CLASSIC_HEAD
+            ImportRejection.OUTPUT_ROWS -> ModelRejectionReason.OUTPUT_ROWS
             ImportRejection.OUTPUT_SHAPE -> ModelRejectionReason.OUTPUT_SHAPE
         }
 
@@ -79,7 +89,7 @@ internal object ControlModelMapper {
                         ModelFallback.GUARD_NOT_STORED -> ModelNotice(ModelNoticeKind.GUARD_NOT_STORED)
                         else -> null
                     }
-                ControlEvent.ModelStateLoaded(active, notice)
+                ControlEvent.ModelStateLoaded(active, notice, stored.anyFileStored)
             }
 
             is ModelChoice.BuiltIn -> {
@@ -90,7 +100,7 @@ internal object ControlModelMapper {
                         BuiltInReason.GUARD_TRIPPED_LOAD -> ModelNotice(ModelNoticeKind.GUARD_TRIPPED_LOAD)
                         null -> unreadableNotice(status)
                     }
-                ControlEvent.ModelStateLoaded(ActiveModel.BuiltIn, notice)
+                ControlEvent.ModelStateLoaded(ActiveModel.BuiltIn, notice, stored.anyFileStored)
             }
         }
 
@@ -120,7 +130,17 @@ internal object ControlModelMapper {
             ModelRejectionReason.OUTPUT_COUNT -> R.string.model_reject_output_count
             ModelRejectionReason.OUTPUT_TYPE -> R.string.model_reject_output_type
             ModelRejectionReason.OUTPUT_CLASSIC_HEAD -> R.string.model_reject_output_classic_head
+            ModelRejectionReason.OUTPUT_ROWS -> R.string.model_reject_output_rows
             ModelRejectionReason.OUTPUT_SHAPE -> R.string.model_reject_output_shape
+        }
+
+    /** The sentence of a failed import; the one for [ImportFailure.IO] takes the technical message as its argument. */
+    @StringRes
+    fun failureRes(failure: ImportFailure): Int =
+        when (failure) {
+            ImportFailure.BUSY -> R.string.model_result_busy
+            ImportFailure.GUARD_NOT_STORED -> R.string.model_result_guard_not_stored
+            ImportFailure.IO -> R.string.model_result_failed
         }
 
     /** The sentence of a model notice. */

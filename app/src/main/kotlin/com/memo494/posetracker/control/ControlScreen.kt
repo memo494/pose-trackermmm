@@ -162,7 +162,7 @@ private fun ModelBlock(
         OutlinedButton(onClick = onImportClick, enabled = idle, modifier = Modifier.fillMaxWidth()) {
             Text(stringResource(R.string.model_import))
         }
-        if (state.activeModel is ActiveModel.Imported || modelNotice != null) {
+        if (state.activeModel is ActiveModel.Imported || modelNotice != null || state.modelFileStored) {
             OutlinedButton(onClick = onUseBuiltInClick, enabled = idle, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.model_use_built_in))
             }
@@ -193,7 +193,7 @@ private fun ImportResultText(result: ImportSummary) {
 
         is ImportSummary.Failed -> {
             Text(
-                text = stringResource(R.string.model_result_failed, result.message),
+                text = stringResource(ControlModelMapper.failureRes(result.kind), result.message.orEmpty()),
                 color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodyMedium,
             )

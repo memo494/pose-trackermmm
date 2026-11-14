@@ -390,12 +390,15 @@ step back up after 60 s below the threshold. Every step is logged and shown in t
   and copies only the `.tflite` files and `model_info.json` into the APK assets.
 - No INT8 / w8a16 (loses the end-to-end head; w8a16 falls off the GPU).
 - **Imported models (M0c).** The app has one imported-model slot besides the bundled ones.
-  - *Storage:* the picked file is copied into `noBackupFilesDir/imported/` while its sha256 is computed; importing
-    again replaces it, **Use built-in model** deletes it. Import and reset work only while the capture is stopped.
+  - *Storage:* the picked file is copied into `noBackupFilesDir/imported/` while its sha256 is computed and stored
+    as `model-<first 16 hex of sha256>.tflite` (named by content, so two imports of equal size never share the
+    name the GPU program cache is keyed by); importing again replaces it, **Use built-in model** deletes it. Import
+    and reset work only while the capture is stopped; one import runs at a time per process.
   - *Accepted layout, version 1:* exactly one float32 input `[1, 3, S, S]` (channels first, square, `S` a
     multiple of 32 between `importMinInputSize` and `importMaxInputSize`) and exactly one float32 output
-    `[1, N, 57]` (end-to-end pose head, 17 keypoints). Anything else is refused with a reason that names the
-    shapes found; rectangular inputs come with M1.
+    `[1, N, 57]` (end-to-end pose head, 17 keypoints, `0 < N <= 300`: the vendored decoder treats 57 columns as
+    end-to-end only up to 300 rows). Anything else is refused with a reason that names the shapes found;
+    rectangular inputs come with M1.
   - *The real tensors decide:* the shapes are read from the model itself through LiteRT (`ModelProbe`, CPU
     `CompiledModel`, worker thread); metadata inside the file is never trusted.
   - *Never worse than the built-in model:* if the imported model cannot be loaded at Start, the session runs

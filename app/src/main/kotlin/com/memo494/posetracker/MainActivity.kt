@@ -31,6 +31,8 @@ import com.memo494.posetracker.control.ControlModelMapper
 import com.memo494.posetracker.control.ControlReducer
 import com.memo494.posetracker.control.ControlScreen
 import com.memo494.posetracker.control.ControlState
+import com.memo494.posetracker.control.ImportFailure
+import com.memo494.posetracker.control.ImportResults
 import com.memo494.posetracker.control.ImportSummary
 import com.memo494.posetracker.core.TrackerConfig
 import com.memo494.posetracker.diagnostics.AppLog
@@ -56,13 +58,17 @@ import java.io.IOException
  * Every decision comes from [ControlReducer]; this class only reads the system and performs the effect it returns.
  *
  * Model import: the picked file is copied at once by [ModelImporter] on `Dispatchers.IO`, so no persistable URI
- * permission is needed. The import belongs to this activity's `lifecycleScope` and there is no service for it: if
- * the activity is destroyed mid-import (rotation, the system closing it) the result is not shown, the
- * `importing` flag of the new instance starts as `false`, and the copy may be lost or finish unseen (the next
- * model-state read shows what was stored). The store refuses a second import while one runs.
+ * permission is needed. There is no service for it. The import is single flight per process
+ * ([ModelImporter.isImporting]): a recreated activity (rotation) seeds `importing` from it, so Import, Use
+ * built-in model and Start stay disabled until the running import ends, and the result goes through the
+ * process-wide [ImportResults] that every activity collects, so the new one learns it and reloads the model state.
+ * If the whole process dies mid-import, the copy is lost and the next model-state read shows what was stored.
  */
 class MainActivity : ComponentActivity() {
-    private val controlState = mutableStateOf(ControlState())
+    /** The last [ImportResults] sequence this activity handled; read before `importing` is seeded (see [onImportResult]). */
+    private var seenImportSequence = ImportResults.latest.value.sequence
+
+    private val controlState = mutableStateOf(ControlState(importing = ModelImporter.isImporting()))
     private val diagnosticsState = mutableStateOf(DiagnosticsUiState())
     private var seenStartFailures = 0
 
@@ -129,6 +135,7 @@ class MainActivity : ComponentActivity() {
                         loadModelState()
                     }
                 }
+                launch { ImportResults.latest.collect { onImportResult(it) } }
                 CaptureService.startFailures.collect { failures ->
                     if (failures > seenStartFailures) dispatch(ControlEvent.StartFailed)
                     seenStartFailures = failures
@@ -267,15 +274,31 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** Imports the picked document off the main thread, then reports the outcome and reads the model state again. */
+    /**
+     * Imports the picked document off the main thread and publishes the outcome to [ImportResults]; the collector
+     * ([onImportResult]) reports it, also in an activity that was recreated meanwhile. The publish runs inside the
+     * worker block, so a cancelled `lifecycleScope` cannot lose it.
+     */
     private fun runImport(uriString: String?) {
         if (uriString == null) return
         lifecycleScope.launch {
-            val summary = withContext(Dispatchers.IO) { importOrFail(Uri.parse(uriString)) }
-            // A new model is a new situation: what the last session said about the old one no longer applies.
-            if (summary is ImportSummary.Accepted) acknowledgedStatus = ModelStatusHolder.latest()
-            dispatch(ControlEvent.ImportFinished(summary))
+            withContext(Dispatchers.IO) { ImportResults.publish(importOrFail(Uri.parse(uriString))) }
         }
+    }
+
+    /**
+     * A finished import. Each result is handled once per activity (`seenImportSequence`, read in the field
+     * initialiser before `importing` is seeded, so an import that ends in between is still delivered). When this
+     * activity is waiting for it the reducer finishes the import; otherwise (it started after the import began and
+     * missed the flag) only the model state is read again.
+     */
+    private fun onImportResult(result: ImportResults.Result) {
+        val summary = result.summary
+        if (result.sequence <= seenImportSequence || summary == null) return
+        seenImportSequence = result.sequence
+        // A new model is a new situation: what the last session said about the old one no longer applies.
+        if (summary is ImportSummary.Accepted) acknowledgedStatus = ModelStatusHolder.latest()
+        if (controlState.value.importing) dispatch(ControlEvent.ImportFinished(summary)) else loadModelState()
     }
 
     /** Worker thread. Never throws: any failure, `Error`s included, becomes [ImportSummary.Failed]. */
@@ -287,7 +310,7 @@ class MainActivity : ComponentActivity() {
             ControlModelMapper.summary(importer.import(source, name, size))
         } catch (t: Throwable) {
             AppLog.log("model import failed", t)
-            ImportSummary.Failed(t.javaClass.simpleName + (t.message?.let { ": $it" } ?: ""))
+            ImportSummary.Failed(ImportFailure.IO, t.javaClass.simpleName + (t.message?.let { ": $it" } ?: ""))
         }
 
     /**

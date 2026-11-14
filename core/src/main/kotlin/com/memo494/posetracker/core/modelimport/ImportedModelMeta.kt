@@ -58,7 +58,7 @@ data class ImportedModelMeta(
          * bad number or one not in canonical decimal form, a bad SHA-256, a name [sanitiseName] would change,
          * [bytes] outside 1..[TrackerConfig.MAX_IMPORT_BYTES_LIMIT], [inputSize] outside
          * [TrackerConfig.MIN_IMPORT_INPUT_SIZE_LIMIT]..[TrackerConfig.MAX_IMPORT_INPUT_SIZE_LIMIT] or not a multiple
-         * of [TrackerConfig.IMPORT_INPUT_SIZE_STEP], [outputRows] outside 1..[TrackerConfig.IMPORT_META_MAX_OUTPUT_ROWS]).
+         * of [TrackerConfig.IMPORT_INPUT_SIZE_STEP], [outputRows] outside 1..[TrackerConfig.IMPORT_MAX_OUTPUT_ROWS]).
          * These ranges are sanity checks independent of the configured import limits. Never throws.
          */
         fun decode(text: String): ImportedModelMeta? {
@@ -76,7 +76,7 @@ data class ImportedModelMeta(
                     bytes in 1L..TrackerConfig.MAX_IMPORT_BYTES_LIMIT &&
                     inputSize in TrackerConfig.MIN_IMPORT_INPUT_SIZE_LIMIT.toLong()..TrackerConfig.MAX_IMPORT_INPUT_SIZE_LIMIT.toLong() &&
                     inputSize % TrackerConfig.IMPORT_INPUT_SIZE_STEP == 0L &&
-                    outputRows in 1L..TrackerConfig.IMPORT_META_MAX_OUTPUT_ROWS.toLong()
+                    outputRows in 1L..TrackerConfig.IMPORT_MAX_OUTPUT_ROWS.toLong()
             if (!valid) return null
             return ImportedModelMeta(name, sha256, bytes, inputSize.toInt(), outputRows.toInt())
         }

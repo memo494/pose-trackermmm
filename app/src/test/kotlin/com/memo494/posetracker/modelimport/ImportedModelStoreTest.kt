@@ -30,6 +30,9 @@ class ImportedModelStoreTest {
 
     private val directory get() = File(tmp.root, "imported")
 
+    private val oldName = "model-" + "a".repeat(16) + ".tflite"
+    private val newName = "model-" + "b".repeat(16) + ".tflite"
+
     private fun meta(
         name: String,
         digit: Char,
@@ -68,9 +71,9 @@ class ImportedModelStoreTest {
         assertThat(store.accept(temp, newMeta)).isTrue()
 
         assertThat(store.state()).isEqualTo(StoredModelState(newMeta, fileExists = true, guard = ImportGuardState.Idle))
-        assertThat(store.modelFile.readBytes()).isEqualTo(newBytes)
+        assertThat(store.modelFileFor(newMeta).readBytes()).isEqualTo(newBytes)
         assertThat(temp.exists()).isFalse()
-        assertThat(directory.list()!!.toSet()).containsExactly("model.tflite", "meta.txt")
+        assertThat(directory.list()!!.toSet()).containsExactly(newName, "meta.txt")
     }
 
     @Test
@@ -81,7 +84,108 @@ class ImportedModelStoreTest {
         assertThat(store.accept(stage(store, newBytes), newMeta)).isTrue()
 
         assertThat(store.state().meta).isEqualTo(newMeta)
-        assertThat(store.modelFile.readBytes()).isEqualTo(newBytes)
+        assertThat(store.modelFileFor(newMeta).readBytes()).isEqualTo(newBytes)
+    }
+
+    @Test
+    fun accept_removesEveryOtherModelFile() {
+        val store = newStore()
+        storeOldModel(store)
+        File(directory, "model.tflite").writeText("pre-R1 name")
+        File(directory, "model-" + "c".repeat(16) + ".tflite").writeText("stray")
+        File(directory, "notes.txt").writeText("not a model file")
+
+        assertThat(store.accept(stage(store, newBytes), newMeta)).isTrue()
+
+        assertThat(directory.list()!!.toSet()).containsExactly(newName, "meta.txt", "notes.txt")
+        assertThat(store.state().anyFileStored).isTrue()
+    }
+
+    @Test
+    fun twoModelsOfEqualSize_getDifferentFileNames() {
+        val store = newStore()
+        val first = meta("first.tflite", 'a', 300)
+        val second = meta("second.tflite", 'b', 300)
+
+        assertThat(store.modelFileFor(first).name).isEqualTo(oldName)
+        assertThat(store.modelFileFor(second).name).isEqualTo(newName)
+        assertThat(store.modelFileFor(first).name).isNotEqualTo(store.modelFileFor(second).name)
+    }
+
+    @Test
+    fun acceptingTheSameContentAgain_keepsOneFile() {
+        val store = newStore()
+        storeOldModel(store)
+
+        assertThat(store.accept(stage(store, oldBytes), oldMeta.copy(displayName = "again.tflite"))).isTrue()
+
+        assertThat(directory.list()!!.toSet()).containsExactly(oldName, "meta.txt")
+        assertThat(store.modelFileFor(oldMeta).readBytes()).isEqualTo(oldBytes)
+    }
+
+    @Test
+    fun accept_storesTheGuardAsIdle_liftingATrip() {
+        val store = newStore()
+        store.setGuard(ImportGuardState.Tripped(ImportStage.PROBE))
+
+        assertThat(store.accept(stage(store, newBytes), newMeta)).isTrue()
+
+        assertThat(prefs.text).isEqualTo("idle")
+        assertThat(store.state().guard).isEqualTo(ImportGuardState.Idle)
+    }
+
+    @Test
+    fun failedAccept_keepsATrip() {
+        val store = newStore()
+        storeOldModel(store)
+        store.setGuard(ImportGuardState.Tripped(ImportStage.LOAD))
+        failRenameOf = newName
+
+        assertThat(store.accept(stage(store, newBytes), newMeta)).isFalse()
+
+        assertThat(store.state().guard).isEqualTo(ImportGuardState.Tripped(ImportStage.LOAD))
+    }
+
+    @Test
+    fun guardThatCannotBeStored_failsTheAcceptAndKeepsThePreviousModel() {
+        val store = newStore()
+        storeOldModel(store)
+        val temp = stage(store, newBytes)
+        prefs.failWrites = true
+
+        assertThat(store.accept(temp, newMeta)).isFalse()
+
+        prefs.failWrites = false
+        assertThat(store.state()).isEqualTo(StoredModelState(oldMeta, fileExists = true, guard = ImportGuardState.Idle))
+        assertThat(directory.list()!!.toSet() - temp.name).containsExactly(oldName, "meta.txt")
+    }
+
+    @Test
+    fun orphanModelFileWithoutMeta_isReportedAsStored_andClearRemovesIt() {
+        val store = newStore()
+        directory.mkdirs()
+        File(directory, newName).writeText("left by a process death")
+
+        val state = store.state()
+
+        assertThat(state.meta).isNull()
+        assertThat(state.fileExists).isFalse()
+        assertThat(state.anyFileStored).isTrue()
+        assertThat(store.clear()).isTrue()
+        assertThat(store.state().anyFileStored).isFalse()
+        assertThat(directory.list()!!.toList()).isEmpty()
+    }
+
+    @Test
+    fun clear_removesEveryModelFileNotJustTheOneInTheMeta() {
+        val store = newStore()
+        storeOldModel(store)
+        File(directory, "model.tflite").writeText("pre-R1 name")
+        File(directory, newName).writeText("orphan")
+
+        assertThat(store.clear()).isTrue()
+
+        assertThat(directory.list()!!.toList()).isEmpty()
     }
 
     @Test
@@ -100,7 +204,7 @@ class ImportedModelStoreTest {
     fun missingModelFile_keepsTheMetaButReportsNoFile() {
         val store = newStore()
         storeOldModel(store)
-        assertThat(store.modelFile.delete()).isTrue()
+        assertThat(store.modelFileFor(oldMeta).delete()).isTrue()
 
         val state = store.state()
 
@@ -138,7 +242,8 @@ class ImportedModelStoreTest {
 
         val temp = store.newTempFile()
 
-        assertThat(temp.parentFile).isEqualTo(store.modelFile.parentFile)
+        assertThat(temp.parentFile).isEqualTo(store.modelFileFor(newMeta).parentFile)
+        assertThat(temp.name).endsWith(".tflite")
         assertThat(temp.exists()).isFalse()
     }
 
@@ -230,13 +335,13 @@ class ImportedModelStoreTest {
     fun failedModelRename_leavesTheOldModelAndMeta() {
         val store = newStore()
         storeOldModel(store)
-        failRenameOf = "model.tflite"
+        failRenameOf = newName
 
         val accepted = store.accept(stage(store, newBytes), newMeta)
 
         assertThat(accepted).isFalse()
         assertThat(store.state()).isEqualTo(StoredModelState(oldMeta, fileExists = true, guard = ImportGuardState.Idle))
-        assertThat(store.modelFile.readBytes()).isEqualTo(oldBytes)
+        assertThat(store.modelFileFor(oldMeta).readBytes()).isEqualTo(oldBytes)
         assertThat(File(directory, "meta.tmp").exists()).isFalse()
     }
 
@@ -271,14 +376,14 @@ class ImportedModelStoreTest {
     fun processDeathBeforeTheModelRename_leavesNoMeta() {
         val store = newStore()
         storeOldModel(store)
-        dieOnRenameOf = "model.tflite"
+        dieOnRenameOf = newName
 
         assertThrows(IllegalStateException::class.java) { store.accept(stage(store, newBytes), newMeta) }
         dieOnRenameOf = null
 
         val state = newStore().state()
         assertThat(state.meta).isNull()
-        assertThat(store.modelFile.readBytes()).isEqualTo(oldBytes)
+        assertThat(store.modelFileFor(oldMeta).readBytes()).isEqualTo(oldBytes)
     }
 
     @Test
@@ -290,7 +395,7 @@ class ImportedModelStoreTest {
 
         assertThat(accepted).isFalse()
         assertThat(store.state().meta).isEqualTo(oldMeta)
-        assertThat(store.modelFile.readBytes()).isEqualTo(oldBytes)
+        assertThat(store.modelFileFor(oldMeta).readBytes()).isEqualTo(oldBytes)
     }
 
     // ---- the injected main-thread check ----
@@ -302,7 +407,7 @@ class ImportedModelStoreTest {
         thread.onMainThread = true
 
         assertThrows(IllegalStateException::class.java) { store.state() }
-        assertThrows(IllegalStateException::class.java) { store.modelFile }
+        assertThrows(IllegalStateException::class.java) { store.modelFileFor(newMeta) }
         assertThrows(IllegalStateException::class.java) { store.newTempFile() }
         assertThrows(IllegalStateException::class.java) { store.accept(temp, newMeta) }
         assertThrows(IllegalStateException::class.java) { store.clear() }

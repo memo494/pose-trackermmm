@@ -22,6 +22,11 @@ internal data class ControlState(
     val importResult: ImportSummary? = null,
     /** Why the built-in model is used although an imported one may be expected, or `null`. */
     val modelNotice: ModelNotice? = null,
+    /**
+     * `true` when any imported model file is stored, even one no meta describes (an orphan left by a process
+     * death), so **Use built-in model** can remove it.
+     */
+    val modelFileStored: Boolean = false,
     /** Side of the built-in model's square input, in model pixels (Mdl), for the "Built-in (416)" line. */
     val builtInInputSize: Int = TrackerConfig.DEFAULT_MODEL_INPUT_SIZE,
     /**
@@ -70,7 +75,20 @@ internal enum class ModelRejectionReason {
     OUTPUT_COUNT,
     OUTPUT_TYPE,
     OUTPUT_CLASSIC_HEAD,
+    OUTPUT_ROWS,
     OUTPUT_SHAPE,
+}
+
+/** Why an import failed without a verdict on the file: one value per kind of the importer, so each has its own sentence. */
+internal enum class ImportFailure {
+    /** Another import is still running. */
+    BUSY,
+
+    /** The crash marker could not be saved, so the import was not run. */
+    GUARD_NOT_STORED,
+
+    /** An I/O or other unexpected error; [ImportSummary.Failed.message] says which. */
+    IO,
 }
 
 /** What an import came to, as small pure data (the importer's own outcome types stay out of the state). */
@@ -87,9 +105,10 @@ internal sealed interface ImportSummary {
         val details: String,
     ) : ImportSummary
 
-    /** An unexpected error (not a verdict on the file); [message] is a short technical line. */
+    /** The import did not run to a verdict ([kind]); [message] is a short technical line for [ImportFailure.IO], else `null`. */
     data class Failed(
-        val message: String,
+        val kind: ImportFailure,
+        val message: String?,
     ) : ImportSummary
 }
 
@@ -196,6 +215,7 @@ internal sealed interface ControlEvent {
     data class ModelStateLoaded(
         val active: ActiveModel,
         val notice: ModelNotice?,
+        val fileStored: Boolean = false,
     ) : ControlEvent
 }
 
@@ -353,7 +373,11 @@ internal object ControlReducer {
         val next =
             when (summary) {
                 is ImportSummary.Accepted -> {
-                    finished.copy(activeModel = ActiveModel.Imported(summary.displayName, summary.inputSize), modelNotice = null)
+                    finished.copy(
+                        activeModel = ActiveModel.Imported(summary.displayName, summary.inputSize),
+                        modelNotice = null,
+                        modelFileStored = true,
+                    )
                 }
 
                 is ImportSummary.Rejected, is ImportSummary.Failed -> {
@@ -365,7 +389,8 @@ internal object ControlReducer {
 
     private fun onUseBuiltIn(state: ControlState): ControlStep {
         if (modelBusy(state)) return ControlStep(state, null)
-        val cleared = state.copy(activeModel = ActiveModel.BuiltIn, importResult = null, modelNotice = null)
+        val cleared =
+            state.copy(activeModel = ActiveModel.BuiltIn, importResult = null, modelNotice = null, modelFileStored = false)
         return ControlStep(cleared, ControlEffect.CLEAR_IMPORTED)
     }
 
@@ -375,6 +400,9 @@ internal object ControlReducer {
     ): ControlStep {
         // A read that finishes during an import may predate it; the import asks for a fresh read when it ends.
         if (state.importing) return ControlStep(state, null)
-        return ControlStep(state.copy(activeModel = event.active, modelNotice = event.notice), null)
+        return ControlStep(
+            state.copy(activeModel = event.active, modelNotice = event.notice, modelFileStored = event.fileStored),
+            null,
+        )
     }
 }

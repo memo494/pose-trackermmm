@@ -49,8 +49,8 @@ class ImportedModelRulesTest {
     }
 
     @Test
-    fun outputRows_areReportedForAnyPositiveN() {
-        for (rows in listOf(1, 300, 8400)) {
+    fun outputRows_areReportedForAnyPositiveNUpTo300() {
+        for (rows in listOf(1, 299, 300)) {
             val result = check(tensor(1, 3, 640, 640), tensor(1, rows, 57))
 
             assertThat(result).isEqualTo(ImportCheck.Accepted(inputSize = 640, outputRows = rows))
@@ -235,6 +235,18 @@ class ImportedModelRulesTest {
     }
 
     @Test
+    fun outputRowsJustAbove300_areRejectedAsOutputRows() {
+        val rejected = assertRejected(check(tensor(1, 3, 640, 640), tensor(1, 301, 57)), ImportRejection.OUTPUT_ROWS)
+
+        assertThat(rejected.details).isEqualTo("input [1,3,640,640] float32; output [1,301,57] float32")
+    }
+
+    @Test
+    fun manyOutputRows_areRejectedAsOutputRows() {
+        assertRejected(check(tensor(1, 3, 640, 640), tensor(1, 8400, 57)), ImportRejection.OUTPUT_ROWS)
+    }
+
+    @Test
     fun otherOutputShapes_areRejectedAsOutputShape() {
         val shapes =
             listOf(
@@ -313,6 +325,7 @@ class ImportedModelRulesTest {
             "output_count",
             "output_type",
             "output_classic_head",
+            "output_rows",
             "output_shape",
         )
     }

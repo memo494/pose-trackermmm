@@ -3,6 +3,7 @@ package com.memo494.posetracker.modelimport
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.SharedPreferences
+import com.memo494.posetracker.core.TrackerConfig
 import com.memo494.posetracker.core.modelimport.ImportGuard
 import com.memo494.posetracker.core.modelimport.ImportGuardState
 import com.memo494.posetracker.core.modelimport.ImportedModelMeta
@@ -15,13 +16,17 @@ import java.util.concurrent.atomic.AtomicBoolean
  * What is stored about the one imported model (M0c D1, D4).
  *
  * @property meta the stored description, or `null` when there is none or it does not decode.
- * @property fileExists whether `model.tflite` exists; it is only meaningful together with [meta].
+ * @property fileExists whether the file named by [meta] (`ImportedModelStore.modelFileFor`) exists; it is only
+ *   meaningful together with [meta].
  * @property guard the crash marker, with the app-start step already applied (a stale `Pending` is `Tripped`).
+ * @property anyFileStored whether any stored model file exists, with or without a [meta] (an orphan left by a
+ *   process death); the screen then offers **Use built-in model**, which removes it. Defaults to [fileExists].
  */
 data class StoredModelState(
     val meta: ImportedModelMeta?,
     val fileExists: Boolean,
     val guard: ImportGuardState,
+    val anyFileStored: Boolean = fileExists,
 )
 
 /** The one string value that holds the encoded [ImportGuardState]; the Android shell is [SharedPreferences]. */
@@ -35,19 +40,26 @@ internal interface GuardPrefs {
 
 /**
  * The one owner of everything on disk for the imported model: the directory `noBackupFilesDir/imported/` with
- * `model.tflite`, one temporary file for the import in progress and `meta.txt`, plus the crash-marker value in
- * `SharedPreferences`.
+ * the model file `model-<first 16 hex of its sha256>.tflite` (named by content, so two different imports never
+ * share a file name: the vendored GPU program cache is keyed by file name and byte size), one temporary file
+ * `import.tflite` for the import in progress (it keeps the `.tflite` extension LiteRT may look at) and
+ * `meta.txt`, plus the crash-marker value in `SharedPreferences`.
  *
  * Threading: every method does disk work, so each one throws [IllegalStateException] when called on the main
  * thread; call them from a worker thread (even the constructor is free of disk work, so it may be built anywhere).
  * Methods are serialised by one process-wide lock, so calls from the import thread and a capture thread are safe.
  *
- * Crash safety of [accept]: the store never leaves a `meta.txt` that describes a different file. It deletes the old
- * meta first, then renames the model into place, then renames the new meta into place. A process death between
- * the steps leaves no meta, which [state] reports as "no imported model". The order "model first, meta second"
- * would leave the old meta next to the new file; the order "new meta first" would leave the new meta next to the old
- * file. When the model rename itself fails, the old meta is written back, so the previous model stays usable.
- * (`PoseDetectors.fromImported` re-checks length and hash anyway.)
+ * Crash safety of [accept]: the store never leaves a `meta.txt` that describes a different file. The meta holds the
+ * sha256 and the file name derives from it, so a meta only ever points at the file with its own name; the order
+ * keeps that true at every instant. [accept] writes the new meta to a scratch file, deletes the old meta, renames
+ * the model into its content name, stores the guard as `Idle`, renames the new meta into place, and only then
+ * deletes the other model files. A process death before the last meta rename leaves no meta, which [state]
+ * reports as "no imported model" (the stray model files are orphans that [clear] and the next [accept] remove);
+ * a death after it leaves the new meta next to its own file and the old one as an orphan. The order "model
+ * first, meta second" would leave the old meta next to the new content; the order "new meta first" would leave
+ * the new meta without its file. When a step before the meta rename fails, the old meta is written back and the
+ * old file was never touched, so the previous model stays usable. (`PoseDetectors.fromImported` re-checks
+ * length and hash anyway.)
  */
 class ImportedModelStore private constructor(
     private val directoryLazy: Lazy<File>,
@@ -84,12 +96,11 @@ class ImportedModelStore private constructor(
         rename: (File, File) -> Boolean = File::renameTo,
     ) : this(lazyOf(directory), lazyOf(guardPrefs), appStartApplied, threadCheck, rename)
 
-    /** The stored model file `model.tflite`; it may not exist. */
-    val modelFile: File
-        get() {
-            threadCheck()
-            return File(directoryLazy.value, MODEL_NAME)
-        }
+    /** The file that holds the model described by [meta]: `model-<first 16 hex of sha256>.tflite`; it may not exist. */
+    fun modelFileFor(meta: ImportedModelMeta): File {
+        threadCheck()
+        return File(directoryLazy.value, modelNameFor(meta))
+    }
 
     /**
      * What is stored now. The first call in a process (this or any other method) applies [ImportGuard.onAppStart]
@@ -101,12 +112,14 @@ class ImportedModelStore private constructor(
         synchronized(LOCK) {
             val guard = currentGuard()
             val directory = directoryLazy.value
-            return StoredModelState(readMeta(File(directory, META_NAME)), isFile(File(directory, MODEL_NAME)), guard)
+            val meta = readMeta(File(directory, META_NAME))
+            val fileExists = meta != null && isFile(File(directory, modelNameFor(meta)))
+            return StoredModelState(meta, fileExists, guard, anyFileStored = fileExists || modelFiles(directory).isNotEmpty())
         }
     }
 
     /**
-     * A fresh, empty temporary file inside the store's directory (the same file system as [modelFile], so
+     * A fresh, empty temporary file inside the store's directory (the same file system as the model files, so
      * [accept] can rename it). Any leftover from an earlier run is deleted first.
      *
      * @throws IOException when the directory cannot be created or the leftover cannot be deleted.
@@ -123,8 +136,10 @@ class ImportedModelStore private constructor(
 
     /**
      * Makes [temp] (from [newTempFile]) the stored model with the description [meta]; see the class comment for
-     * the order. Returns `false` when it failed; the previous model and meta are then unchanged (or, in the rare
-     * case that even restoring the old meta failed, there is no meta: "no imported model"). [temp] is left for the
+     * the order. Also stores the guard as `Idle` inside the same lock (the new file replaces the one that may have
+     * tripped it, and a process death after this call must not leave a stale trip), and removes every other model
+     * file. Returns `false` when it failed; the previous model and meta are then unchanged (or, in the rare case
+     * that even restoring the old meta failed, there is no meta: "no imported model"). [temp] is left for the
      * caller to delete on failure. Never leaves a meta that describes a different file.
      */
     fun accept(
@@ -145,7 +160,7 @@ class ImportedModelStore private constructor(
     }
 
     /**
-     * Deletes the model, the temporary file and the meta, and sets the guard to `Idle` (lifting a trip).
+     * Deletes every model file, the temporary file and the meta, and sets the guard to `Idle` (lifting a trip).
      * Returns `true` only when everything is gone and the guard was stored.
      */
     fun clear(): Boolean {
@@ -155,9 +170,10 @@ class ImportedModelStore private constructor(
             val directory = directoryLazy.value
             // The meta goes first: a meta without a file is harmless, a file with a stale meta is not.
             var done = true
-            for (name in listOf(META_NAME, META_TEMP_NAME, MODEL_NAME, TEMP_NAME)) {
+            for (name in listOf(META_NAME, META_TEMP_NAME, TEMP_NAME)) {
                 done = deleteIfExists(File(directory, name)) && done
             }
+            for (file in modelFiles(directory)) done = deleteIfExists(file) && done
             return prefsLazy.value.write(ImportGuard.encode(ImportGuard.clear())) && done
         }
     }
@@ -189,7 +205,7 @@ class ImportedModelStore private constructor(
         meta: ImportedModelMeta,
     ): Boolean {
         val directory = ensureDirectory() ?: return false
-        val modelFile = File(directory, MODEL_NAME)
+        val modelFile = File(directory, modelNameFor(meta))
         val metaFile = File(directory, META_NAME)
         val metaTemp = File(directory, META_TEMP_NAME)
         val previousMeta = if (metaFile.isFile) readText(metaFile) else null
@@ -199,7 +215,11 @@ class ImportedModelStore private constructor(
             metaTemp.delete()
             return false
         }
-        if (!rename(temp, modelFile)) {
+        val modelFileExistedBefore = modelFile.exists()
+        if (!rename(temp, modelFile) || !prefsLazy.value.write(ImportGuard.encode(ImportGuard.clear()))) {
+            // Nothing else changed yet: put the old meta back. A file that already had this name has the same
+            // content (the name is the hash), so it stays; a file this call created is removed again.
+            if (!modelFileExistedBefore) modelFile.delete()
             metaTemp.delete()
             if (previousMeta != null) writeAtomically(metaFile, metaTemp, previousMeta)
             return false
@@ -208,6 +228,10 @@ class ImportedModelStore private constructor(
         if (!rename(metaTemp, metaFile)) {
             metaTemp.delete()
             return false
+        }
+        // Best effort: a file that cannot be deleted is an orphan, shown by state() and removed by clear().
+        for (file in modelFiles(directory)) {
+            if (file != modelFile) file.delete()
         }
         return true
     }
@@ -264,6 +288,20 @@ class ImportedModelStore private constructor(
             false
         }
 
+    /** Every stored model file in [directory] (any content name, and the pre-R1 `model.tflite`); never `null`. */
+    private fun modelFiles(directory: File): List<File> =
+        try {
+            directory.listFiles { _, name -> isModelFileName(name) }?.toList().orEmpty()
+        } catch (e: SecurityException) {
+            emptyList()
+        }
+
+    private fun isModelFileName(name: String): Boolean =
+        name == LEGACY_MODEL_NAME || (name.startsWith(MODEL_PREFIX) && name.endsWith(MODEL_SUFFIX))
+
+    private fun modelNameFor(meta: ImportedModelMeta): String =
+        MODEL_PREFIX + meta.sha256.take(TrackerConfig.STAGED_MODEL_SHA_PREFIX_LENGTH) + MODEL_SUFFIX
+
     private fun deleteIfExists(file: File): Boolean = !file.exists() || file.delete()
 
     /** The Android shell of [GuardPrefs]: one string in private preferences. */
@@ -279,8 +317,14 @@ class ImportedModelStore private constructor(
 
     private companion object {
         const val DIRECTORY_NAME = "imported"
-        const val MODEL_NAME = "model.tflite"
-        const val TEMP_NAME = "import.tmp"
+        const val MODEL_PREFIX = "model-"
+        const val MODEL_SUFFIX = ".tflite"
+
+        /** The name before review R1-5; no longer written, still removed. */
+        const val LEGACY_MODEL_NAME = "model.tflite"
+
+        /** Ends in `.tflite`: LiteRT may look at the extension when it opens a path (R1-4). */
+        const val TEMP_NAME = "import.tflite"
         const val META_NAME = "meta.txt"
         const val META_TEMP_NAME = "meta.tmp"
         const val PREFS_NAME = "imported_model"

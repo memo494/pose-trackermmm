@@ -55,7 +55,14 @@ enum class ImportRejection(
      */
     OUTPUT_CLASSIC_HEAD("output_classic_head"),
 
-    /** Any other output that is not `[1, N, 57]` with `N` > 0 (other keypoint count, detect model, wrong rank). */
+    /**
+     * The output is `[1, N, 57]` but `N` is above [TrackerConfig.IMPORT_MAX_OUTPUT_ROWS]: the vendored
+     * `PoseEstimator` treats 57 columns as end-to-end only up to `END_TO_END_MAX_ROWS` rows, so the model would
+     * fail at every Start.
+     */
+    OUTPUT_ROWS("output_rows"),
+
+    /** Any other output that is not `[1, N, 57]` with `0 < N <= 300` (other keypoint count, detect model, wrong rank). */
     OUTPUT_SHAPE("output_shape"),
 }
 
@@ -107,7 +114,9 @@ object ImportedModelRules {
      * type, input layout (NHWC recognised, otherwise NCHW rank/batch/channels, square, size range,
      * multiple of [TrackerConfig.IMPORT_INPUT_SIZE_STEP]), output type, output shape (classic head
      * recognised). Accepts exactly one `float32` input `[1, 3, S, S]` and one `float32` output
-     * `[1, N, 57]` with `N` > 0 ([TrackerConfig.POSE_OUTPUT_COLUMNS] columns).
+     * `[1, N, 57]` with `0 < N <=` [TrackerConfig.IMPORT_MAX_OUTPUT_ROWS] ([TrackerConfig.POSE_OUTPUT_COLUMNS]
+     * columns; the vendored `PoseEstimator` treats 57 columns as end-to-end only up to its
+     * `END_TO_END_MAX_ROWS`, so a larger `N` is refused as [ImportRejection.OUTPUT_ROWS]).
      */
     fun check(
         inputs: List<TensorDescription>,
@@ -143,7 +152,11 @@ object ImportedModelRules {
 
         if (output.elementType != FLOAT32) return reject(ImportRejection.OUTPUT_TYPE)
         val outputShape = output.shape
-        if (isPoseHead(outputShape)) return ImportCheck.Accepted(inputSize = side, outputRows = outputShape[AXIS_1])
+        if (isPoseHead(outputShape)) {
+            val rows = outputShape[AXIS_1]
+            if (rows > TrackerConfig.IMPORT_MAX_OUTPUT_ROWS) return reject(ImportRejection.OUTPUT_ROWS)
+            return ImportCheck.Accepted(inputSize = side, outputRows = rows)
+        }
         return reject(if (isClassicHead(outputShape)) ImportRejection.OUTPUT_CLASSIC_HEAD else ImportRejection.OUTPUT_SHAPE)
     }
 

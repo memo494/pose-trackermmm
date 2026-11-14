@@ -382,8 +382,13 @@ data class TrackerConfig(
         /** An imported model's input side must be a multiple of this, in pixels (the largest YOLO stride). */
         const val IMPORT_INPUT_SIZE_STEP = 32
 
-        /** Most rows (`N`) of an imported model's output that stored metadata may claim; a sanity cap, not a tuning value. */
-        const val IMPORT_META_MAX_OUTPUT_ROWS = 1_000_000
+        /**
+         * Most rows (`N`) of an imported model's `[1, N, 57]` output: the vendored `PoseEstimator` treats 57
+         * columns as an end-to-end head only up to its `END_TO_END_MAX_ROWS` (300, the Ultralytics default
+         * `max_det`); a model with more rows would import and then fail at every Start. Also the sanity cap
+         * of stored metadata.
+         */
+        const val IMPORT_MAX_OUTPUT_ROWS = 300
 
         /** Longest stored display name of an imported model, in characters. */
         const val IMPORT_NAME_MAX_CHARS = 64

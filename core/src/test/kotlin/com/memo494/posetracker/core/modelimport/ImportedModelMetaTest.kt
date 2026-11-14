@@ -54,7 +54,7 @@ class ImportedModelMetaTest {
                     bytes = TrackerConfig.MAX_IMPORT_BYTES_LIMIT,
                     inputSize = TrackerConfig.MAX_IMPORT_INPUT_SIZE_LIMIT,
                 ),
-                meta.copy(outputRows = TrackerConfig.IMPORT_META_MAX_OUTPUT_ROWS),
+                meta.copy(outputRows = TrackerConfig.IMPORT_MAX_OUTPUT_ROWS),
             )
 
         for (other in others) {
@@ -154,7 +154,7 @@ class ImportedModelMetaTest {
                 "inputSize=" to
                     listOf("", "0", "-640", "+640", "0640", "640.0", "x", "31", "641", "4128", "2147483648"),
                 "outputRows=" to
-                    listOf("", "0", "-1", "+300", "0300", "3.0", "x", "${TrackerConfig.IMPORT_META_MAX_OUTPUT_ROWS + 1}"),
+                    listOf("", "0", "-1", "+300", "0300", "3.0", "x", "${TrackerConfig.IMPORT_MAX_OUTPUT_ROWS + 1}"),
             )
 
         for ((prefix, values) in bad) {
@@ -201,7 +201,7 @@ class ImportedModelMetaTest {
             text(
                 3 to "bytes=${TrackerConfig.MAX_IMPORT_BYTES_LIMIT}",
                 4 to "inputSize=${TrackerConfig.MAX_IMPORT_INPUT_SIZE_LIMIT}",
-                5 to "outputRows=${TrackerConfig.IMPORT_META_MAX_OUTPUT_ROWS}",
+                5 to "outputRows=${TrackerConfig.IMPORT_MAX_OUTPUT_ROWS}",
             )
 
         assertThat(ImportedModelMeta.decode(atMax)).isNotNull()

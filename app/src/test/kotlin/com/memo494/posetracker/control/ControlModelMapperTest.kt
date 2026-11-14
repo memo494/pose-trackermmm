@@ -6,6 +6,7 @@ import com.memo494.posetracker.core.modelimport.ImportRejection
 import com.memo494.posetracker.core.modelimport.ImportStage
 import com.memo494.posetracker.core.modelimport.ImportedModelMeta
 import com.memo494.posetracker.core.modelimport.SniffRejection
+import com.memo494.posetracker.modelimport.FailureKind
 import com.memo494.posetracker.modelimport.ImportOutcome
 import com.memo494.posetracker.modelimport.ModelFallback
 import com.memo494.posetracker.modelimport.ModelSource
@@ -28,7 +29,8 @@ class ControlModelMapperTest {
         meta: ImportedModelMeta? = null,
         fileExists: Boolean = false,
         guard: ImportGuardState = ImportGuardState.Idle,
-    ) = StoredModelState(meta, fileExists, guard)
+        anyFileStored: Boolean = fileExists,
+    ) = StoredModelState(meta, fileExists, guard, anyFileStored)
 
     private fun status(
         fallback: ModelFallback?,
@@ -95,10 +97,27 @@ class ControlModelMapperTest {
     }
 
     @Test
-    fun summary_failed_keepsTheMessage() {
-        val summary = ControlModelMapper.summary(ImportOutcome.Failed("IOException: boom"))
+    fun summary_failed_keepsTheKindAndTheMessage() {
+        val summary = ControlModelMapper.summary(ImportOutcome.Failed(FailureKind.IO, "IOException: boom"))
 
-        assertThat(summary).isEqualTo(ImportSummary.Failed("IOException: boom"))
+        assertThat(summary).isEqualTo(ImportSummary.Failed(ImportFailure.IO, "IOException: boom"))
+    }
+
+    @Test
+    fun summary_failedWithoutMessage_keepsTheKind() {
+        assertThat(ControlModelMapper.summary(ImportOutcome.Failed(FailureKind.BUSY)))
+            .isEqualTo(ImportSummary.Failed(ImportFailure.BUSY, null))
+    }
+
+    @Test
+    fun everyFailureKind_hasItsOwnFailureAndItsOwnMessage() {
+        val failures = FailureKind.entries.map { ControlModelMapper.failure(it) }
+
+        assertThat(failures).containsNoDuplicates()
+        assertThat(failures).containsExactlyElementsIn(ImportFailure.entries)
+        val messages = ImportFailure.entries.map { ControlModelMapper.failureRes(it) }
+        assertThat(messages).containsNoDuplicates()
+        assertThat(messages).doesNotContain(0)
     }
 
     // Stored state and the last session to the model block.
@@ -111,10 +130,22 @@ class ControlModelMapperTest {
     }
 
     @Test
+    fun loaded_orphanFileWithoutMetaOrNotice_stillReportsAStoredFile() {
+        val event = ControlModelMapper.stateLoaded(stored(anyFileStored = true), null)
+
+        assertThat(event).isEqualTo(ControlEvent.ModelStateLoaded(ActiveModel.BuiltIn, null, fileStored = true))
+    }
+
+    @Test
+    fun loaded_nothingOnDisk_reportsNoStoredFile() {
+        assertThat(ControlModelMapper.stateLoaded(stored(), null).fileStored).isFalse()
+    }
+
+    @Test
     fun loaded_importedModelPresent_isImportedWithoutNotice() {
         val event = ControlModelMapper.stateLoaded(stored(meta, fileExists = true), null)
 
-        val expected = ControlEvent.ModelStateLoaded(ActiveModel.Imported("yolo26n-pose_640.tflite", 640), null)
+        val expected = ControlEvent.ModelStateLoaded(ActiveModel.Imported("yolo26n-pose_640.tflite", 640), null, fileStored = true)
         assertThat(event).isEqualTo(expected)
     }
 
@@ -123,8 +154,10 @@ class ControlModelMapperTest {
         val probe = ControlModelMapper.stateLoaded(stored(meta, true, ImportGuardState.Tripped(ImportStage.PROBE)), null)
         val load = ControlModelMapper.stateLoaded(stored(meta, true, ImportGuardState.Tripped(ImportStage.LOAD)), null)
 
-        assertThat(probe).isEqualTo(ControlEvent.ModelStateLoaded(ActiveModel.BuiltIn, ModelNotice(ModelNoticeKind.GUARD_TRIPPED_PROBE)))
-        assertThat(load).isEqualTo(ControlEvent.ModelStateLoaded(ActiveModel.BuiltIn, ModelNotice(ModelNoticeKind.GUARD_TRIPPED_LOAD)))
+        val probeNotice = ModelNotice(ModelNoticeKind.GUARD_TRIPPED_PROBE)
+        val loadNotice = ModelNotice(ModelNoticeKind.GUARD_TRIPPED_LOAD)
+        assertThat(probe).isEqualTo(ControlEvent.ModelStateLoaded(ActiveModel.BuiltIn, probeNotice, fileStored = true))
+        assertThat(load).isEqualTo(ControlEvent.ModelStateLoaded(ActiveModel.BuiltIn, loadNotice, fileStored = true))
     }
 
     @Test
@@ -141,7 +174,8 @@ class ControlModelMapperTest {
         val event = ControlModelMapper.stateLoaded(stored(meta, fileExists = true), last)
 
         val notice = ModelNotice(ModelNoticeKind.LOAD_FAILED, "IllegalStateException: bad flatbuffer")
-        assertThat(event).isEqualTo(ControlEvent.ModelStateLoaded(ActiveModel.Imported("yolo26n-pose_640.tflite", 640), notice))
+        val imported = ActiveModel.Imported("yolo26n-pose_640.tflite", 640)
+        assertThat(event).isEqualTo(ControlEvent.ModelStateLoaded(imported, notice, fileStored = true))
     }
 
     @Test

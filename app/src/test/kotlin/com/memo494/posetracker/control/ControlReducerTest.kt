@@ -487,7 +487,7 @@ class ControlReducerTest {
     @Test
     fun importFinished_failed_keepsTheBuiltInModelAndShowsTheMessage() {
         val state = ready.copy(importing = true)
-        val failed = ImportSummary.Failed("IOException: no space")
+        val failed = ImportSummary.Failed(ImportFailure.IO, "IOException: no space")
 
         val step = reduce(state, ControlEvent.ImportFinished(failed))
 
@@ -554,6 +554,59 @@ class ControlReducerTest {
     }
 
     @Test
+    fun modelStateLoaded_withAnOrphanFileAndNoNotice_remembersThatAFileIsStored() {
+        val step = reduce(ready, ControlEvent.ModelStateLoaded(ActiveModel.BuiltIn, null, fileStored = true))
+
+        assertThat(step.state.activeModel).isEqualTo(ActiveModel.BuiltIn)
+        assertThat(step.state.modelNotice).isNull()
+        assertThat(step.state.modelFileStored).isTrue()
+    }
+
+    @Test
+    fun modelStateLoaded_withNothingOnDisk_forgetsTheStoredFile() {
+        val step = reduce(ready.copy(modelFileStored = true), ControlEvent.ModelStateLoaded(ActiveModel.BuiltIn, null))
+
+        assertThat(step.state.modelFileStored).isFalse()
+    }
+
+    @Test
+    fun importFinished_accepted_marksAFileAsStored() {
+        val step = reduce(ready.copy(importing = true), ControlEvent.ImportFinished(ImportSummary.Accepted("a.tflite", 640)))
+
+        assertThat(step.state.modelFileStored).isTrue()
+    }
+
+    @Test
+    fun useBuiltIn_withOnlyAnOrphanFile_isAllowedAndClearsTheStoredFlag() {
+        val state = ready.copy(modelFileStored = true)
+
+        val step = reduce(state, ControlEvent.UseBuiltInClicked)
+
+        assertThat(step.effect).isEqualTo(ControlEffect.CLEAR_IMPORTED)
+        assertThat(step.state.modelFileStored).isFalse()
+    }
+
+    @Test
+    fun importingSeededFromARunningImport_keepsImportUseBuiltInAndStartDisabled() {
+        val state = ready.copy(importing = true)
+
+        assertThat(reduce(state, ControlEvent.ImportClicked).effect).isNull()
+        assertThat(reduce(state, ControlEvent.UseBuiltInClicked).effect).isNull()
+        assertThat(reduce(state, ControlEvent.StartClicked).effect).isNull()
+    }
+
+    @Test
+    fun importFinished_arrivingAtARecreatedScreen_clearsImportingAndReloadsTheModel() {
+        val state = ready.copy(importing = true)
+
+        val step = reduce(state, ControlEvent.ImportFinished(ImportSummary.Accepted("a.tflite", 640)))
+
+        assertThat(step.state.importing).isFalse()
+        assertThat(step.state.importResult).isEqualTo(ImportSummary.Accepted("a.tflite", 640))
+        assertThat(step.effect).isEqualTo(ControlEffect.LOAD_MODEL_STATE)
+    }
+
+    @Test
     fun modelStateLoaded_whileRunning_isStored() {
         val step = reduce(ready.copy(running = true), ControlEvent.ModelStateLoaded(imported, null))
 
@@ -599,7 +652,7 @@ class ControlReducerTest {
                 ControlEvent.ImportPicked("content://docs/model"),
                 ControlEvent.ImportFinished(ImportSummary.Accepted("a.tflite", 416)),
                 ControlEvent.ImportFinished(rejected),
-                ControlEvent.ImportFinished(ImportSummary.Failed("x")),
+                ControlEvent.ImportFinished(ImportSummary.Failed(ImportFailure.IO, "x")),
                 ControlEvent.UseBuiltInClicked,
                 ControlEvent.ModelStateLoaded(ActiveModel.BuiltIn, null),
                 ControlEvent.ModelStateLoaded(imported, tripped),

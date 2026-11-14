@@ -18,6 +18,7 @@ import java.io.FileOutputStream
 import java.io.InputStream
 import java.math.BigInteger
 import java.security.MessageDigest
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** Why a picked file was refused; the control screen turns each case into text without parsing strings. */
 sealed interface RejectionKind {
@@ -55,10 +56,29 @@ sealed interface ImportOutcome {
         val details: String,
     ) : ImportOutcome
 
-    /** An I/O or other unexpected error (not a verdict on the file); the previous model is untouched. */
+    /**
+     * The import did not run to a verdict (not a verdict on the file); the previous model is untouched.
+     *
+     * @property kind what happened, so the screen can pick a text without parsing [message].
+     * @property message a short technical line for [FailureKind.IO] (exception name and message), `null` for the
+     *   kinds whose [kind] says everything.
+     */
     data class Failed(
-        val message: String,
+        val kind: FailureKind,
+        val message: String? = null,
     ) : ImportOutcome
+}
+
+/** Why an import failed without a verdict on the file. */
+enum class FailureKind {
+    /** Another import or model operation is running (single flight, or a crash marker still pending). */
+    BUSY,
+
+    /** The crash marker could not be saved, so the risky step was not taken (or its result is not safe to keep). */
+    GUARD_NOT_STORED,
+
+    /** An I/O or other unexpected error; the message names it. */
+    IO,
 }
 
 /**
@@ -69,6 +89,10 @@ sealed interface ImportOutcome {
  * Threading: [import] reads, hashes and probes a file, so it must run on a worker thread and throws
  * [IllegalStateException] on the main thread. It never throws otherwise: every `Throwable` (`OutOfMemoryError`
  * included) becomes [ImportOutcome.Failed].
+ *
+ * Single flight: one import runs per process (a flag shared by every instance, [isImporting]). A second [import]
+ * while one runs returns `Failed(BUSY)` at once and touches nothing on disk (in particular not the temporary file
+ * the first one is filling). The flag is cleared on every way out, including exceptions.
  *
  * @param threadCheck throws [IllegalStateException] on the main thread; the production default needs a real
  *   `Looper`, tests pass a fake.
@@ -94,6 +118,19 @@ class ModelImporter(
         declaredBytes: Long?,
     ): ImportOutcome {
         threadCheck()
+        if (!RUNNING.compareAndSet(false, true)) return ImportOutcome.Failed(FailureKind.BUSY)
+        try {
+            return importExclusively(source, rawDisplayName, declaredBytes)
+        } finally {
+            RUNNING.set(false)
+        }
+    }
+
+    private fun importExclusively(
+        source: () -> InputStream,
+        rawDisplayName: String?,
+        declaredBytes: Long?,
+    ): ImportOutcome {
         if (declaredBytes != null && declaredBytes > config.importMaxBytes) return tooLarge("declared $declaredBytes bytes")
         val temp =
             try {
@@ -123,12 +160,12 @@ class ModelImporter(
         }
 
         val initialGuard = store.state().guard
-        if (initialGuard is ImportGuardState.Pending) return ImportOutcome.Failed(BUSY)
-        if (!store.setGuard(ImportGuard.begin(ImportStage.PROBE))) return ImportOutcome.Failed(GUARD_NOT_STORED)
+        if (initialGuard is ImportGuardState.Pending) return ImportOutcome.Failed(FailureKind.BUSY)
+        if (!store.setGuard(ImportGuard.begin(ImportStage.PROBE))) return ImportOutcome.Failed(FailureKind.GUARD_NOT_STORED)
         val probed = runProbe(temp)
         // A refusal or a catchable failure is not a crash: the marker goes back, but a trip is only lifted by an accept.
         val afterProbe = if (initialGuard is ImportGuardState.Tripped) initialGuard else ImportGuard.succeed()
-        if (!store.setGuard(afterProbe)) return ImportOutcome.Failed(GUARD_NOT_STORED)
+        if (!store.setGuard(afterProbe)) return ImportOutcome.Failed(FailureKind.GUARD_NOT_STORED)
 
         val tensors =
             when (probed) {
@@ -149,7 +186,7 @@ class ModelImporter(
                         inputSize = check.inputSize,
                         outputRows = check.outputRows,
                     )
-                accept(temp, meta, afterProbe)
+                accept(temp, meta)
             }
         }
     }
@@ -157,15 +194,14 @@ class ModelImporter(
     private fun accept(
         temp: File,
         meta: ImportedModelMeta,
-        guard: ImportGuardState,
     ): ImportOutcome {
-        // A model the rules accept but the stored form cannot describe (for example absurdly many rows) is not stored.
-        if (ImportedModelMeta.decode(meta.encode()) != meta) return ImportOutcome.Failed("The model description cannot be stored")
-        if (!store.accept(temp, meta)) return ImportOutcome.Failed("The model could not be stored")
-        // The new file replaces the one that tripped the guard, so the trip ends here.
-        if (guard != ImportGuardState.Idle && !store.setGuard(ImportGuard.clear())) {
-            return ImportOutcome.Failed(GUARD_NOT_STORED)
+        // A model the rules accept but the stored form cannot describe is not stored (fail closed; the rules and
+        // the stored form share their limits, so this is a guard against them drifting apart).
+        if (ImportedModelMeta.decode(meta.encode()) != meta) {
+            return ImportOutcome.Failed(FailureKind.IO, "The model description cannot be stored")
         }
+        // The store also lifts a trip (the new file replaces the one that tripped the guard), under the same lock.
+        if (!store.accept(temp, meta)) return ImportOutcome.Failed(FailureKind.IO, "The model could not be stored")
         return ImportOutcome.Accepted(meta)
     }
 
@@ -220,16 +256,20 @@ class ModelImporter(
     private fun tooLarge(details: String): ImportOutcome =
         ImportOutcome.Rejected(RejectionKind.Sniffed(SniffRejection.TOO_LARGE), "$details, limit ${config.importMaxBytes} bytes")
 
-    private fun failed(t: Throwable): ImportOutcome = ImportOutcome.Failed(describe(t))
+    private fun failed(t: Throwable): ImportOutcome = ImportOutcome.Failed(FailureKind.IO, describe(t))
 
     private fun describe(t: Throwable): String = t.javaClass.simpleName + (t.message?.let { ": $it" } ?: "")
 
     private fun toHex(digest: ByteArray): String = BigInteger(1, digest).toString(HEX_RADIX).padStart(TrackerConfig.SHA256_HEX_LENGTH, '0')
 
-    private companion object {
-        const val HASH_ALGORITHM = "SHA-256"
-        const val HEX_RADIX = 16
-        const val BUSY = "Another model operation is running"
-        const val GUARD_NOT_STORED = "The crash marker could not be stored"
+    companion object {
+        private const val HASH_ALGORITHM = "SHA-256"
+        private const val HEX_RADIX = 16
+
+        /** Set while an [import] runs; shared by every instance, so it also covers a recreated activity. */
+        private val RUNNING = AtomicBoolean(false)
+
+        /** Whether an [import] is running in this process now; safe to call from any thread. */
+        fun isImporting(): Boolean = RUNNING.get()
     }
 }

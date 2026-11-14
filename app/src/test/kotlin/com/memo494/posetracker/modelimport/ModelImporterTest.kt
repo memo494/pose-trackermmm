@@ -39,6 +39,10 @@ class ModelImporterTest {
     private var guardDuringProbe: ImportGuardState? = null
     private var failRenameOf: String? = null
 
+    /** Runs inside the fake probe, on the importing thread, while the import is still in flight. */
+    private var duringProbe: ((File) -> Unit)? = null
+    private var probedFileName: String? = null
+
     private val directory get() = File(tmp.root, "imported")
 
     // Lazy: the TemporaryFolder rule creates the folder after the constructor ran.
@@ -52,7 +56,9 @@ class ModelImporterTest {
         ModelImporter(store, config, thread::check) { file ->
             probeCalls++
             guardDuringProbe = store.state().guard
+            probedFileName = file.name
             assertThat(file.exists()).isTrue()
+            duringProbe?.invoke(file)
             probeThrows?.let { throw it }
             probeResult
         }
@@ -80,6 +86,9 @@ class ModelImporterTest {
 
     private val previousBytes = tfliteBytes(500, seed = 9)
 
+    /** The stored file name of a model with these bytes: `model-<first 16 hex of sha256>.tflite`. */
+    private fun storedName(bytes: ByteArray) = "model-" + Sha256.hex(ByteArrayInputStream(bytes)).take(16) + ".tflite"
+
     private fun importPreviousModel(): ImportedModelMeta {
         val outcome = runImport(previousBytes, name = "previous.tflite")
         assertThat(outcome).isInstanceOf(ImportOutcome.Accepted::class.java)
@@ -92,9 +101,9 @@ class ModelImporterTest {
         val state = store.state()
         assertThat(state.meta).isEqualTo(previous)
         assertThat(state.fileExists).isTrue()
-        assertThat(store.modelFile.readBytes()).isEqualTo(previousBytes)
-        assertThat(File(directory, "import.tmp").exists()).isFalse()
-        assertThat(directory.list()!!.toSet()).containsExactly("model.tflite", "meta.txt")
+        assertThat(store.modelFileFor(previous).readBytes()).isEqualTo(previousBytes)
+        assertThat(File(directory, "import.tflite").exists()).isFalse()
+        assertThat(directory.list()!!.toSet()).containsExactly(storedName(previousBytes), "meta.txt")
     }
 
     private fun assertRejected(
@@ -126,8 +135,8 @@ class ModelImporterTest {
             )
         assertThat(outcome).isEqualTo(ImportOutcome.Accepted(expected))
         assertThat(store.state()).isEqualTo(StoredModelState(expected, fileExists = true, guard = ImportGuardState.Idle))
-        assertThat(store.modelFile.readBytes()).isEqualTo(bytes)
-        assertThat(directory.list()!!.toSet()).containsExactly("model.tflite", "meta.txt")
+        assertThat(store.modelFileFor(expected).readBytes()).isEqualTo(bytes)
+        assertThat(directory.list()!!.toSet()).containsExactly(storedName(bytes), "meta.txt")
     }
 
     @Test
@@ -138,8 +147,9 @@ class ModelImporterTest {
 
         val outcome = bigImporter.import({ ByteArrayInputStream(bytes) }, "big.tflite", null)
 
-        assertThat((outcome as ImportOutcome.Accepted).meta.sha256).isEqualTo(Sha256.hex(ByteArrayInputStream(bytes)))
-        assertThat(store.modelFile.readBytes()).isEqualTo(bytes)
+        val meta = (outcome as ImportOutcome.Accepted).meta
+        assertThat(meta.sha256).isEqualTo(Sha256.hex(ByteArrayInputStream(bytes)))
+        assertThat(store.modelFileFor(meta).readBytes()).isEqualTo(bytes)
     }
 
     @Test
@@ -156,8 +166,9 @@ class ModelImporterTest {
 
         val outcome = runImport(bytes, name = "second.tflite")
 
-        assertThat(store.state().meta).isEqualTo((outcome as ImportOutcome.Accepted).meta)
-        assertThat(store.modelFile.readBytes()).isEqualTo(bytes)
+        val meta = (outcome as ImportOutcome.Accepted).meta
+        assertThat(store.state().meta).isEqualTo(meta)
+        assertThat(store.modelFileFor(meta).readBytes()).isEqualTo(bytes)
     }
 
     // ---- size ----
@@ -276,6 +287,7 @@ class ModelImporterTest {
                 ImportRejection.OUTPUT_COUNT to (listOf(goodIn) to listOf(goodOut, goodOut)),
                 ImportRejection.OUTPUT_TYPE to (listOf(goodIn) to listOf(tensor(1, 300, 57, type = "float16"))),
                 ImportRejection.OUTPUT_CLASSIC_HEAD to (listOf(goodIn) to listOf(tensor(1, 56, 8400))),
+                ImportRejection.OUTPUT_ROWS to (listOf(goodIn) to listOf(tensor(1, 301, 57))),
                 ImportRejection.OUTPUT_SHAPE to (listOf(goodIn) to listOf(tensor(1, 300, 51))),
             )
         assertThat(cases.keys).containsExactlyElementsIn(ImportRejection.entries)
@@ -303,7 +315,8 @@ class ModelImporterTest {
         val outcome = importer.import({ stream }, "x.tflite", null)
 
         assertThat(outcome).isInstanceOf(ImportOutcome.Failed::class.java)
-        assertThat((outcome as ImportOutcome.Failed).message).contains("disk went away")
+        assertThat((outcome as ImportOutcome.Failed).kind).isEqualTo(FailureKind.IO)
+        assertThat(outcome.message).contains("disk went away")
         assertThat(stream.closed).isTrue()
         assertThat(probeCalls).isEqualTo(0)
         assertPreviousSurvives(previous)
@@ -326,32 +339,152 @@ class ModelImporterTest {
 
         val outcome = importer.import({ throw SecurityException("permission revoked") }, "x.tflite", null)
 
-        assertThat((outcome as ImportOutcome.Failed).message).contains("permission revoked")
+        assertThat((outcome as ImportOutcome.Failed).kind).isEqualTo(FailureKind.IO)
+        assertThat(outcome.message).contains("permission revoked")
         assertPreviousSurvives(previous)
     }
 
     @Test
     fun storeThatCannotMoveTheFile_isFailed_andThePreviousModelStays() {
         val previous = importPreviousModel()
-        failRenameOf = "model.tflite"
+        val bytes = tfliteBytes(1_000)
+        failRenameOf = storedName(bytes)
 
-        val outcome = runImport(tfliteBytes(1_000))
+        val outcome = runImport(bytes)
 
-        assertThat(outcome).isInstanceOf(ImportOutcome.Failed::class.java)
+        assertThat(outcome).isEqualTo(ImportOutcome.Failed(FailureKind.IO, "The model could not be stored"))
         assertThat(store.state().guard).isEqualTo(ImportGuardState.Idle)
         assertPreviousSurvives(previous)
     }
 
     @Test
-    fun modelWhoseDescriptionCannotBeStored_isFailed() {
+    fun modelWithMoreRowsThanTheDecoderTakes_isRejectedAsOutputRows_andThePreviousModelStays() {
         val previous = importPreviousModel()
-        val rows = TrackerConfig.IMPORT_META_MAX_OUTPUT_ROWS + 1
+        val rows = TrackerConfig.IMPORT_MAX_OUTPUT_ROWS + 1
         probeResult = ProbeResult.Tensors(listOf(tensor(1, 3, 640, 640)), listOf(tensor(1, rows, 57)))
 
         val outcome = runImport(tfliteBytes(1_000))
 
-        assertThat(outcome).isInstanceOf(ImportOutcome.Failed::class.java)
+        assertRejected(outcome, RejectionKind.Layout(ImportRejection.OUTPUT_ROWS))
         assertPreviousSurvives(previous)
+    }
+
+    @Test
+    fun modelWithExactlyTheMostRows_isAccepted() {
+        probeResult =
+            ProbeResult.Tensors(listOf(tensor(1, 3, 640, 640)), listOf(tensor(1, TrackerConfig.IMPORT_MAX_OUTPUT_ROWS, 57)))
+
+        val outcome = runImport(tfliteBytes(1_000))
+
+        assertThat((outcome as ImportOutcome.Accepted).meta.outputRows).isEqualTo(TrackerConfig.IMPORT_MAX_OUTPUT_ROWS)
+    }
+
+    // ---- temp file name, single flight ----
+
+    @Test
+    fun theProbedTempFile_endsInTflite() {
+        runImport(tfliteBytes(1_000))
+
+        assertThat(probedFileName).endsWith(".tflite")
+    }
+
+    @Test
+    fun secondImportDuringTheProbe_isBusy_andTheFirstOnesBytesAreKept() {
+        val firstBytes = tfliteBytes(1_000, seed = 5)
+        val secondBytes = tfliteBytes(1_200, seed = 6)
+        var secondOutcome: ImportOutcome? = null
+        var runningDuringProbe = false
+        var tempBytesAfterSecond: ByteArray? = null
+        var secondOpened = false
+        duringProbe = { temp ->
+            runningDuringProbe = ModelImporter.isImporting()
+            secondOutcome =
+                importer.import(
+                    {
+                        secondOpened = true
+                        ByteArrayInputStream(secondBytes)
+                    },
+                    "second.tflite",
+                    secondBytes.size.toLong(),
+                )
+            tempBytesAfterSecond = temp.readBytes()
+        }
+
+        val first = runImport(firstBytes, name = "first.tflite")
+
+        assertThat(runningDuringProbe).isTrue()
+        assertThat(secondOutcome).isEqualTo(ImportOutcome.Failed(FailureKind.BUSY))
+        assertThat(secondOpened).isFalse()
+        assertThat(tempBytesAfterSecond).isEqualTo(firstBytes)
+        assertThat(probeCalls).isEqualTo(1)
+        val meta = (first as ImportOutcome.Accepted).meta
+        assertThat(store.modelFileFor(meta).readBytes()).isEqualTo(firstBytes)
+        assertThat(meta.sha256).isEqualTo(Sha256.hex(ByteArrayInputStream(firstBytes)))
+    }
+
+    @Test
+    fun busyImport_doesNotClearTheFlagOfTheRunningOne() {
+        var stillRunningAfterBusy = false
+        duringProbe = {
+            importer.import({ ByteArrayInputStream(ByteArray(0)) }, "second.tflite", null)
+            stillRunningAfterBusy = ModelImporter.isImporting()
+        }
+
+        runImport(tfliteBytes(1_000))
+
+        assertThat(stillRunningAfterBusy).isTrue()
+        assertThat(ModelImporter.isImporting()).isFalse()
+    }
+
+    @Test
+    fun singleFlightFlag_isClearedAfterAnAccept() {
+        runImport(tfliteBytes(1_000))
+
+        assertThat(ModelImporter.isImporting()).isFalse()
+    }
+
+    @Test
+    fun singleFlightFlag_isClearedAfterARefusal() {
+        probeResult = ProbeResult.Failed("nope")
+
+        assertThat(runImport(tfliteBytes(1_000))).isInstanceOf(ImportOutcome.Rejected::class.java)
+
+        assertThat(ModelImporter.isImporting()).isFalse()
+    }
+
+    @Test
+    fun singleFlightFlag_isClearedAfterAFailure() {
+        prefs.failWrites = true
+
+        assertThat(runImport(tfliteBytes(1_000))).isInstanceOf(ImportOutcome.Failed::class.java)
+
+        assertThat(ModelImporter.isImporting()).isFalse()
+    }
+
+    @Test
+    fun singleFlightFlag_isClearedWhenTheSourceThrows() {
+        val outcome = importer.import({ throw SecurityException("revoked") }, "x.tflite", null)
+
+        assertThat(outcome).isInstanceOf(ImportOutcome.Failed::class.java)
+        assertThat(ModelImporter.isImporting()).isFalse()
+    }
+
+    @Test
+    fun singleFlightFlag_isClearedWhenTheProbeThrowsAnError() {
+        probeThrows = OutOfMemoryError("pretend")
+
+        runImport(tfliteBytes(1_000))
+
+        assertThat(ModelImporter.isImporting()).isFalse()
+    }
+
+    @Test
+    fun singleFlightFlag_isNotSetByAMainThreadRefusal() {
+        thread.onMainThread = true
+
+        assertThrows(IllegalStateException::class.java) { importer.import({ ByteArrayInputStream(ByteArray(0)) }, "x.tflite", null) }
+
+        assertThat(ModelImporter.isImporting()).isFalse()
     }
 
     // ---- the guard ----
@@ -373,9 +506,9 @@ class ModelImporterTest {
 
         val outcome = runImport(tfliteBytes(1_000))
 
-        assertThat(outcome).isInstanceOf(ImportOutcome.Failed::class.java)
+        assertThat(outcome).isEqualTo(ImportOutcome.Failed(FailureKind.GUARD_NOT_STORED))
         assertThat(probeCalls).isEqualTo(0)
-        assertThat(directory.list()?.toSet().orEmpty()).doesNotContain("model.tflite")
+        assertThat(directory.list()?.toList().orEmpty().filter { it.startsWith("model") }).isEmpty()
     }
 
     @Test
@@ -405,9 +538,10 @@ class ModelImporterTest {
     @Test
     fun trippedGuard_staysWhenTheStoreFailsToAccept() {
         prefs.text = "tripped:probe"
-        failRenameOf = "model.tflite"
+        val bytes = tfliteBytes(1_000)
+        failRenameOf = storedName(bytes)
 
-        val outcome = runImport(tfliteBytes(1_000))
+        val outcome = runImport(bytes)
 
         assertThat(outcome).isInstanceOf(ImportOutcome.Failed::class.java)
         assertThat(store.state().guard).isEqualTo(ImportGuardState.Tripped(ImportStage.PROBE))
@@ -420,7 +554,7 @@ class ModelImporterTest {
 
         val outcome = runImport(tfliteBytes(1_000))
 
-        assertThat(outcome).isInstanceOf(ImportOutcome.Failed::class.java)
+        assertThat(outcome).isEqualTo(ImportOutcome.Failed(FailureKind.BUSY))
         assertThat(probeCalls).isEqualTo(0)
         assertThat(prefs.text).isEqualTo("pending:load")
     }

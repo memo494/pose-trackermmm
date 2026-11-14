@@ -261,7 +261,7 @@ internal class CaptureSession(
         return SessionModelLoader(
             readState = store::state,
             setGuard = store::setGuard,
-            loadImported = { meta -> PoseDetectors.fromImported(context, store.modelFile, meta, config) },
+            loadImported = { meta -> PoseDetectors.fromImported(context, store.modelFileFor(meta), meta, config) },
             loadBuiltIn = { PoseDetectors.fromAssets(context, config) },
             log = CaptureLog::log,
         ).load()

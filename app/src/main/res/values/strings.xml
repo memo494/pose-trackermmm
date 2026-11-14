@@ -33,6 +33,8 @@
     <string name="model_details">Details: %1$s</string>
     <string name="model_result_accepted">Imported %1$s. It is used the next time you press Start.</string>
     <string name="model_result_failed">The file could not be imported. Details: %1$s</string>
+    <string name="model_result_busy">Another import is still running. Wait until it has finished.</string>
+    <string name="model_result_guard_not_stored">The import was not run because its safety marker could not be saved.</string>
     <string name="model_reject_too_small">This file is too small to be a pose model.</string>
     <string name="model_reject_too_large">This file is too large to import.</string>
     <string name="model_reject_header_too_short">The file ended before its type could be checked.</string>
@@ -48,9 +50,10 @@
     <string name="model_reject_output_count">The model must have exactly one output.</string>
     <string name="model_reject_output_type">The model output must be float32.</string>
     <string name="model_reject_output_classic_head">The model output is the older channels-first format [1, channels, N]. Export a pose model with the end-to-end output [1, N, 57].</string>
+    <string name="model_reject_output_rows">The model output has more than 300 rows [1, N, 57]. Export it with at most 300 detections (the default).</string>
     <string name="model_reject_output_shape">The model output is not a pose output [1, N, 57] (17 keypoints). Detect models and other keypoint counts are not supported.</string>
     <string name="model_notice_file_missing">The imported model file is missing, so the built-in model is used.</string>
-    <string name="model_notice_guard_probe">The app stopped while checking an imported file, so imported models are switched off and the built-in model is used. Import another file or press Use built-in model.</string>
+    <string name="model_notice_guard_probe">The app stopped while checking an imported file. Imported models, including a previously imported one, are switched off and the built-in model is used until you import again or press Use built-in model.</string>
     <string name="model_notice_guard_load">The app stopped while loading the imported model, so it is switched off and the built-in model is used. Import another file or press Use built-in model.</string>
     <string name="model_notice_guard_not_stored">The imported model was not used because its safety marker could not be saved. The built-in model ran instead.</string>
     <string name="model_notice_load_failed">The imported model could not be loaded, so the built-in model ran instead.</string>

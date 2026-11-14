@@ -261,12 +261,14 @@ internal object ControlReducer {
             is ControlEvent.ImportFinished -> onImportFinished(state, event.summary)
             ControlEvent.UseBuiltInClicked -> onUseBuiltIn(state)
             is ControlEvent.ModelStateLoaded -> onModelStateLoaded(state, event)
-            is ControlEvent.DebugMarksToggled -> {
-                ControlStep(state.copy(debugMarks = event.enabled), ControlEffect.PERSIST_DEBUG_MARKS, debugMarks = event.enabled)
-            }
-
+            is ControlEvent.DebugMarksToggled -> onDebugMarksToggled(state, event.enabled)
             is ControlEvent.DebugMarksLoaded -> ControlStep(state.copy(debugMarks = event.enabled), null)
         }
+
+    private fun onDebugMarksToggled(
+        state: ControlState,
+        enabled: Boolean,
+    ): ControlStep = ControlStep(state.copy(debugMarks = enabled), ControlEffect.PERSIST_DEBUG_MARKS, debugMarks = enabled)
 
     private fun onOverlayChecked(
         state: ControlState,

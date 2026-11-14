@@ -1,6 +1,7 @@
 package com.memo494.posetracker.core.overlay
 
 import com.google.common.truth.Truth.assertThat
+import com.memo494.posetracker.core.TrackerConfig
 import com.memo494.posetracker.core.model.DetectionFrame
 import com.memo494.posetracker.core.model.PoseDetection
 import com.memo494.posetracker.core.model.TimestampSource
@@ -46,6 +47,7 @@ class RedrawPolicyTest {
         previousWarning: OverlayWarning? = null,
         currentWarning: OverlayWarning? = null,
         hudDue: Boolean = false,
+        keypointsDrawn: Boolean = true,
     ): Boolean =
         RedrawPolicy.shouldRedraw(
             previous = previous,
@@ -56,6 +58,7 @@ class RedrawPolicyTest {
             currentWarning = currentWarning,
             deadbandImg = deadband,
             keypointMinScore = minScore,
+            keypointsDrawn = keypointsDrawn,
             hudDue = hudDue,
         )
 
@@ -150,6 +153,58 @@ class RedrawPolicyTest {
         after.keypointsXyImg[2] += 50f
 
         assertThat(redraw(frame(before), frame(after))).isFalse()
+    }
+
+    // ---- keypoints not drawn (debug marks off): only what is on the screen counts ----
+
+    private val wristIndex = 9
+    private val noseIndex = 0
+
+    @Test
+    fun wristMovingBeyondTheDeadband_withoutDebugMarks_doesNotRedraw() {
+        val moved = person(keypointCount = 17)
+        moved.keypointsXyImg[wristIndex * 2] += 20f
+
+        assertThat(redraw(frame(person(keypointCount = 17)), frame(moved), keypointsDrawn = false)).isFalse()
+    }
+
+    @Test
+    fun wristMovingBeyondTheDeadband_withDebugMarks_redraws() {
+        val moved = person(keypointCount = 17)
+        moved.keypointsXyImg[wristIndex * 2] += 20f
+
+        assertThat(redraw(frame(person(keypointCount = 17)), frame(moved), keypointsDrawn = true)).isTrue()
+    }
+
+    @Test
+    fun wristCrossingTheScoreThreshold_withoutDebugMarks_doesNotRedraw() {
+        val dropped = person(keypointCount = 17)
+        dropped.keypointScores[wristIndex] = 0.1f
+
+        assertThat(redraw(frame(person(keypointCount = 17)), frame(dropped), keypointsDrawn = false)).isFalse()
+        assertThat(redraw(frame(person(keypointCount = 17)), frame(dropped), keypointsDrawn = true)).isTrue()
+    }
+
+    @Test
+    fun headPointMoving_redrawsWithAndWithoutDebugMarks() {
+        val moved = person(keypointCount = 17)
+        moved.keypointsXyImg[noseIndex * 2] += 20f
+
+        assertThat(redraw(frame(person(keypointCount = 17)), frame(moved), keypointsDrawn = false)).isTrue()
+        assertThat(redraw(frame(person(keypointCount = 17)), frame(moved), keypointsDrawn = true)).isTrue()
+    }
+
+    @Test
+    fun headPointFallingBackToTheBoxTop_withoutDebugMarks_redraws() {
+        val noHead = person(keypointCount = 17)
+        for (k in 0 until TrackerConfig.HEAD_KEYPOINT_COUNT) noHead.keypointScores[k] = 0.1f
+
+        assertThat(redraw(frame(person(keypointCount = 17)), frame(noHead), keypointsDrawn = false)).isTrue()
+    }
+
+    @Test
+    fun boxEdgeMoving_withoutDebugMarks_redraws() {
+        assertThat(redraw(frame(person()), frame(person(shiftX = 2f)), keypointsDrawn = false)).isTrue()
     }
 
     @Test

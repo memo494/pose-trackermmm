@@ -10,7 +10,7 @@ on:
         type: string
         default: ""
       publish_tag:
-        description: "With sizes: release tag to upload the files to (created as a pre-release if missing). Never 'latest'."
+        description: "With sizes: release tag to upload the files to (created as a pre-release if missing). Must start with 'models' (for example 'models'); never 'latest'."
         type: string
         default: ""
 
@@ -73,12 +73,12 @@ jobs:
             exit 1
           fi
           if [ -n "$TAG" ]; then
-            if ! [[ "$TAG" =~ ^[A-Za-z0-9._][A-Za-z0-9._-]*$ ]]; then
-              echo "publish_tag may only contain A-Z a-z 0-9 . _ - and must not start with -" >&2
-              exit 1
-            fi
             if [ "$TAG" = "latest" ]; then
               echo "publish_tag must not be 'latest' (the rolling APK release)" >&2
+              exit 1
+            fi
+            if ! [[ "$TAG" =~ ^models[A-Za-z0-9._-]*$ ]]; then
+              echo "publish_tag must start with 'models' and may only contain A-Z a-z 0-9 . _ -" >&2
               exit 1
             fi
           fi

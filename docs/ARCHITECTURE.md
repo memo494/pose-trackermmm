@@ -306,12 +306,20 @@ The overlay is a plain `View` (not `ComposeView`) in a `TYPE_APPLICATION_OVERLAY
   `TrackerConfig.hudIdleFps` (`hudRateHz` + 2) prints as 0 fps and its fps and inference-time changes do not
   refresh the HUD text; only a leave from or entry into idle, or any other field, does.
 - **Draw phase:** `onDraw` allocates nothing: preallocated `Paint`s, a reused `CharArray` per HUD line
-  (`drawText(char[], …)`), no lambdas or temporaries. Origin and size come from `getLocationOnScreen` /
-  `onSizeChanged` → `FitCenter` (§4.2).
+  (`drawText(char[], …)`), no lambdas or temporaries. The view's origin comes from `getLocationOnScreen`; the
+  display size is **not** read from the view (`onSizeChanged` can still hold the previous rotation): since PR #5
+  the Img→View mapping uses the display size that the capture plan published in `OverlayState`
+  (`OverlayMapping.forState` → `FitCenter`, §4.2). While that size or the capture size is unknown, nothing is drawn.
 - **The overlay is in the capture** — and `FLAG_SECURE` on it would black out the **whole** capture, so it is
-  not an option. Mitigation: hollow rings instead of filled dots, thin box strokes, a corner HUD strip. The
-  remaining effect on detection is **measured** (dot A/B in `docs/TEST_CHECKLIST.md`: head shift < 0.03·h,
-  keypoint 0–4 confidence drop < 0.05) and tracked in §13.
+  not an option. Mitigation: hollow marks, thin strokes, a corner HUD strip, and the marks rule below.
+- **Marks rule (M0c T7):** by default each person gets a head ring with radius
+  `max(headRingRadiusRatio × box width, minHeadRingRadiusDp)` (`core/overlay/HeadRing`) and short corner brackets
+  (`core/overlay/CornerBrackets`, `boxCornerRatio` of each box side) instead of the full box. The full box and the
+  keypoint dots are drawn only with `debugMarks` (`TrackerConfig`, switch **Debug marks (box and body points)** on
+  the control screen, read when a session starts). Why: the marks are inside the capture, and offline the box and
+  the dots lowered the model's score of the same person on the next frame (so the marks vanished and the person
+  was detected again: blinking); the measured table is in `docs/plans/M0c.md` ("Measured after T1"). The check on
+  the phone is in `docs/TEST_CHECKLIST.md` (M0c) and the open item in §13.
 
 ### 6.6 Target lock (M4)
 - The overlay window stays not touchable. Locking uses a **small touchable handle window** (separate
@@ -331,6 +339,16 @@ The overlay is a plain `View` (not `ComposeView`) in a `TYPE_APPLICATION_OVERLAY
   capture size and scale, size-change events, capture fps, dropped size-mismatched frames, timestamp-source
   statistics, `now − image.timestamp` range), FPS + thermal stats, `model_info.json`, current `TrackerConfig`,
   last 10 s replay JSON, latest benchmark CSV. This zip is what the owner pastes to an agent.
+- **Model in the HUD (M0c):** the detections line ends with the model's input size and, for an imported model,
+  the mark `imp`: `det 2/3 max 0.89 in 416` (built-in) or `det 2/3 max 0.89 in 640 imp`; with no model loaded
+  the ` in …` part is left out (`HudFormatter.formatDetections`). When an imported model was expected but the
+  built-in one runs (`OverlayWarning.IMPORTED_MODEL_NOT_USED`), the warning line says
+  `Imported model not used: built-in model`; it has the lowest priority and does not hide the dots.
+- **Model in `summary.txt` (M0c, `DiagnosticsReport`):** `modelSource` (`builtin` / `imported`; `unknown` before any
+  session), `modelFile` (`builtin` for the built-in model), `modelSha256` (first `SHA256_SHORT_CHARS` = 12 hex
+  characters), `modelInputSize`, `modelOutputRows`, `modelFallback` (a `ModelFallback` name or `none`),
+  `modelFallbackMessage`, and `modelFallbackFile` (name and short sha256 of an imported model that was refused;
+  only then).
 
 ### 6.8 Capture frame rate & benchmark screen — built in M1
 - **Capture fps** is *measured*, not selected: frames delivered per second while the screen content changes
@@ -371,6 +389,31 @@ step back up after 60 s below the threshold. Every step is logged and shown in t
   is the `stage<Variant>ModelAssets` Gradle task of `app`, which verifies every file listed in `model_info.json`
   and copies only the `.tflite` files and `model_info.json` into the APK assets.
 - No INT8 / w8a16 (loses the end-to-end head; w8a16 falls off the GPU).
+- **Imported models (M0c).** The app has one imported-model slot besides the bundled ones.
+  - *Storage:* the picked file is copied into `noBackupFilesDir/imported/` while its sha256 is computed; importing
+    again replaces it, **Use built-in model** deletes it. Import and reset work only while the capture is stopped.
+  - *Accepted layout, version 1:* exactly one float32 input `[1, 3, S, S]` (channels first, square, `S` a
+    multiple of 32 between `importMinInputSize` and `importMaxInputSize`) and exactly one float32 output
+    `[1, N, 57]` (end-to-end pose head, 17 keypoints). Anything else is refused with a reason that names the
+    shapes found; rectangular inputs come with M1.
+  - *The real tensors decide:* the shapes are read from the model itself through LiteRT (`ModelProbe`, CPU
+    `CompiledModel`, worker thread); metadata inside the file is never trusted.
+  - *Never worse than the built-in model:* if the imported model cannot be loaded at Start, the session runs
+    the built-in model and shows the warning of §6.7. A native crash cannot be caught, so a marker is stored
+    before LiteRT first opens the file and before each session's load, and cleared after; a marker found at the
+    next app start (`ImportGuard`: `Idle`, `Pending(stage)`, `Tripped(stage)`) switches the imported model off
+    and the control screen says so.
+  - *Classes:* `ModelFileSniffer` (`TFL3` identifier and size limits), `ImportedModelRules` (accept or refuse
+    the tensors), `ImportedModelMeta` (name, sha256, bytes, input size, output rows; strict text codec),
+    `ImportGuard` (crash-marker state machine) — all in `core/modelimport`; `ModelProbe` and
+    `PoseDetectors.fromImported` in `detector`; `ModelImporter` (copy, probe, check, store), `ImportedModelStore`
+    (files and preferences), `ModelChoice` (pure choice at Start), `SessionModelLoader` (load with the
+    fallback), `ModelStatusHolder` (what the session runs, read by the screen and the diagnostics) — in
+    `app/modelimport`.
+  - *The 640 model is a download, not part of the app:* `export-model.yml` (manual, inputs `sizes` and
+    `publish_tag`) builds `yolo26n-pose_640.tflite` with the pinned toolchain (`tools/requirements.lock`), checks
+    it and uploads it to the pre-release tagged `models`. It is not in the APK, `model/**` or `model_info.json`,
+    and the rolling `latest` APK release is not touched.
 - **Licence: AGPL-3.0 for the whole app** (vendored Ultralytics code + model weights). Fine for private personal use. Any distribution (Play Store, sharing the APK
   publicly) requires open-sourcing app + weights, or an Ultralytics Enterprise licence.
 
@@ -441,7 +484,9 @@ Agents may not loosen asserted thresholds (protected files).
 |---|---|---|
 | M0a | Tooling: 3 modules, CI green, signed APK on `latest`, AI team files + scripts, skills vendored, AGENTS/CLAUDE.md; model-export workflow run (FP32 320/416 + golden outputs) | app opens (placeholder), version in HUD |
 | M0b | Import the Ultralytics core (§2.1) → screen capture + overlay + raw keypoints in green with our model, portrait + landscape; permissions flow; diagnostics + log screen; CPU banner | **green boxes/keypoints over people in any app**, taps still reach the app below |
-| M1 | One-thread LiteRT fix, allocation-free vendored decoder (D2), golden decode test (both sizes), **capture fps measurement + benchmark screen** | real numbers for fps / ms / heat |
+| M0c | Import one model file (layout checked from its real tensors, crash guard, fallback to the built-in model); `yolo26n-pose_640.tflite` as a download under the release tag `models`; steadier marks (head ring + corner brackets, **Debug marks** switch); plan `docs/plans/M0c.md` | import the 640 file, HUD shows `in 640 imp`; a medium-distance person detected and blinking less |
+| M0d | Video-area crop: bigger people for the model (parked, not approved; plan `docs/plans/M0d.md`) | — |
+| M1 | One-thread LiteRT fix, allocation-free vendored decoder (D2), golden decode test (both sizes), **capture fps measurement + benchmark screen**, rectangular model candidates in the benchmark (352x608 or 384x640, decided by the measured ms/fps at 640) | real numbers for fps / ms / heat |
 | M2 | Img→View hardening: `FitCenter` extended and checked on the phone across rotation, cutout and resize events (no camera) | green dots exactly on heads in portrait and landscape |
 | M3 | Tracker + Kalman + synthetic tests (30 & 60 fps, idle gaps); IDs | red dots with IDs, stable when crossing |
 | M4 | Forward prediction + OneEuro + handle-window lock + debug sheet | smooth dot, tap-to-lock, tuning sliders |
@@ -454,9 +499,15 @@ One session per milestone; M4 may need a second session for tuning on the phone.
 - Real capture fps of the virtual display on the Poco X7 Pro (and `image.timestamp` reliability) — measured in M0b/M1.
 - **HyperOS restrictions:** battery/auto-start limits killing the foreground service, extra "display pop-up"
   toggles, overlay or notification quirks — checked on the phone in M0b; findings go in `docs/TEST_CHECKLIST.md`.
-- **Dot A/B (overlay in the capture):** does our own overlay change detection (head shift < 0.03·h, keypoint 0–4
-  confidence drop < 0.05)? Measured in M0b; if it fails, thinner/hollower marks or capture-side masking in a
-  later milestone.
+- **Dot A/B (overlay in the capture):** answered offline in M0c: the keypoint dots and the full box lower the
+  model's score of the same person on the next frame (`docs/plans/M0c.md`, "Measured after T1"; two people
+  only), so the default marks are now a ring and corner brackets (§6.5). Still to check on the phone, with the
+  **Debug marks** switch off and on (`docs/TEST_CHECKLIST.md`, M0c).
+- **People of 12–15 % of the video height stay undetected** at 640 (and far workers and the snow scene still
+  score 0.00); the area crop is M0d, rectangular inputs M1.
+- **Duplicate boxes on one person** were seen once (v0.1.37): dedupe in M1 or M3.
+- **Unmerged branch `fix-export-model-deps`** holds a stricter export script (self-check against `predict()`,
+  raw-output goldens, public-domain fixture); decide in M1 whether to bring it to `main`.
 - **DRM / secure apps capture black** (`FLAG_SECURE`): expected and unfixable by us; no dots there. Only
   documented, plus the HUD may say "no frames".
 - `displayLeadMs` default — tuned on the phone in M4.
@@ -469,6 +520,14 @@ answers hard questions. Each change is verified in the session with `scripts/ver
 and always by GitHub Actions, which is the source of truth. The owner's laptop is not used for builds.
 
 ## 15. Changes
+- **v0.6.4 (M0c, 2026-11-14):** (A) one imported model file (§8): layout of version 1 checked from the real
+  tensors, crash guard, fallback to the built-in model, control-screen block **Model**; (B) the 640 model is a
+  download under the release tag `models`, built by `export-model.yml`, not part of the APK; (C) marks: head ring
+  (radius not below `minHeadRingRadiusDp`) + corner brackets by default, full box and keypoint dots only with
+  `debugMarks` (§6.5), because the overlay is in the capture; (D) HUD `in <size>` / `imp`, the warning
+  `Imported model not used: built-in model` and the model fields of `summary.txt` (§6.7); (E) §6.5 corrected: the
+  Img→View mapping uses the display size of the capture plan, not `onSizeChanged`; M0c and M0d rows in §12,
+  new open items in §13.
 - **v0.6.3 (M0b review R1):** (A) HUD idle rule in §6.5 (fps below `hudIdleFps` shows 0 and no longer feeds back
   into the capture); (B) every capture-thread entry point is wrapped so no `Error` reaches the `HandlerThread`;
   (C) a changed expected capture size republishes the state without its old detections; (E) a failed start

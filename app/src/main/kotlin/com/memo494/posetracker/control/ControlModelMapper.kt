@@ -81,6 +81,7 @@ internal object ControlModelMapper {
                     }
                 ControlEvent.ModelStateLoaded(active, notice)
             }
+
             is ModelChoice.BuiltIn -> {
                 val notice =
                     when (choice.reason) {

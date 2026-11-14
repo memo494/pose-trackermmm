@@ -146,19 +146,23 @@ private fun activeModelLine(state: ControlState): String =
 @Composable
 private fun ImportResultText(result: ImportSummary) {
     when (result) {
-        is ImportSummary.Accepted ->
+        is ImportSummary.Accepted -> {
             Text(stringResource(R.string.model_result_accepted, result.displayName), style = MaterialTheme.typography.bodyMedium)
+        }
+
         is ImportSummary.Rejected -> {
             val sentence = stringResource(ControlModelMapper.messageRes(result.reason))
             Text(sentence, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
             DetailsLine(result.details)
         }
-        is ImportSummary.Failed ->
+
+        is ImportSummary.Failed -> {
             Text(
                 text = stringResource(R.string.model_result_failed, result.message),
                 color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodyMedium,
             )
+        }
     }
 }
 

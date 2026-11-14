@@ -323,9 +323,13 @@ internal object ControlReducer {
         // A refusal or a failure keeps the previous model and notice; the reload then shows what is really stored.
         val next =
             when (summary) {
-                is ImportSummary.Accepted ->
+                is ImportSummary.Accepted -> {
                     finished.copy(activeModel = ActiveModel.Imported(summary.displayName, summary.inputSize), modelNotice = null)
-                is ImportSummary.Rejected, is ImportSummary.Failed -> finished
+                }
+
+                is ImportSummary.Rejected, is ImportSummary.Failed -> {
+                    finished
+                }
             }
         return ControlStep(next, ControlEffect.LOAD_MODEL_STATE)
     }

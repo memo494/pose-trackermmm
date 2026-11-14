@@ -172,8 +172,9 @@ result, not a failure of the app: send both sets of numbers and one screenshot o
 ### 5. A file that is not a model
 1. Stop. Press **Import model** and pick a **photo** (or any file that is not a model).
 
-**Pass:** the app refuses it with a reason, for example **This is not a TensorFlow Lite model file (.tflite).**,
-and the model line still shows the model you had before.
+**Pass:** the app refuses it with a reason: either **This file is too small to be a pose model.** or **This is not
+a TensorFlow Lite model file (.tflite).** counts as a pass (a very small file gets the first text, a bigger
+one the second), and the model line still shows the model you had before.
 **If it fails:** the app accepts the photo, closes, or the model line changes: Share diagnostics.
 
 ### 6. Steadier marks (debug switch)

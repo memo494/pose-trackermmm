@@ -34,6 +34,8 @@ internal data class ControlState(
      * It is read by the next Start only; changing it while running changes nothing in the session.
      */
     val debugMarks: Boolean = TrackerConfig.DEFAULT_DEBUG_MARKS,
+    /** `true` once the user moved the switch on this screen; a saved value read later is stale and is dropped. */
+    val debugMarksTouched: Boolean = false,
 )
 
 /** The model the next capture start will use. Pure data: no files, no Android types. */
@@ -282,13 +284,24 @@ internal object ControlReducer {
             ControlEvent.UseBuiltInClicked -> onUseBuiltIn(state)
             is ControlEvent.ModelStateLoaded -> onModelStateLoaded(state, event)
             is ControlEvent.DebugMarksToggled -> onDebugMarksToggled(state, event.enabled)
-            is ControlEvent.DebugMarksLoaded -> ControlStep(state.copy(debugMarks = event.enabled), null)
+            is ControlEvent.DebugMarksLoaded -> onDebugMarksLoaded(state, event.enabled)
         }
 
     private fun onDebugMarksToggled(
         state: ControlState,
         enabled: Boolean,
-    ): ControlStep = ControlStep(state.copy(debugMarks = enabled), ControlEffect.PERSIST_DEBUG_MARKS, debugMarks = enabled)
+    ): ControlStep =
+        ControlStep(
+            state.copy(debugMarks = enabled, debugMarksTouched = true),
+            ControlEffect.PERSIST_DEBUG_MARKS,
+            debugMarks = enabled,
+        )
+
+    /** The saved value is read off the main thread; one that arrives after the user moved the switch is stale. */
+    private fun onDebugMarksLoaded(
+        state: ControlState,
+        enabled: Boolean,
+    ): ControlStep = if (state.debugMarksTouched) ControlStep(state, null) else ControlStep(state.copy(debugMarks = enabled), null)
 
     private fun onOverlayChecked(
         state: ControlState,

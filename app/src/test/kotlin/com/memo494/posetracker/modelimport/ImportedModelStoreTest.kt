@@ -28,6 +28,9 @@ class ImportedModelStoreTest {
     /** Test hook: a rename that throws (the process died) for a target with this name. */
     private var dieOnRenameOf: String? = null
 
+    /** Test hook: what the store is told about "an import is running now" (the importer's flag in production). */
+    private var importRunning = false
+
     private val directory get() = File(tmp.root, "imported")
 
     private val oldName = "model-" + "a".repeat(16) + ".tflite"
@@ -40,7 +43,7 @@ class ImportedModelStoreTest {
     ) = ImportedModelMeta(name, digit.toString().repeat(64), bytes.toLong(), 640, 300)
 
     private fun newStore(appStartApplied: AtomicBoolean = AtomicBoolean(false)) =
-        ImportedModelStore(directory, prefs, appStartApplied, thread::check) { from, to ->
+        ImportedModelStore(directory, prefs, appStartApplied, thread::check, { importRunning }) { from, to ->
             if (to.name == dieOnRenameOf) throw IllegalStateException("the process died")
             to.name != failRenameOf && from.renameTo(to)
         }
@@ -245,6 +248,55 @@ class ImportedModelStoreTest {
         assertThat(temp.parentFile).isEqualTo(store.modelFileFor(newMeta).parentFile)
         assertThat(temp.name).endsWith(".tflite")
         assertThat(temp.exists()).isFalse()
+    }
+
+    // ---- leftover temporary file of a dead process ----
+
+    private fun leaveTemp(): File {
+        directory.mkdirs()
+        return File(directory, "import.tflite").also { it.writeBytes(newBytes) }
+    }
+
+    @Test
+    fun firstAccessOfTheProcess_deletesALeftoverTempFile() {
+        val leftover = leaveTemp()
+
+        newStore().state()
+
+        assertThat(leftover.exists()).isFalse()
+    }
+
+    @Test
+    fun firstAccessDuringAnImport_keepsTheTempFile() {
+        val leftover = leaveTemp()
+        importRunning = true
+
+        newStore().state()
+
+        assertThat(leftover.exists()).isTrue()
+    }
+
+    @Test
+    fun laterAccess_doesNotDeleteTheTempFileOfAnImportInProgress() {
+        val store = newStore()
+        store.state()
+        importRunning = true
+        val temp = store.newTempFile().also { it.writeBytes(newBytes) }
+
+        store.state()
+        store.setGuard(ImportGuardState.Idle)
+        newStore(AtomicBoolean(true)).state()
+
+        assertThat(temp.exists()).isTrue()
+    }
+
+    @Test
+    fun leftoverTempFile_isKeptOnLaterAccessesWhenTheProcessAlreadyStarted() {
+        val leftover = leaveTemp()
+
+        newStore(AtomicBoolean(true)).state()
+
+        assertThat(leftover.exists()).isTrue()
     }
 
     // ---- guard ----

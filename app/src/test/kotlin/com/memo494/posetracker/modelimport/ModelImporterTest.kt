@@ -305,6 +305,39 @@ class ModelImporterTest {
         }
     }
 
+    // ---- early stop on a file that is not a model ----
+
+    @Test
+    fun notTfliteStream_stopsReadingAsSoonAsTheHeaderIsKnown() {
+        val previous = importPreviousModel()
+        val stream = SlowZeroStream(total = 8_000, chunk = 50)
+
+        val outcome = importer.import({ stream }, "photo.jpg", null)
+
+        assertRejected(outcome, RejectionKind.Sniffed(SniffRejection.NOT_TFLITE))
+        // The minimum is 100 bytes: the second read of 50 reaches it with a full header and the loop stops there.
+        assertThat(stream.bytesRead).isEqualTo(100L)
+        assertThat(stream.closed).isTrue()
+        assertThat(probeCalls).isEqualTo(0)
+        assertThat(prefs.writes).isEmpty()
+        assertPreviousSurvives(previous)
+    }
+
+    @Test
+    fun smallNotTfliteStream_isStillTooSmall() {
+        assertRejected(runImport(ByteArray(50)), RejectionKind.Sniffed(SniffRejection.TOO_SMALL))
+    }
+
+    @Test
+    fun notTfliteStreamLargerThanTheCap_stillStopsAtTheHeader_notAtTheCap() {
+        val stream = SlowZeroStream(total = 1_000_000, chunk = 1_000)
+
+        val outcome = importer.import({ stream }, "huge.bin", null)
+
+        assertRejected(outcome, RejectionKind.Sniffed(SniffRejection.NOT_TFLITE))
+        assertThat(stream.bytesRead).isEqualTo(1_000L)
+    }
+
     // ---- I/O failures ----
 
     @Test
@@ -567,7 +600,7 @@ class ModelImporterTest {
 
     // ---- streams ----
 
-    /** Hands out [chunk] zero bytes per read, forever. */
+    /** Hands out [chunk] bytes per read, forever; they start like a TFLite file (identifier at bytes 4 to 7). */
     private class EndlessStream(
         private val chunk: Int,
     ) : InputStream() {
@@ -582,7 +615,7 @@ class ModelImporterTest {
             len: Int,
         ): Int {
             val n = minOf(chunk, len)
-            b.fill(0, off, off + n)
+            fillLikeTflite(b, off, n, bytesRead.toInt())
             bytesRead += n
             return n
         }
@@ -613,6 +646,33 @@ class ModelImporterTest {
         assertThat(prefs.writes).isEmpty()
     }
 
+    /** Hands out [total] zero bytes in reads of at most [chunk] bytes, then ends; it counts what was read. */
+    private class SlowZeroStream(
+        private val total: Int,
+        private val chunk: Int,
+    ) : InputStream() {
+        var bytesRead = 0L
+        var closed = false
+
+        override fun read(): Int = throw UnsupportedOperationException()
+
+        override fun read(
+            b: ByteArray,
+            off: Int,
+            len: Int,
+        ): Int {
+            if (bytesRead >= total) return -1
+            val n = minOf(chunk, len, total - bytesRead.toInt())
+            b.fill(0, off, off + n)
+            bytesRead += n
+            return n
+        }
+
+        override fun close() {
+            closed = true
+        }
+    }
+
     /** Serves [failAfter] bytes, then throws [error]. */
     private class FailingStream(
         private val failAfter: Int,
@@ -630,13 +690,29 @@ class ModelImporterTest {
         ): Int {
             if (served >= failAfter) throw error
             val n = minOf(len, failAfter - served)
-            b.fill(0, off, off + n)
+            // Looks like a TFLite file from the first bytes, so only the read error ends the copy.
+            fillLikeTflite(b, off, n, served)
             served += n
             return n
         }
 
         override fun close() {
             closed = true
+        }
+    }
+
+    private companion object {
+        const val IDENTIFIER_OFFSET = 4
+        val IDENTIFIER_BYTES = "TFL3".map { it.code.toByte() }
+
+        /** Writes [n] bytes of a stream from position [from] on: zeros, except the TFLite identifier at bytes 4 to 7. */
+        fun fillLikeTflite(
+            b: ByteArray,
+            off: Int,
+            n: Int,
+            from: Int,
+        ) {
+            for (i in 0 until n) b[off + i] = IDENTIFIER_BYTES.getOrElse(from + i - IDENTIFIER_OFFSET) { 0 }
         }
     }
 }

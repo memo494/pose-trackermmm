@@ -153,7 +153,18 @@ class ModelImporter(
         source: () -> InputStream,
         rawDisplayName: String?,
     ): ImportOutcome {
-        val copy = copyToTemp(source, temp) ?: return tooLarge("more than ${config.importMaxBytes} bytes")
+        val copy =
+            when (val copied = copyToTemp(source, temp)) {
+                is CopyResult.TooLarge -> return tooLarge("more than ${config.importMaxBytes} bytes")
+                is CopyResult.NotTflite -> {
+                    return ImportOutcome.Rejected(
+                        RejectionKind.Sniffed(SniffRejection.NOT_TFLITE),
+                        "stopped after ${copied.bytesRead} bytes",
+                    )
+                }
+
+                is CopyResult.Copied -> copied
+            }
         val sniff = ModelFileSniffer.looksLikeTflite(copy.header, copy.bytes, config)
         if (sniff is SniffResult.Rejected) {
             return ImportOutcome.Rejected(RejectionKind.Sniffed(sniff.reason), "${copy.bytes} bytes")
@@ -214,13 +225,16 @@ class ModelImporter(
         }
 
     /**
-     * Copies the stream into [temp] while hashing and counting; `null` as soon as the count passes the cap
-     * (the rest of the stream is not read).
+     * Copies the stream into [temp] while hashing and counting. It stops early, without reading the rest of the
+     * stream, with [CopyResult.TooLarge] as soon as the count passes the cap, and with [CopyResult.NotTflite] as
+     * soon as the size is at least the minimum and the first 8 bytes are not a TFLite header (a photo or a text
+     * file is refused after one buffer, not after a full copy). Below the minimum size the final sniff answers
+     * "too small" first, so the early look waits for it.
      */
     private fun copyToTemp(
         source: () -> InputStream,
         temp: File,
-    ): Copied? {
+    ): CopyResult {
         val digest = MessageDigest.getInstance(HASH_ALGORITHM)
         val buffer = ByteArray(TrackerConfig.MODEL_IO_BUFFER_BYTES)
         val header = ByteArray(ModelFileSniffer.HEADER_BYTES)
@@ -231,12 +245,13 @@ class ModelImporter(
                 var count = input.read(buffer)
                 while (count >= 0) {
                     total += count
-                    if (total > config.importMaxBytes) return null
+                    if (total > config.importMaxBytes) return CopyResult.TooLarge
                     val take = minOf(count, header.size - headerFilled)
                     if (take > 0) {
                         System.arraycopy(buffer, 0, header, headerFilled, take)
                         headerFilled += take
                     }
+                    if (headerFilled == header.size && isNotTflite(header, total)) return CopyResult.NotTflite(total)
                     digest.update(buffer, 0, count)
                     output.write(buffer, 0, count)
                     count = input.read(buffer)
@@ -244,14 +259,30 @@ class ModelImporter(
                 output.fd.sync()
             }
         }
-        return Copied(total, toHex(digest.digest()), header.copyOf(headerFilled))
+        return CopyResult.Copied(total, toHex(digest.digest()), header.copyOf(headerFilled))
     }
 
-    private class Copied(
-        val bytes: Long,
-        val sha256: String,
-        val header: ByteArray,
-    )
+    private fun isNotTflite(
+        header: ByteArray,
+        bytesSoFar: Long,
+    ): Boolean = ModelFileSniffer.looksLikeTflite(header, bytesSoFar, config) == SniffResult.Rejected(SniffRejection.NOT_TFLITE)
+
+    private sealed interface CopyResult {
+        /** The stream is longer than the cap. */
+        object TooLarge : CopyResult
+
+        /** The header is not TFLite; [bytesRead] bytes were read before the copy stopped. */
+        class NotTflite(
+            val bytesRead: Long,
+        ) : CopyResult
+
+        /** The whole stream was copied. */
+        class Copied(
+            val bytes: Long,
+            val sha256: String,
+            val header: ByteArray,
+        ) : CopyResult
+    }
 
     private fun tooLarge(details: String): ImportOutcome =
         ImportOutcome.Rejected(RejectionKind.Sniffed(SniffRejection.TOO_LARGE), "$details, limit ${config.importMaxBytes} bytes")

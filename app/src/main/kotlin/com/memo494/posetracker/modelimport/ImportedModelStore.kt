@@ -66,6 +66,7 @@ class ImportedModelStore private constructor(
     private val prefsLazy: Lazy<GuardPrefs>,
     private val appStartApplied: AtomicBoolean,
     private val threadCheck: () -> Unit,
+    private val importInFlight: () -> Boolean,
     private val rename: (File, File) -> Boolean,
 ) {
     /** The production store: files under `noBackupFilesDir/imported/`, the marker in private preferences. */
@@ -78,6 +79,7 @@ class ImportedModelStore private constructor(
         },
         PROCESS_APP_START_APPLIED,
         { WorkerThreadCheck.require() },
+        { ModelImporter.isImporting() },
         File::renameTo,
     )
 
@@ -85,7 +87,9 @@ class ImportedModelStore private constructor(
      * For tests: [directory] is the store's own directory, [guardPrefs] the marker value, [appStartApplied] the
      * "this process already applied the app-start step" flag (a fresh `AtomicBoolean(false)` is a fresh process),
      * [threadCheck] the "not on the main thread" check that every method runs first (the production one is
-     * `WorkerThreadCheck.require`, which needs a real `Looper`; it throws [IllegalStateException] when it objects)
+     * `WorkerThreadCheck.require`, which needs a real `Looper`; it throws [IllegalStateException] when it objects),
+     * [importInFlight] ("an import is running now", the production one is `ModelImporter.isImporting`; the
+     * first access of a process deletes a leftover temporary file only while it says `false`)
      * and [rename] the file move used by [accept] (`false` means it failed).
      */
     internal constructor(
@@ -93,8 +97,9 @@ class ImportedModelStore private constructor(
         guardPrefs: GuardPrefs,
         appStartApplied: AtomicBoolean,
         threadCheck: () -> Unit,
+        importInFlight: () -> Boolean = { ModelImporter.isImporting() },
         rename: (File, File) -> Boolean = File::renameTo,
-    ) : this(lazyOf(directory), lazyOf(guardPrefs), appStartApplied, threadCheck, rename)
+    ) : this(lazyOf(directory), lazyOf(guardPrefs), appStartApplied, threadCheck, importInFlight, rename)
 
     /** The file that holds the model described by [meta]: `model-<first 16 hex of sha256>.tflite`; it may not exist. */
     fun modelFileFor(meta: ImportedModelMeta): File {
@@ -104,7 +109,8 @@ class ImportedModelStore private constructor(
 
     /**
      * What is stored now. The first call in a process (this or any other method) applies [ImportGuard.onAppStart]
-     * once and stores the result: a `Pending` left by a crashed run becomes `Tripped`. A meta that does not decode
+     * once and stores the result: a `Pending` left by a crashed run becomes `Tripped`, and a leftover temporary
+     * file of a dead process is deleted (unless an import runs now: it owns that file). A meta that does not decode
      * or a missing file is simply "no imported model"; this never throws for bad data.
      */
     fun state(): StoredModelState {
@@ -194,10 +200,22 @@ class ImportedModelStore private constructor(
         val prefs = prefsLazy.value
         val stored = ImportGuard.decode(prefs.read())
         if (!appStartApplied.compareAndSet(false, true)) return stored
+        // The importer sets its flag before newTempFile(), so a temporary file seen here with the flag clear is a
+        // leftover of a dead process (the temporary file name is fixed, so it would also be replaced on the next import).
+        if (!importInFlight()) deleteLeftoverTemp()
         val applied = ImportGuard.onAppStart(stored)
         // If the trip cannot be stored, apply it again on the next call: a stale Pending must not read as usable.
         if (applied != stored && !prefs.write(ImportGuard.encode(applied))) appStartApplied.set(false)
         return applied
+    }
+
+    /** Best effort: a leftover that cannot be deleted is deleted again by the next [newTempFile]. */
+    private fun deleteLeftoverTemp() {
+        try {
+            File(directoryLazy.value, TEMP_NAME).delete()
+        } catch (e: SecurityException) {
+            // Nothing to do: see above.
+        }
     }
 
     private fun acceptLocked(

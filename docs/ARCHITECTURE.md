@@ -194,6 +194,11 @@ Dependencies: `app → detector → core`, `app → core`. Nothing else.
 | `CompiledModel` + its `TensorBuffer`s | capture (= analysis) | create, warm up, run, close on this thread only; never on main; buffers allocated **once** and reused; buffers closed before the model |
 | `MediaProjection` callbacks, `ImageReader` listener | capture | `registerCallback(…, captureHandler)` |
 | Tracker | capture | sole writer |
+| Probe `CompiledModel` (`ModelProbe`, M0c import) | IO worker, CPU only | created and closed inside one call; never on main, never GPU, never kept |
+| `ImportedModelStore` | any worker thread | one process-wide lock serialises every call; refuses the main thread (`IllegalStateException`) |
+| Import single-flight flag (`ModelImporter`) | any thread | process-wide `AtomicBoolean`, set before `import.tflite` is created and cleared in `finally`; a second import answers `Failed(BUSY)`; a recreated screen seeds `importing` from it |
+| `ModelStatusHolder` | any thread | one `AtomicReference`, immutable values; written by the capture thread, read by the screen |
+| Imported model file (hash check) | capture | the capture thread hashes `model-<sha16>.tflite` against its meta before loading it |
 | Snapshot | any | immutable |
 | Overlay `View`, `WindowManager` calls, Predictor / OneEuro state | main | plain classes, preallocated; no work except drawing |
 | TrackerConfig | DataStore → StateFlow | applied at next frame boundary |

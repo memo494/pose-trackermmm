@@ -792,7 +792,7 @@ class ControlReducerTest {
 
         val step = reduce(busy, ControlEvent.DebugMarksToggled(true))
 
-        assertThat(step.state).isEqualTo(busy.copy(debugMarks = true))
+        assertThat(step.state).isEqualTo(busy.copy(debugMarks = true, debugMarksTouched = true))
     }
 
     @Test
@@ -802,6 +802,36 @@ class ControlReducerTest {
         assertThat(step.state.debugMarks).isTrue()
         assertThat(step.effect).isNull()
         assertThat(step.debugMarks).isNull()
+    }
+
+    @Test
+    fun debugMarksLoadedAfterAToggle_isDropped() {
+        val toggled = reduce(ready, ControlEvent.DebugMarksToggled(true)).state
+
+        val step = reduce(toggled, ControlEvent.DebugMarksLoaded(false))
+
+        assertThat(step.state).isEqualTo(toggled)
+        assertThat(step.state.debugMarks).isTrue()
+        assertThat(step.effect).isNull()
+        assertThat(step.debugMarks).isNull()
+    }
+
+    @Test
+    fun debugMarksLoadedAfterAToggleBackOff_isDroppedToo() {
+        val on = reduce(ready, ControlEvent.DebugMarksToggled(true)).state
+        val off = reduce(on, ControlEvent.DebugMarksToggled(false)).state
+
+        val step = reduce(off, ControlEvent.DebugMarksLoaded(true))
+
+        assertThat(step.state.debugMarks).isFalse()
+    }
+
+    @Test
+    fun debugMarksLoadedBeforeAnyToggle_doesNotCountAsATouch() {
+        val loaded = reduce(ready, ControlEvent.DebugMarksLoaded(true)).state
+
+        assertThat(loaded.debugMarksTouched).isFalse()
+        assertThat(reduce(loaded, ControlEvent.DebugMarksLoaded(false)).state.debugMarks).isFalse()
     }
 
     @Test

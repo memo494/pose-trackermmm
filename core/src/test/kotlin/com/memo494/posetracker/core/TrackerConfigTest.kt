@@ -18,6 +18,9 @@ class TrackerConfigTest {
         assertThat(config.keypointMinScore).isEqualTo(0.5f)
         assertThat(config.hudTextSizeSp).isEqualTo(12f)
         assertThat(config.headRingRadiusRatio).isEqualTo(0.12f)
+        assertThat(config.minHeadRingRadiusDp).isEqualTo(12f)
+        assertThat(config.boxCornerRatio).isEqualTo(0.18f)
+        assertThat(config.debugMarks).isFalse()
     }
 
     @Test
@@ -130,6 +133,42 @@ class TrackerConfigTest {
         assertThrows(IllegalArgumentException::class.java) {
             TrackerConfig(headRingRadiusRatio = TrackerConfig.MAX_HEAD_RING_RADIUS_RATIO + 0.01f)
         }
+    }
+
+    @Test
+    fun minHeadRingRadiusDp_negativeOrAboveTheMaximum_isRejected() {
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(minHeadRingRadiusDp = -0.5f) }
+        assertThrows(IllegalArgumentException::class.java) {
+            TrackerConfig(minHeadRingRadiusDp = TrackerConfig.MAX_MIN_HEAD_RING_RADIUS_DP + 1f)
+        }
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(minHeadRingRadiusDp = Float.NaN) }
+    }
+
+    @Test
+    fun minHeadRingRadiusDp_atItsBounds_isAccepted() {
+        assertThat(TrackerConfig(minHeadRingRadiusDp = 0f).minHeadRingRadiusDp).isEqualTo(0f)
+        val high = TrackerConfig(minHeadRingRadiusDp = TrackerConfig.MAX_MIN_HEAD_RING_RADIUS_DP)
+        assertThat(high.minHeadRingRadiusDp).isEqualTo(TrackerConfig.MAX_MIN_HEAD_RING_RADIUS_DP)
+    }
+
+    @Test
+    fun boxCornerRatio_zeroNegativeHalfOrMore_isRejected() {
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(boxCornerRatio = 0f) }
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(boxCornerRatio = -0.1f) }
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(boxCornerRatio = 0.5f) }
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(boxCornerRatio = 0.9f) }
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(boxCornerRatio = Float.NaN) }
+    }
+
+    @Test
+    fun boxCornerRatio_justInsideTheOpenInterval_isAccepted() {
+        assertThat(TrackerConfig(boxCornerRatio = 0.01f).boxCornerRatio).isEqualTo(0.01f)
+        assertThat(TrackerConfig(boxCornerRatio = 0.49f).boxCornerRatio).isEqualTo(0.49f)
+    }
+
+    @Test
+    fun debugMarks_canBeTurnedOn() {
+        assertThat(TrackerConfig(debugMarks = true).debugMarks).isTrue()
     }
 
     @Test

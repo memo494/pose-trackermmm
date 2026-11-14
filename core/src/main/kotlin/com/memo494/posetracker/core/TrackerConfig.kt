@@ -26,6 +26,14 @@ package com.memo494.posetracker.core
  * @property hudTextSizeSp text size of the debug HUD, in sp.
  * @property headRingRadiusRatio radius of the head ring as a fraction of the person box width
  *   (unitless).
+ * @property minHeadRingRadiusDp smallest radius of the head ring, in dp; the ring is
+ *   `max(headRingRadiusRatio x box width, minHeadRingRadiusDp)` so far people still get a ring that
+ *   is a real mark (a tiny ring does not keep the model's score on the next frame).
+ * @property boxCornerRatio length of each corner-bracket stroke as a fraction of the box side it runs
+ *   along (unitless, in the open interval (0, 0.5), so the two strokes of one side never meet).
+ * @property debugMarks `false` (default): only the head ring and the corner brackets are drawn, because
+ *   the overlay is part of the capture and every extra mark lowers the model's score of the person on the
+ *   next frame. `true`: also the full box and the keypoint dots, for debugging.
  * @property modelInputSize side of the square model input, in pixels (Mdl space), of the BUILT-IN
  *   models; only [MODEL_INPUT_SIZE_SMALL] (320) or [MODEL_INPUT_SIZE_LARGE] (416) is accepted because only
  *   those two model files are shipped. An imported model brings its own size, limited by
@@ -51,6 +59,9 @@ data class TrackerConfig(
     val keypointMinScore: Float = DEFAULT_KEYPOINT_MIN_SCORE,
     val hudTextSizeSp: Float = DEFAULT_HUD_TEXT_SIZE_SP,
     val headRingRadiusRatio: Float = DEFAULT_HEAD_RING_RADIUS_RATIO,
+    val minHeadRingRadiusDp: Float = DEFAULT_MIN_HEAD_RING_RADIUS_DP,
+    val boxCornerRatio: Float = DEFAULT_BOX_CORNER_RATIO,
+    val debugMarks: Boolean = DEFAULT_DEBUG_MARKS,
     val modelInputSize: Int = DEFAULT_MODEL_INPUT_SIZE,
     val importMinBytes: Long = DEFAULT_IMPORT_MIN_BYTES,
     val importMaxBytes: Long = DEFAULT_IMPORT_MAX_BYTES,
@@ -92,6 +103,13 @@ data class TrackerConfig(
         require(headRingRadiusRatio in MIN_HEAD_RING_RADIUS_RATIO..MAX_HEAD_RING_RADIUS_RATIO) {
             "headRingRadiusRatio $headRingRadiusRatio outside " +
                 "[$MIN_HEAD_RING_RADIUS_RATIO, $MAX_HEAD_RING_RADIUS_RATIO]"
+        }
+        require(minHeadRingRadiusDp in MIN_MIN_HEAD_RING_RADIUS_DP..MAX_MIN_HEAD_RING_RADIUS_DP) {
+            "minHeadRingRadiusDp $minHeadRingRadiusDp outside " +
+                "[$MIN_MIN_HEAD_RING_RADIUS_DP, $MAX_MIN_HEAD_RING_RADIUS_DP]"
+        }
+        require(boxCornerRatio > BOX_CORNER_RATIO_LOWER_EXCLUSIVE && boxCornerRatio < BOX_CORNER_RATIO_UPPER_EXCLUSIVE) {
+            "boxCornerRatio $boxCornerRatio outside ($BOX_CORNER_RATIO_LOWER_EXCLUSIVE, $BOX_CORNER_RATIO_UPPER_EXCLUSIVE)"
         }
         require(modelInputSize == MODEL_INPUT_SIZE_SMALL || modelInputSize == MODEL_INPUT_SIZE_LARGE) {
             "modelInputSize $modelInputSize is neither $MODEL_INPUT_SIZE_SMALL nor $MODEL_INPUT_SIZE_LARGE"
@@ -228,6 +246,27 @@ data class TrackerConfig(
 
         /** Highest accepted [headRingRadiusRatio]. */
         const val MAX_HEAD_RING_RADIUS_RATIO = 0.4f
+
+        /** Default [minHeadRingRadiusDp], in dp. */
+        const val DEFAULT_MIN_HEAD_RING_RADIUS_DP = 12.0f
+
+        /** Lowest accepted [minHeadRingRadiusDp], in dp (0 = no minimum). */
+        const val MIN_MIN_HEAD_RING_RADIUS_DP = 0.0f
+
+        /** Highest accepted [minHeadRingRadiusDp], in dp. */
+        const val MAX_MIN_HEAD_RING_RADIUS_DP = 48.0f
+
+        /** Default [boxCornerRatio]: unitless fraction of the box side. */
+        const val DEFAULT_BOX_CORNER_RATIO = 0.18f
+
+        /** [boxCornerRatio] must be above this (exclusive). */
+        const val BOX_CORNER_RATIO_LOWER_EXCLUSIVE = 0.0f
+
+        /** [boxCornerRatio] must be below this (exclusive): at 0.5 the two strokes of one side would meet. */
+        const val BOX_CORNER_RATIO_UPPER_EXCLUSIVE = 0.5f
+
+        /** Default [debugMarks]: the box and the keypoint dots are off. */
+        const val DEFAULT_DEBUG_MARKS = false
 
         /** Small model input side, in pixels (Mdl): the thermal fallback size. */
         const val MODEL_INPUT_SIZE_SMALL = 320

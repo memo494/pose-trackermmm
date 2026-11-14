@@ -10,6 +10,7 @@ import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.OpenableColumns
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -26,9 +27,11 @@ import com.memo494.posetracker.capture.CaptureLog
 import com.memo494.posetracker.capture.CaptureService
 import com.memo494.posetracker.control.ControlEffect
 import com.memo494.posetracker.control.ControlEvent
+import com.memo494.posetracker.control.ControlModelMapper
 import com.memo494.posetracker.control.ControlReducer
 import com.memo494.posetracker.control.ControlScreen
 import com.memo494.posetracker.control.ControlState
+import com.memo494.posetracker.control.ImportSummary
 import com.memo494.posetracker.core.TrackerConfig
 import com.memo494.posetracker.diagnostics.AppLog
 import com.memo494.posetracker.diagnostics.CrashNotice
@@ -38,19 +41,33 @@ import com.memo494.posetracker.diagnostics.DiagnosticsSection
 import com.memo494.posetracker.diagnostics.DiagnosticsShare
 import com.memo494.posetracker.diagnostics.DiagnosticsUiState
 import com.memo494.posetracker.diagnostics.DiagnosticsZip
+import com.memo494.posetracker.modelimport.ImportedModelStore
+import com.memo494.posetracker.modelimport.ModelImporter
+import com.memo494.posetracker.modelimport.ModelStatus
+import com.memo494.posetracker.modelimport.ModelStatusHolder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.IOException
 
 /**
  * Control screen: permissions, screen-capture consent, Start and Stop (ARCHITECTURE §1, §14).
  * Every decision comes from [ControlReducer]; this class only reads the system and performs the effect it returns.
+ *
+ * Model import: the picked file is copied at once by [ModelImporter] on `Dispatchers.IO`, so no persistable URI
+ * permission is needed. The import belongs to this activity's `lifecycleScope` and there is no service for it: if
+ * the activity is destroyed mid-import (rotation, the system closing it) the result is not shown, the
+ * `importing` flag of the new instance starts as `false`, and the copy may be lost or finish unseen (the next
+ * model-state read shows what was stored). The store refuses a second import while one runs.
  */
 class MainActivity : ComponentActivity() {
     private val controlState = mutableStateOf(ControlState())
     private val diagnosticsState = mutableStateOf(DiagnosticsUiState())
     private var seenStartFailures = 0
+
+    /** Counts the model-state reads; only the newest read may answer (main thread only). */
+    private var modelLoadSeq = 0
 
     // Registered at activity level so a result that arrives after a recreation still reaches the new instance.
     private val consentLauncher =
@@ -60,6 +77,12 @@ class MainActivity : ComponentActivity() {
     private val notificationLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             dispatch(ControlEvent.NotificationPermissionResult(granted))
+        }
+
+    // A .tflite has no registered MIME type, so the picker is opened for every type.
+    private val modelPickerLauncher =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            dispatch(ControlEvent.ImportPicked(uri?.toString()))
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -73,6 +96,8 @@ class MainActivity : ComponentActivity() {
                     onStartClick = { dispatch(ControlEvent.StartClicked) },
                     onStopClick = { dispatch(ControlEvent.StopClicked) },
                     onOpenOverlaySettingsClick = { dispatch(ControlEvent.OpenOverlaySettingsClicked) },
+                    onImportClick = { dispatch(ControlEvent.ImportClicked) },
+                    onUseBuiltInClick = { dispatch(ControlEvent.UseBuiltInClicked) },
                     crashContent = {
                         CrashNotice(
                             state = diagnosticsState.value,
@@ -95,7 +120,14 @@ class MainActivity : ComponentActivity() {
         seenStartFailures = CaptureService.startFailures.value
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-                launch { CaptureService.running.collect { dispatch(ControlEvent.RunningChanged(it)) } }
+                launch {
+                    // Also the first value of every start of the screen, so the model block is read when the screen
+                    // comes up and again when a session stops (the session publishes its model status).
+                    CaptureService.running.collect {
+                        dispatch(ControlEvent.RunningChanged(it))
+                        loadModelState()
+                    }
+                }
                 CaptureService.startFailures.collect { failures ->
                     if (failures > seenStartFailures) dispatch(ControlEvent.StartFailed)
                     seenStartFailures = failures
@@ -126,6 +158,10 @@ class MainActivity : ComponentActivity() {
             ControlEffect.LAUNCH_CONSENT -> launchConsent()
             ControlEffect.START_SERVICE -> startCapture(consentResult)
             ControlEffect.STOP_SERVICE -> stopCapture()
+            ControlEffect.OPEN_MODEL_PICKER -> openModelPicker()
+            ControlEffect.RUN_IMPORT -> runImport(step.importUri)
+            ControlEffect.CLEAR_IMPORTED -> clearImported()
+            ControlEffect.LOAD_MODEL_STATE -> loadModelState()
             null -> Unit
         }
     }
@@ -217,6 +253,97 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun openModelPicker() {
+        try {
+            modelPickerLauncher.launch(arrayOf(MODEL_PICKER_MIME_TYPE))
+        } catch (e: Exception) {
+            CaptureLog.log("opening the model picker failed", e)
+        }
+    }
+
+    /** Imports the picked document off the main thread, then reports the outcome and reads the model state again. */
+    private fun runImport(uriString: String?) {
+        if (uriString == null) return
+        lifecycleScope.launch {
+            val summary = withContext(Dispatchers.IO) { importOrFail(Uri.parse(uriString)) }
+            // A new model is a new situation: what the last session said about the old one no longer applies.
+            if (summary is ImportSummary.Accepted) acknowledgedStatus = ModelStatusHolder.latest()
+            dispatch(ControlEvent.ImportFinished(summary))
+        }
+    }
+
+    /** Worker thread. Never throws: any failure, `Error`s included, becomes [ImportSummary.Failed]. */
+    private fun importOrFail(uri: Uri): ImportSummary =
+        try {
+            val (name, size) = readNameAndSize(uri)
+            val importer = ModelImporter(ImportedModelStore(applicationContext))
+            val source = { contentResolver.openInputStream(uri) ?: throw IOException("The picked file cannot be opened") }
+            ControlModelMapper.summary(importer.import(source, name, size))
+        } catch (t: Throwable) {
+            AppLog.log("model import failed", t)
+            ImportSummary.Failed(t.javaClass.simpleName + (t.message?.let { ": $it" } ?: ""))
+        }
+
+    /**
+     * The provider's file name and size, each `null` when it does not say (or the query fails): the importer
+     * counts the bytes itself and falls back to a neutral name.
+     */
+    private fun readNameAndSize(uri: Uri): Pair<String?, Long?> {
+        val unknown: Pair<String?, Long?> = Pair(null, null)
+        return try {
+            val columns = arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE)
+            contentResolver.query(uri, columns, null, null, null)?.use { cursor ->
+                if (!cursor.moveToFirst()) return@use unknown
+                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                val name = if (nameIndex >= 0 && !cursor.isNull(nameIndex)) cursor.getString(nameIndex) else null
+                val size = if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) cursor.getLong(sizeIndex) else null
+                Pair(name, size)
+            } ?: unknown
+        } catch (e: Exception) {
+            AppLog.log("reading the picked file's name and size failed", e)
+            unknown
+        }
+    }
+
+    /** Deletes the imported model off the main thread, then reads the model state again. */
+    private fun clearImported() {
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) { clearOrLog() }
+            acknowledgedStatus = ModelStatusHolder.latest()
+            loadModelState()
+        }
+    }
+
+    private fun clearOrLog() {
+        try {
+            if (!ImportedModelStore(applicationContext).clear()) AppLog.log("clearing the imported model was incomplete", null)
+        } catch (t: Throwable) {
+            AppLog.log("clearing the imported model failed", t)
+        }
+    }
+
+    /**
+     * Reads the stored model state and the newest session's model status off the main thread. Only the newest
+     * read answers, so an older read cannot overwrite a newer one; a failed read leaves the screen as it was.
+     */
+    private fun loadModelState() {
+        val sequence = ++modelLoadSeq
+        lifecycleScope.launch {
+            val event = withContext(Dispatchers.IO) { readModelState() }
+            if (event != null && sequence == modelLoadSeq) dispatch(event)
+        }
+    }
+
+    private fun readModelState(): ControlEvent.ModelStateLoaded? =
+        try {
+            val status: ModelStatus? = ModelStatusHolder.latest().takeUnless { it === acknowledgedStatus }
+            ControlModelMapper.stateLoaded(ImportedModelStore(applicationContext).state(), status)
+        } catch (t: Throwable) {
+            AppLog.log("reading the model state failed", t)
+            null
+        }
+
     private fun updateDiagnostics(change: (DiagnosticsUiState) -> DiagnosticsUiState) {
         diagnosticsState.value = change(diagnosticsState.value)
     }
@@ -279,4 +406,15 @@ class MainActivity : ComponentActivity() {
 
     /** The newest log lines, newest last. */
     private fun logText(): String = AppLog.lines().takeLast(TrackerConfig.LOG_SCREEN_LINES).joinToString("\n")
+
+    private companion object {
+        const val MODEL_PICKER_MIME_TYPE = "*/*"
+
+        /**
+         * The session status the owner has already acted on (imported a new model or reset to the built-in one);
+         * its fallback notice is not shown again. Compared by identity: a new session publishes a new object.
+         */
+        @Volatile
+        var acknowledgedStatus: ModelStatus? = null
+    }
 }

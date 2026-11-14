@@ -379,6 +379,288 @@ class ControlReducerTest {
         assertThat(steps).isEqualTo(stateFlagCombinations * notices.size * events.size * flags.size)
     }
 
+    // The model block: import, reset and the stored model state.
+
+    private val imported = ActiveModel.Imported("yolo26n-pose_640.tflite", 640)
+    private val tripped = ModelNotice(ModelNoticeKind.GUARD_TRIPPED_LOAD)
+    private val rejected = ImportSummary.Rejected(ModelRejectionReason.INPUT_NHWC, "input [1,640,640,3] float32")
+
+    @Test
+    fun modelBlock_startsWithTheBuiltInModelAndNothingToTell() {
+        val state = ControlState()
+
+        assertThat(state.activeModel).isEqualTo(ActiveModel.BuiltIn)
+        assertThat(state.importing).isFalse()
+        assertThat(state.importResult).isNull()
+        assertThat(state.modelNotice).isNull()
+    }
+
+    @Test
+    fun importClicked_whileStopped_opensThePickerAndChangesNothing() {
+        val state = ready.copy(activeModel = imported, importResult = rejected, modelNotice = tripped)
+
+        val step = reduce(state, ControlEvent.ImportClicked)
+
+        assertThat(step.state).isEqualTo(state)
+        assertThat(step.effect).isEqualTo(ControlEffect.OPEN_MODEL_PICKER)
+    }
+
+    @Test
+    fun importClicked_whileRunningStartingOrImporting_isIgnored() {
+        val blocked = listOf(ready.copy(running = true), ready.copy(awaitingConsent = true), ready.copy(importing = true))
+        for (state in blocked) {
+            val step = reduce(state, ControlEvent.ImportClicked)
+
+            assertThat(step.state).isEqualTo(state)
+            assertThat(step.effect).isNull()
+        }
+    }
+
+    @Test
+    fun importPicked_cancelled_leavesEverythingAsItWas() {
+        val states =
+            listOf(
+                ready,
+                ready.copy(activeModel = imported, importResult = rejected, modelNotice = tripped),
+                ready.copy(running = true),
+                ready.copy(importing = true),
+            )
+        for (state in states) {
+            val step = reduce(state, ControlEvent.ImportPicked(null))
+
+            assertThat(step.state).isEqualTo(state)
+            assertThat(step.effect).isNull()
+            assertThat(step.importUri).isNull()
+        }
+    }
+
+    @Test
+    fun importPicked_whileStopped_startsTheImportAndForgetsTheOldResult() {
+        val state = ready.copy(activeModel = imported, importResult = rejected, modelNotice = tripped)
+
+        val step = reduce(state, ControlEvent.ImportPicked("content://docs/model"))
+
+        assertThat(step.state).isEqualTo(state.copy(importing = true, importResult = null))
+        assertThat(step.effect).isEqualTo(ControlEffect.RUN_IMPORT)
+        assertThat(step.importUri).isEqualTo("content://docs/model")
+    }
+
+    @Test
+    fun importPicked_whileRunningStartingOrImporting_isIgnored() {
+        val blocked = listOf(ready.copy(running = true), ready.copy(awaitingConsent = true), ready.copy(importing = true))
+        for (state in blocked) {
+            val step = reduce(state, ControlEvent.ImportPicked("content://docs/model"))
+
+            assertThat(step.state).isEqualTo(state)
+            assertThat(step.effect).isNull()
+            assertThat(step.importUri).isNull()
+        }
+    }
+
+    @Test
+    fun importFinished_accepted_switchesTheActiveModelAndClearsTheOldNotice() {
+        val state = ready.copy(importing = true, modelNotice = tripped)
+        val summary = ImportSummary.Accepted("yolo26n-pose_640.tflite", 640)
+
+        val step = reduce(state, ControlEvent.ImportFinished(summary))
+
+        assertThat(step.state.importing).isFalse()
+        assertThat(step.state.activeModel).isEqualTo(imported)
+        assertThat(step.state.importResult).isEqualTo(summary)
+        assertThat(step.state.modelNotice).isNull()
+        assertThat(step.effect).isEqualTo(ControlEffect.LOAD_MODEL_STATE)
+    }
+
+    @Test
+    fun importFinished_rejected_keepsThePreviousModelAndShowsTheReason() {
+        val state = ready.copy(importing = true, activeModel = imported, modelNotice = tripped)
+
+        val step = reduce(state, ControlEvent.ImportFinished(rejected))
+
+        assertThat(step.state.importing).isFalse()
+        assertThat(step.state.activeModel).isEqualTo(imported)
+        assertThat(step.state.importResult).isEqualTo(rejected)
+        assertThat(step.state.modelNotice).isEqualTo(tripped)
+        assertThat(step.effect).isEqualTo(ControlEffect.LOAD_MODEL_STATE)
+    }
+
+    @Test
+    fun importFinished_failed_keepsTheBuiltInModelAndShowsTheMessage() {
+        val state = ready.copy(importing = true)
+        val failed = ImportSummary.Failed("IOException: no space")
+
+        val step = reduce(state, ControlEvent.ImportFinished(failed))
+
+        assertThat(step.state.importing).isFalse()
+        assertThat(step.state.activeModel).isEqualTo(ActiveModel.BuiltIn)
+        assertThat(step.state.importResult).isEqualTo(failed)
+        assertThat(step.effect).isEqualTo(ControlEffect.LOAD_MODEL_STATE)
+    }
+
+    @Test
+    fun importFinished_withoutAnImportInProgress_isIgnored() {
+        val state = ready.copy(activeModel = imported)
+
+        val step = reduce(state, ControlEvent.ImportFinished(rejected))
+
+        assertThat(step.state).isEqualTo(state)
+        assertThat(step.effect).isNull()
+    }
+
+    @Test
+    fun useBuiltInClicked_whileStopped_clearsTheImportedModelTheNoticeAndTheResult() {
+        val state = ready.copy(activeModel = imported, importResult = rejected, modelNotice = tripped)
+
+        val step = reduce(state, ControlEvent.UseBuiltInClicked)
+
+        assertThat(step.state.activeModel).isEqualTo(ActiveModel.BuiltIn)
+        assertThat(step.state.importResult).isNull()
+        assertThat(step.state.modelNotice).isNull()
+        assertThat(step.effect).isEqualTo(ControlEffect.CLEAR_IMPORTED)
+    }
+
+    @Test
+    fun useBuiltInClicked_whileRunningStartingOrImporting_isIgnored() {
+        val base = ready.copy(activeModel = imported, modelNotice = tripped)
+        val blocked = listOf(base.copy(running = true), base.copy(awaitingConsent = true), base.copy(importing = true))
+        for (state in blocked) {
+            val step = reduce(state, ControlEvent.UseBuiltInClicked)
+
+            assertThat(step.state).isEqualTo(state)
+            assertThat(step.effect).isNull()
+        }
+    }
+
+    @Test
+    fun modelStateLoaded_withATrippedGuard_showsTheNoticeAndTheBuiltInModel() {
+        val state = ready.copy(activeModel = imported)
+
+        val step = reduce(state, ControlEvent.ModelStateLoaded(ActiveModel.BuiltIn, tripped))
+
+        assertThat(step.state.activeModel).isEqualTo(ActiveModel.BuiltIn)
+        assertThat(step.state.modelNotice).isEqualTo(tripped)
+        assertThat(step.effect).isNull()
+    }
+
+    @Test
+    fun modelStateLoaded_withAnImportedModel_replacesTheModelAndKeepsTheResult() {
+        val state = ready.copy(modelNotice = tripped, importResult = rejected)
+
+        val step = reduce(state, ControlEvent.ModelStateLoaded(imported, null))
+
+        assertThat(step.state.activeModel).isEqualTo(imported)
+        assertThat(step.state.modelNotice).isNull()
+        assertThat(step.state.importResult).isEqualTo(rejected)
+    }
+
+    @Test
+    fun modelStateLoaded_whileRunning_isStored() {
+        val step = reduce(ready.copy(running = true), ControlEvent.ModelStateLoaded(imported, null))
+
+        assertThat(step.state.activeModel).isEqualTo(imported)
+    }
+
+    @Test
+    fun modelStateLoaded_whileImporting_isIgnored() {
+        val state = ready.copy(importing = true)
+
+        val step = reduce(state, ControlEvent.ModelStateLoaded(imported, tripped))
+
+        assertThat(step.state).isEqualTo(state)
+        assertThat(step.effect).isNull()
+    }
+
+    @Test
+    fun start_whileImporting_isIgnored() {
+        val state = ready.copy(importing = true)
+
+        val step = reduce(state, ControlEvent.StartClicked)
+
+        assertThat(step.state).isEqualTo(state)
+        assertThat(step.effect).isNull()
+    }
+
+    @Test
+    fun notificationResult_whileImporting_doesNotLaunchTheConsent() {
+        val state = ready.copy(importing = true)
+
+        val step = reduce(state, ControlEvent.NotificationPermissionResult(true))
+
+        assertThat(step.state).isEqualTo(state)
+        assertThat(step.effect).isNull()
+    }
+
+    @Test
+    fun modelEvents_inEveryState_returnAStep() {
+        val events =
+            listOf(
+                ControlEvent.ImportClicked,
+                ControlEvent.ImportPicked(null),
+                ControlEvent.ImportPicked("content://docs/model"),
+                ControlEvent.ImportFinished(ImportSummary.Accepted("a.tflite", 416)),
+                ControlEvent.ImportFinished(rejected),
+                ControlEvent.ImportFinished(ImportSummary.Failed("x")),
+                ControlEvent.UseBuiltInClicked,
+                ControlEvent.ModelStateLoaded(ActiveModel.BuiltIn, null),
+                ControlEvent.ModelStateLoaded(imported, tripped),
+            )
+        val flags = listOf(true, false)
+        var steps = 0
+        for (running in flags) {
+            for (awaiting in flags) {
+                for (importing in flags) {
+                    for (model in listOf(ActiveModel.BuiltIn, imported)) {
+                        for (notice in listOf(null, tripped)) {
+                            val state =
+                                ready.copy(
+                                    running = running,
+                                    awaitingConsent = awaiting,
+                                    importing = importing,
+                                    activeModel = model,
+                                    modelNotice = notice,
+                                )
+                            for (event in events) {
+                                val step = reduce(state, event)
+                                // Only a stopped, idle screen may start work on the model files.
+                                if (running || awaiting || importing) {
+                                    assertThat(step.effect).isNotEqualTo(ControlEffect.OPEN_MODEL_PICKER)
+                                    assertThat(step.effect).isNotEqualTo(ControlEffect.RUN_IMPORT)
+                                    assertThat(step.effect).isNotEqualTo(ControlEffect.CLEAR_IMPORTED)
+                                }
+                                steps++
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assertThat(steps).isEqualTo(flags.size * flags.size * flags.size * 2 * 2 * events.size)
+    }
+
+    @Test
+    fun modelFlow_rejectThenAcceptThenUseBuiltIn() {
+        var state = reduce(ControlState(), ControlEvent.OverlayPermissionChecked(true)).state
+
+        val picked = reduce(state, ControlEvent.ImportPicked("content://docs/a"))
+        state = picked.state
+        assertThat(state.importing).isTrue()
+        assertThat(reduce(state, ControlEvent.StartClicked).effect).isNull()
+
+        state = reduce(state, ControlEvent.ImportFinished(rejected)).state
+        assertThat(state.activeModel).isEqualTo(ActiveModel.BuiltIn)
+        assertThat(state.importResult).isEqualTo(rejected)
+
+        state = reduce(state, ControlEvent.ImportPicked("content://docs/b")).state
+        assertThat(state.importResult).isNull()
+        state = reduce(state, ControlEvent.ImportFinished(ImportSummary.Accepted("b.tflite", 640))).state
+        assertThat(state.activeModel).isEqualTo(ActiveModel.Imported("b.tflite", 640))
+
+        val reset = reduce(state, ControlEvent.UseBuiltInClicked)
+        assertThat(reset.effect).isEqualTo(ControlEffect.CLEAR_IMPORTED)
+        assertThat(reset.state.activeModel).isEqualTo(ActiveModel.BuiltIn)
+        assertThat(reset.state.importResult).isNull()
+    }
+
     // The whole flow.
 
     @Test

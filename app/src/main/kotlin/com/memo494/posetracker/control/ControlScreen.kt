@@ -23,7 +23,7 @@ private val SCREEN_PADDING = 24.dp
 private val ITEM_SPACING = 16.dp
 
 /**
- * The control screen: status, the build label, Start or Stop, and the way to the overlay permission.
+ * The control screen: status, the build label, Start or Stop, the way to the overlay permission and the model block.
  * Stateless: [state] comes in, user actions go out through the callbacks. The [Scaffold] insets keep
  * everything clear of the system bars and the cutout (edge-to-edge).
  *
@@ -37,6 +37,8 @@ internal fun ControlScreen(
     onStartClick: () -> Unit,
     onStopClick: () -> Unit,
     onOpenOverlaySettingsClick: () -> Unit,
+    onImportClick: () -> Unit,
+    onUseBuiltInClick: () -> Unit,
     modifier: Modifier = Modifier,
     crashContent: @Composable () -> Unit = {},
     diagnosticsContent: @Composable () -> Unit = {},
@@ -71,7 +73,7 @@ internal fun ControlScreen(
             val primaryRes = if (state.running) R.string.control_stop else R.string.control_start
             Button(
                 onClick = if (state.running) onStopClick else onStartClick,
-                enabled = !state.awaitingConsent,
+                enabled = !state.awaitingConsent && !state.importing,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(stringResource(primaryRes))
@@ -83,10 +85,88 @@ internal fun ControlScreen(
                 }
             }
 
+            ModelBlock(state, onImportClick, onUseBuiltInClick)
+
             Text(stringResource(R.string.control_description), style = MaterialTheme.typography.bodyMedium)
             diagnosticsContent()
         }
     }
+}
+
+/**
+ * The model block: the active model, Import and Use built-in, the progress line, the last result, the notice and
+ * the trust hint. Import and reset are disabled while the capture runs or starts and while an import runs.
+ */
+@Composable
+private fun ModelBlock(
+    state: ControlState,
+    onImportClick: () -> Unit,
+    onUseBuiltInClick: () -> Unit,
+) {
+    val idle = !state.running && !state.awaitingConsent && !state.importing
+    Column(verticalArrangement = Arrangement.spacedBy(ITEM_SPACING)) {
+        Text(stringResource(R.string.model_title), style = MaterialTheme.typography.titleMedium)
+        Text(activeModelLine(state), style = MaterialTheme.typography.bodyLarge)
+
+        val modelNotice = state.modelNotice
+        if (modelNotice != null) {
+            Text(
+                text = stringResource(ControlModelMapper.noticeRes(modelNotice.kind)),
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            DetailsLine(modelNotice.message)
+        }
+
+        if (state.importing) {
+            Text(stringResource(R.string.model_importing), style = MaterialTheme.typography.bodyMedium)
+        }
+        val result = state.importResult
+        if (result != null) ImportResultText(result)
+
+        OutlinedButton(onClick = onImportClick, enabled = idle, modifier = Modifier.fillMaxWidth()) {
+            Text(stringResource(R.string.model_import))
+        }
+        if (state.activeModel is ActiveModel.Imported || modelNotice != null) {
+            OutlinedButton(onClick = onUseBuiltInClick, enabled = idle, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.model_use_built_in))
+            }
+        }
+        Text(stringResource(R.string.model_hint_trust), style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable
+private fun activeModelLine(state: ControlState): String =
+    when (val model = state.activeModel) {
+        ActiveModel.BuiltIn -> stringResource(R.string.model_active_built_in, state.builtInInputSize)
+        is ActiveModel.Imported -> stringResource(R.string.model_active_imported, model.displayName, model.inputSize)
+    }
+
+@Composable
+private fun ImportResultText(result: ImportSummary) {
+    when (result) {
+        is ImportSummary.Accepted ->
+            Text(stringResource(R.string.model_result_accepted, result.displayName), style = MaterialTheme.typography.bodyMedium)
+        is ImportSummary.Rejected -> {
+            val sentence = stringResource(ControlModelMapper.messageRes(result.reason))
+            Text(sentence, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+            DetailsLine(result.details)
+        }
+        is ImportSummary.Failed ->
+            Text(
+                text = stringResource(R.string.model_result_failed, result.message),
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+    }
+}
+
+/** The technical detail line (shapes found, the runtime's message); nothing when there is none. */
+@Composable
+private fun DetailsLine(details: String?) {
+    if (details.isNullOrEmpty()) return
+    Text(stringResource(R.string.model_details, details), style = MaterialTheme.typography.bodySmall)
 }
 
 @Preview
@@ -94,11 +174,18 @@ internal fun ControlScreen(
 private fun ControlScreenPreview() {
     MaterialTheme {
         ControlScreen(
-            state = ControlState(notice = ControlNotice.OVERLAY_PERMISSION_NEEDED),
+            state =
+                ControlState(
+                    notice = ControlNotice.OVERLAY_PERMISSION_NEEDED,
+                    activeModel = ActiveModel.Imported("yolo26n-pose_640.tflite", 640),
+                    importResult = ImportSummary.Rejected(ModelRejectionReason.INPUT_NHWC, "input [1,640,640,3] float32"),
+                ),
             buildLabel = "v0.1.1 · local",
             onStartClick = {},
             onStopClick = {},
             onOpenOverlaySettingsClick = {},
+            onImportClick = {},
+            onUseBuiltInClick = {},
         )
     }
 }

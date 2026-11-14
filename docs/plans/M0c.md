@@ -220,8 +220,18 @@ recreated-activity state reads `importing = true` while the guard is held; lefto
 not during an import; early stop on a non-TFLite stream (bytes read < file size); reducer ignores a late load after
 a toggle. `@Test` count only goes up.
 **Acceptance:** verify green; rotating during an import cannot start a second one.
-Not in scope (owner/M1): reviewer S3 (GPU cache key by file name+size) and S4 (a PROBE trip also disables the
-previously accepted model — needs the owner's OK).
+Not in scope (M1): reviewer S3 (GPU cache key by file name+size). S4 → T9.
+
+### T9 — A PROBE trip keeps a good stored model · S · runs after T8 · owner chose option B in chat, 2026-11-14
+**Files:** `app/modelimport/ModelChoice.kt` (~176), `ImportGuard`/notice mapping if needed; tests `ModelChoiceTest`.
+- A `Tripped(PROBE)` guard (process died while probing a *new* file that was never stored) only shows the notice;
+  a previously accepted model whose meta exists and whose length + sha256 still match stays the active choice.
+- Trips at any other stage (LOAD/RUN of the stored model itself) keep today's behaviour: built-in model + notice.
+- Fail closed: if the stored meta is missing, unreadable or the hash check cannot run, use the built-in model.
+
+**Tests first:** PROBE trip + valid stored model → imported model chosen, notice shown; PROBE trip + no stored model
+→ built-in; PROBE trip + hash mismatch → built-in; LOAD trip + valid stored model → built-in (unchanged).
+**Acceptance:** verify green; checklist unchanged except a note in block 5 if the notice text changes.
 
 ## Then (lead)
 `android-reviewer` on the whole diff → fixes through the implementer → PR ready, CI green → handoff

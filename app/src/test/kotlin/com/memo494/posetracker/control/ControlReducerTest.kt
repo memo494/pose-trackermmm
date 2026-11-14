@@ -698,4 +698,86 @@ class ControlReducerTest {
         assertThat(again.effect).isEqualTo(ControlEffect.LAUNCH_CONSENT)
         assertThat(again.state.awaitingConsent).isTrue()
     }
+
+    // Debug marks (M0c T7): a switch, saved off the main thread, handed to the service at Start.
+
+    @Test
+    fun debugMarks_defaultIsOff() {
+        assertThat(ControlState().debugMarks).isFalse()
+    }
+
+    @Test
+    fun debugMarksToggled_whileStopped_changesStateAndAsksToPersist() {
+        val on = reduce(ready, ControlEvent.DebugMarksToggled(true))
+
+        assertThat(on.state.debugMarks).isTrue()
+        assertThat(on.effect).isEqualTo(ControlEffect.PERSIST_DEBUG_MARKS)
+        assertThat(on.debugMarks).isTrue()
+
+        val off = reduce(on.state, ControlEvent.DebugMarksToggled(false))
+
+        assertThat(off.state.debugMarks).isFalse()
+        assertThat(off.effect).isEqualTo(ControlEffect.PERSIST_DEBUG_MARKS)
+        assertThat(off.debugMarks).isFalse()
+    }
+
+    @Test
+    fun debugMarksToggled_whileRunning_changesStateAndAsksToPersist() {
+        val running = ready.copy(running = true)
+
+        val step = reduce(running, ControlEvent.DebugMarksToggled(true))
+
+        assertThat(step.state.debugMarks).isTrue()
+        assertThat(step.state.running).isTrue()
+        assertThat(step.effect).isEqualTo(ControlEffect.PERSIST_DEBUG_MARKS)
+        assertThat(step.debugMarks).isTrue()
+    }
+
+    @Test
+    fun debugMarksToggled_leavesTheRestOfTheStateAlone() {
+        val busy = ready.copy(awaitingConsent = true, notice = ControlNotice.CONSENT_DENIED, importing = true)
+
+        val step = reduce(busy, ControlEvent.DebugMarksToggled(true))
+
+        assertThat(step.state).isEqualTo(busy.copy(debugMarks = true))
+    }
+
+    @Test
+    fun debugMarksLoaded_appliesTheStoredValueWithoutEffect() {
+        val step = reduce(ready, ControlEvent.DebugMarksLoaded(true))
+
+        assertThat(step.state.debugMarks).isTrue()
+        assertThat(step.effect).isNull()
+        assertThat(step.debugMarks).isNull()
+    }
+
+    @Test
+    fun consentGranted_carriesTheCurrentDebugMarksToTheService() {
+        val on = ready.copy(awaitingConsent = true, debugMarks = true)
+        val off = ready.copy(awaitingConsent = true, debugMarks = false)
+
+        val startOn = reduce(on, ControlEvent.ConsentResult(true))
+        val startOff = reduce(off, ControlEvent.ConsentResult(true))
+
+        assertThat(startOn.effect).isEqualTo(ControlEffect.START_SERVICE)
+        assertThat(startOn.debugMarks).isTrue()
+        assertThat(startOff.effect).isEqualTo(ControlEffect.START_SERVICE)
+        assertThat(startOff.debugMarks).isFalse()
+    }
+
+    @Test
+    fun consentGranted_afterAToggleDuringTheDialog_usesTheNewValue() {
+        var state = ready.copy(awaitingConsent = true)
+        state = reduce(state, ControlEvent.DebugMarksToggled(true)).state
+
+        val step = reduce(state, ControlEvent.ConsentResult(true))
+
+        assertThat(step.debugMarks).isTrue()
+    }
+
+    @Test
+    fun otherSteps_carryNoDebugMarksValue() {
+        assertThat(reduce(ready, ControlEvent.StartClicked).debugMarks).isNull()
+        assertThat(reduce(ready.copy(awaitingConsent = true), ControlEvent.ConsentResult(false)).debugMarks).isNull()
+    }
 }

@@ -98,6 +98,7 @@ class MainActivity : ComponentActivity() {
                     onOpenOverlaySettingsClick = { dispatch(ControlEvent.OpenOverlaySettingsClicked) },
                     onImportClick = { dispatch(ControlEvent.ImportClicked) },
                     onUseBuiltInClick = { dispatch(ControlEvent.UseBuiltInClicked) },
+                    onDebugMarksChange = { dispatch(ControlEvent.DebugMarksToggled(it)) },
                     crashContent = {
                         CrashNotice(
                             state = diagnosticsState.value,
@@ -135,6 +136,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         showCrashNoticeIfAny()
+        loadDebugMarks()
     }
 
     override fun onResume() {
@@ -156,12 +158,13 @@ class MainActivity : ComponentActivity() {
             ControlEffect.OPEN_OVERLAY_SETTINGS -> openOverlaySettings()
             ControlEffect.REQUEST_NOTIFICATION_PERMISSION -> requestNotificationPermission()
             ControlEffect.LAUNCH_CONSENT -> launchConsent()
-            ControlEffect.START_SERVICE -> startCapture(consentResult)
+            ControlEffect.START_SERVICE -> startCapture(consentResult, step.debugMarks == true)
             ControlEffect.STOP_SERVICE -> stopCapture()
             ControlEffect.OPEN_MODEL_PICKER -> openModelPicker()
             ControlEffect.RUN_IMPORT -> runImport(step.importUri)
             ControlEffect.CLEAR_IMPORTED -> clearImported()
             ControlEffect.LOAD_MODEL_STATE -> loadModelState()
+            ControlEffect.PERSIST_DEBUG_MARKS -> saveDebugMarks(step.debugMarks == true)
             null -> Unit
         }
     }
@@ -230,7 +233,10 @@ class MainActivity : ComponentActivity() {
     }
 
     /** Starts the service at once with the callback's own consent Intent; any failure is shown as a denied consent. */
-    private fun startCapture(consentResult: ActivityResult?) {
+    private fun startCapture(
+        consentResult: ActivityResult?,
+        debugMarks: Boolean,
+    ) {
         val data = consentResult?.data
         if (consentResult == null || data == null) {
             CaptureLog.log("start refused: no consent result to pass on", null)
@@ -238,7 +244,7 @@ class MainActivity : ComponentActivity() {
             return
         }
         try {
-            ContextCompat.startForegroundService(this, CaptureService.startIntent(this, consentResult.resultCode, data))
+            ContextCompat.startForegroundService(this, CaptureService.startIntent(this, consentResult.resultCode, data, debugMarks))
         } catch (e: Exception) {
             CaptureLog.log("starting the capture service failed", e)
             dispatch(ControlEvent.ConsentResult(false))
@@ -344,6 +350,35 @@ class MainActivity : ComponentActivity() {
             null
         }
 
+    /** Reads the saved "Debug marks" switch off the main thread; a failed read leaves the default (off). */
+    private fun loadDebugMarks() {
+        lifecycleScope.launch {
+            val saved =
+                withContext(Dispatchers.IO) {
+                    try {
+                        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getBoolean(KEY_DEBUG_MARKS, TrackerConfig.DEFAULT_DEBUG_MARKS)
+                    } catch (t: Throwable) {
+                        AppLog.log("reading the debug marks switch failed", t)
+                        null
+                    }
+                }
+            if (saved != null) dispatch(ControlEvent.DebugMarksLoaded(saved))
+        }
+    }
+
+    /** Saves the "Debug marks" switch off the main thread; a failed write is logged and the switch still works this run. */
+    private fun saveDebugMarks(enabled: Boolean) {
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) {
+                try {
+                    getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(KEY_DEBUG_MARKS, enabled).apply()
+                } catch (t: Throwable) {
+                    AppLog.log("saving the debug marks switch failed", t)
+                }
+            }
+        }
+    }
+
     private fun updateDiagnostics(change: (DiagnosticsUiState) -> DiagnosticsUiState) {
         diagnosticsState.value = change(diagnosticsState.value)
     }
@@ -409,6 +444,10 @@ class MainActivity : ComponentActivity() {
 
     private companion object {
         const val MODEL_PICKER_MIME_TYPE = "*/*"
+
+        /** App preferences file and the key of the "Debug marks" switch; only read and written on `Dispatchers.IO`. */
+        const val PREFS_NAME = "pose_tracker_prefs"
+        const val KEY_DEBUG_MARKS = "debug_marks"
 
         /**
          * The session status the owner has already acted on (imported a new model or reset to the built-in one);

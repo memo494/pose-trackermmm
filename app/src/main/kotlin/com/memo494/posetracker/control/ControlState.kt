@@ -24,6 +24,11 @@ internal data class ControlState(
     val modelNotice: ModelNotice? = null,
     /** Side of the built-in model's square input, in model pixels (Mdl), for the "Built-in (416)" line. */
     val builtInInputSize: Int = TrackerConfig.DEFAULT_MODEL_INPUT_SIZE,
+    /**
+     * The "Debug marks (box and body points)" switch: `true` draws the full box and the keypoint dots as well.
+     * It is read by the next Start only; changing it while running changes nothing in the session.
+     */
+    val debugMarks: Boolean = TrackerConfig.DEFAULT_DEBUG_MARKS,
 )
 
 /** The model the next capture start will use. Pure data: no files, no Android types. */
@@ -177,6 +182,16 @@ internal sealed interface ControlEvent {
     /** The user pressed "Use built-in model". */
     data object UseBuiltInClicked : ControlEvent
 
+    /** The user switched "Debug marks" on or off. Allowed in every state; it is used from the next Start. */
+    data class DebugMarksToggled(
+        val enabled: Boolean,
+    ) : ControlEvent
+
+    /** The saved switch value was read off the main thread when the screen started. */
+    data class DebugMarksLoaded(
+        val enabled: Boolean,
+    ) : ControlEvent
+
     /** The model store (and the last session) was read off the main thread: the model and the notice to show. */
     data class ModelStateLoaded(
         val active: ActiveModel,
@@ -203,16 +218,22 @@ internal enum class ControlEffect {
 
     /** Read the model store and the last session's model status on a worker thread; the answer is `ModelStateLoaded`. */
     LOAD_MODEL_STATE,
+
+    /** Save [ControlStep.debugMarks] in the app preferences on a worker thread. */
+    PERSIST_DEBUG_MARKS,
 }
 
 /**
  * Result of one reduction: the new [state] and the [effect] to perform, if any.
  * [importUri] is set only with [ControlEffect.RUN_IMPORT]: the picked document, as text.
+ * [debugMarks] is set only with [ControlEffect.START_SERVICE] (the value the service gets as an Intent extra) and
+ * [ControlEffect.PERSIST_DEBUG_MARKS] (the value to save); otherwise `null`.
  */
 internal data class ControlStep(
     val state: ControlState,
     val effect: ControlEffect?,
     val importUri: String? = null,
+    val debugMarks: Boolean? = null,
 )
 
 /** Pure decision logic of the control screen: total (every event in every state answers) and free of Android. */
@@ -240,6 +261,11 @@ internal object ControlReducer {
             is ControlEvent.ImportFinished -> onImportFinished(state, event.summary)
             ControlEvent.UseBuiltInClicked -> onUseBuiltIn(state)
             is ControlEvent.ModelStateLoaded -> onModelStateLoaded(state, event)
+            is ControlEvent.DebugMarksToggled -> {
+                ControlStep(state.copy(debugMarks = event.enabled), ControlEffect.PERSIST_DEBUG_MARKS, debugMarks = event.enabled)
+            }
+
+            is ControlEvent.DebugMarksLoaded -> ControlStep(state.copy(debugMarks = event.enabled), null)
         }
 
     private fun onOverlayChecked(
@@ -276,7 +302,8 @@ internal object ControlReducer {
         granted: Boolean,
     ): ControlStep {
         if (granted) {
-            return ControlStep(state.copy(awaitingConsent = false, notice = null), ControlEffect.START_SERVICE)
+            val started = state.copy(awaitingConsent = false, notice = null)
+            return ControlStep(started, ControlEffect.START_SERVICE, debugMarks = state.debugMarks)
         }
         return ControlStep(state.copy(awaitingConsent = false, notice = ControlNotice.CONSENT_DENIED), null)
     }

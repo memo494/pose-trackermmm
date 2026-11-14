@@ -1,6 +1,7 @@
 package com.memo494.posetracker.diagnostics
 
 import com.memo494.posetracker.capture.FramePipeline
+import com.memo494.posetracker.core.TrackerConfig
 import com.memo494.posetracker.modelimport.ModelStatusHolder
 import com.memo494.posetracker.overlay.OverlayState
 
@@ -11,6 +12,10 @@ import com.memo494.posetracker.overlay.OverlayState
 internal object CaptureStatsHolder {
     @Volatile
     var latest: CaptureStats? = null
+
+    /** The `debugMarks` of the newest session's config (set when it starts); `config.txt` shows it. */
+    @Volatile
+    var debugMarks: Boolean = TrackerConfig.DEFAULT_DEBUG_MARKS
 
     /** Capture thread, once per HUD tick: stores a snapshot of [state] and the [pipeline] counters. */
     fun publish(

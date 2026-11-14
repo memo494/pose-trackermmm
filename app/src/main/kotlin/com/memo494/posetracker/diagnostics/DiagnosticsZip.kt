@@ -29,7 +29,7 @@ internal object DiagnosticsZip {
             DiagnosticsReport.entries(
                 appInfo = appInfo(),
                 deviceInfo = deviceInfo(context),
-                config = TrackerConfig().toString(),
+                config = TrackerConfig(debugMarks = CaptureStatsHolder.debugMarks).toString(),
                 stats = CaptureStatsHolder.latest,
                 logLines = AppLog.lines(),
                 modelInfo = readModelInfo(context),

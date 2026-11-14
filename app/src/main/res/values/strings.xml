@@ -18,6 +18,10 @@
     <string name="control_allow_overlay">Allow display over other apps</string>
     <string name="control_description">Pose Tracker looks at your screen and draws a dot on the head of each person it finds. Everything stays on this phone. Every start asks for screen-capture permission again.</string>
 
+    <!-- Marks switch of the control screen (ControlScreen). -->
+    <string name="marks_debug_label">Debug marks (box and body points)</string>
+    <string name="marks_debug_note">Used from the next Start. Off: only a ring on each head and corner marks, which keep the detection steady.</string>
+
     <!-- Model block of the control screen (ControlScreen, ControlModelMapper). -->
     <string name="model_title">Model</string>
     <string name="model_active_built_in">Built-in (%1$d)</string>

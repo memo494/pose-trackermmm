@@ -362,6 +362,117 @@ class TrackerConfigTest {
         assertThat(TrackerConfig.JSON_MAX_DEPTH).isEqualTo(32)
     }
 
+    @Test
+    fun headPointFields_haveTheDocumentedDefaults() {
+        val config = TrackerConfig()
+
+        assertThat(config.headKeypointEnterScore).isEqualTo(0.5f)
+        assertThat(config.headKeypointLeaveScore).isEqualTo(0.3f)
+        assertThat(config.headOffsetAlpha).isEqualTo(0.2f)
+        assertThat(config.headFallbackTopRatio).isEqualTo(0.10f)
+        assertThat(config.headMeasurementNoiseRatio).isEqualTo(0.03f)
+        assertThat(config.headFallbackNoiseRatio).isEqualTo(0.10f)
+        assertThat(config.headMinMeanConfidence).isEqualTo(0.05f)
+    }
+
+    @Test
+    fun headPointFields_defaultsAreWithinTheirBounds() {
+        val config = TrackerConfig()
+
+        assertWithin(config.headKeypointEnterScore, TrackerConfig.MIN_HEAD_KEYPOINT_SCORE, TrackerConfig.MAX_HEAD_KEYPOINT_SCORE)
+        assertWithin(config.headKeypointLeaveScore, TrackerConfig.MIN_HEAD_KEYPOINT_SCORE, TrackerConfig.MAX_HEAD_KEYPOINT_SCORE)
+        assertWithin(config.headOffsetAlpha, TrackerConfig.MIN_HEAD_OFFSET_ALPHA, TrackerConfig.MAX_HEAD_OFFSET_ALPHA)
+        assertWithin(config.headFallbackTopRatio, TrackerConfig.MIN_HEAD_FALLBACK_TOP_RATIO, TrackerConfig.MAX_HEAD_FALLBACK_TOP_RATIO)
+        assertWithin(
+            config.headMeasurementNoiseRatio,
+            TrackerConfig.MIN_HEAD_MEASUREMENT_NOISE_RATIO,
+            TrackerConfig.MAX_HEAD_MEASUREMENT_NOISE_RATIO,
+        )
+        assertWithin(
+            config.headFallbackNoiseRatio,
+            TrackerConfig.MIN_HEAD_FALLBACK_NOISE_RATIO,
+            TrackerConfig.MAX_HEAD_FALLBACK_NOISE_RATIO,
+        )
+        assertWithin(
+            config.headMinMeanConfidence,
+            TrackerConfig.MIN_HEAD_MIN_MEAN_CONFIDENCE,
+            TrackerConfig.MAX_HEAD_MIN_MEAN_CONFIDENCE,
+        )
+    }
+
+    @Test
+    fun headPointFields_atTheirBounds_areAccepted() {
+        val low =
+            TrackerConfig(
+                headKeypointEnterScore = TrackerConfig.MIN_HEAD_KEYPOINT_SCORE,
+                headKeypointLeaveScore = TrackerConfig.MIN_HEAD_KEYPOINT_SCORE,
+                headOffsetAlpha = TrackerConfig.MIN_HEAD_OFFSET_ALPHA,
+                headFallbackTopRatio = TrackerConfig.MIN_HEAD_FALLBACK_TOP_RATIO,
+                headMeasurementNoiseRatio = TrackerConfig.MIN_HEAD_MEASUREMENT_NOISE_RATIO,
+                headFallbackNoiseRatio = TrackerConfig.MIN_HEAD_FALLBACK_NOISE_RATIO,
+                headMinMeanConfidence = TrackerConfig.MIN_HEAD_MIN_MEAN_CONFIDENCE,
+            )
+        val high =
+            TrackerConfig(
+                headKeypointEnterScore = TrackerConfig.MAX_HEAD_KEYPOINT_SCORE,
+                headKeypointLeaveScore = TrackerConfig.MAX_HEAD_KEYPOINT_SCORE,
+                headOffsetAlpha = TrackerConfig.MAX_HEAD_OFFSET_ALPHA,
+                headFallbackTopRatio = TrackerConfig.MAX_HEAD_FALLBACK_TOP_RATIO,
+                headMeasurementNoiseRatio = TrackerConfig.MAX_HEAD_MEASUREMENT_NOISE_RATIO,
+                headFallbackNoiseRatio = TrackerConfig.MAX_HEAD_FALLBACK_NOISE_RATIO,
+                headMinMeanConfidence = TrackerConfig.MAX_HEAD_MIN_MEAN_CONFIDENCE,
+            )
+
+        assertThat(low.headOffsetAlpha).isEqualTo(TrackerConfig.MIN_HEAD_OFFSET_ALPHA)
+        assertThat(high.headOffsetAlpha).isEqualTo(1.0f)
+    }
+
+    @Test
+    fun headPointFields_outsideTheirBounds_areRejected() {
+        val rejected =
+            listOf<() -> TrackerConfig>(
+                { TrackerConfig(headKeypointEnterScore = TrackerConfig.MAX_HEAD_KEYPOINT_SCORE + 0.01f) },
+                { TrackerConfig(headKeypointEnterScore = TrackerConfig.MIN_HEAD_KEYPOINT_SCORE - 0.01f) },
+                { TrackerConfig(headKeypointLeaveScore = TrackerConfig.MIN_HEAD_KEYPOINT_SCORE - 0.01f) },
+                { TrackerConfig(headOffsetAlpha = 0.0f) },
+                { TrackerConfig(headOffsetAlpha = 1.01f) },
+                { TrackerConfig(headFallbackTopRatio = -0.01f) },
+                { TrackerConfig(headFallbackTopRatio = TrackerConfig.MAX_HEAD_FALLBACK_TOP_RATIO + 0.01f) },
+                { TrackerConfig(headMeasurementNoiseRatio = 0.0f) },
+                { TrackerConfig(headMeasurementNoiseRatio = TrackerConfig.MAX_HEAD_MEASUREMENT_NOISE_RATIO + 0.01f) },
+                { TrackerConfig(headFallbackNoiseRatio = 0.0f) },
+                { TrackerConfig(headFallbackNoiseRatio = TrackerConfig.MAX_HEAD_FALLBACK_NOISE_RATIO + 0.01f) },
+                { TrackerConfig(headMinMeanConfidence = 0.0f) },
+                { TrackerConfig(headMinMeanConfidence = TrackerConfig.MAX_HEAD_MIN_MEAN_CONFIDENCE + 0.01f) },
+            )
+
+        for (build in rejected) {
+            assertThrows(IllegalArgumentException::class.java) { build() }
+        }
+    }
+
+    @Test
+    fun headPointFields_nanAndInfinity_areRejected() {
+        for (value in listOf(Float.NaN, Float.POSITIVE_INFINITY, Float.NEGATIVE_INFINITY)) {
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(headKeypointEnterScore = value) }
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(headKeypointLeaveScore = value) }
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(headOffsetAlpha = value) }
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(headFallbackTopRatio = value) }
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(headMeasurementNoiseRatio = value) }
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(headFallbackNoiseRatio = value) }
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(headMinMeanConfidence = value) }
+        }
+    }
+
+    @Test
+    fun headKeypointLeaveScore_aboveTheEnterScore_isRejected() {
+        assertThrows(IllegalArgumentException::class.java) {
+            TrackerConfig(headKeypointEnterScore = 0.4f, headKeypointLeaveScore = 0.41f)
+        }
+        assertThat(TrackerConfig(headKeypointEnterScore = 0.4f, headKeypointLeaveScore = 0.4f).headKeypointLeaveScore)
+            .isEqualTo(0.4f)
+    }
+
     private fun assertWithin(
         value: Float,
         min: Float,

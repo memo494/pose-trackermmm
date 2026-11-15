@@ -17,12 +17,18 @@ import com.memo494.posetracker.core.model.PoseDetection
  * 1. A keypoint is visible from a score of at least [TrackerConfig.headKeypointEnterScore] and stays
  *    visible until its score is below [TrackerConfig.headKeypointLeaveScore]. A keypoint with a non-finite
  *    position or score is not visible and never touches the state.
- * 2. The centre uses the visible keypoints that already have an offset. Visible keypoints without one are
- *    used raw (offset 0) only while no keypoint has an offset yet (the first frames of a track).
- * 3. With the centre known, the offsets of all visible keypoints are updated:
- *    `offset += alpha * ((keypoint - centre) / h - offset)`; the first observation sets the offset directly.
- * 4. When no keypoint can anchor the centre, the point is the box fallback ([HeadPoint.estimated]); the
- *    learned offsets are kept.
+ * 2. Full view (all five visible): the offsets are first learned against the plain (unweighted) mean of the
+ *    five keypoints, `target = (keypoint - plainMean) / h`; the first observation sets an offset, later ones
+ *    use `offset += alpha * (target - offset)`. The sum of the five targets is zero, so the reference cannot
+ *    drift whatever the confidences are, and a track that started with a partial view converges to the plain
+ *    mean. Only then is the centre computed (step 4).
+ * 3. Partial view (one to four visible): the centre is computed first (step 4); then an offset is added for
+ *    each visible keypoint that has none, `(keypoint - centre) / h`. Existing offsets are never changed.
+ * 4. The centre is the confidence-weighted mean of `keypoint - offset * h` over the visible keypoints that
+ *    already have an offset; visible keypoints without one are used raw (offset 0) only while no keypoint
+ *    has an offset yet (the first frames of a track).
+ * 5. When no keypoint can anchor the centre, the point is the box fallback ([HeadPoint.estimated]); a
+ *    partial view learns nothing then, and the learned offsets are kept.
  *
  * A frame whose box height is not positive gives an invalid result and changes nothing.
  *
@@ -78,8 +84,11 @@ class HeadPointEstimator(
             return
         }
         updateVisibility(detection)
+        val learnedInFullView = learnInFullView(detection, heightImg)
         if (!anchorCentre(detection, heightImg, out)) {
             setFallbackPoint(detection, heightImg, config, out)
+        } else if (!learnedInFullView) {
+            addMissingOffsets(detection, heightImg, out.headXImg, out.headYImg)
         }
     }
 
@@ -92,8 +101,46 @@ class HeadPointEstimator(
     }
 
     /**
-     * Computes the centre from the visible keypoints, learns their offsets and writes the point into [out];
-     * returns false (writing nothing, learning nothing) when no keypoint can anchor the centre.
+     * Full view only: learns the offsets of all five keypoints against their plain mean. Returns false (and
+     * learns nothing) when fewer than five keypoints are visible or the mean is not finite.
+     */
+    private fun learnInFullView(
+        detection: PoseDetection,
+        heightImg: Float,
+    ): Boolean {
+        for (k in 0 until HEAD_COUNT) {
+            if (!visible[k]) {
+                return false
+            }
+        }
+        var sumXImg = 0f
+        var sumYImg = 0f
+        for (k in 0 until HEAD_COUNT) {
+            sumXImg += detection.keypointXImg(k)
+            sumYImg += detection.keypointYImg(k)
+        }
+        val meanXImg = sumXImg / HEAD_COUNT
+        val meanYImg = sumYImg / HEAD_COUNT
+        if (!meanXImg.isFinite() || !meanYImg.isFinite()) {
+            return false
+        }
+        val alpha = config.headOffsetAlpha
+        for (k in 0 until HEAD_COUNT) {
+            val targetX = (detection.keypointXImg(k) - meanXImg) / heightImg
+            val targetY = (detection.keypointYImg(k) - meanYImg) / heightImg
+            if (learned[k]) {
+                offsetXRatios[k] += alpha * (targetX - offsetXRatios[k])
+                offsetYRatios[k] += alpha * (targetY - offsetYRatios[k])
+            } else {
+                setNewOffset(k, targetX, targetY)
+            }
+        }
+        return true
+    }
+
+    /**
+     * Computes the centre from the visible keypoints and writes the point into [out]; returns false (writing
+     * nothing) when no keypoint can anchor the centre. Does not learn.
      */
     private fun anchorCentre(
         detection: PoseDetection,
@@ -122,7 +169,6 @@ class HeadPointEstimator(
         if (!centreXImg.isFinite() || !centreYImg.isFinite()) {
             return false
         }
-        learnOffsets(detection, heightImg, centreXImg, centreYImg)
         out.setPoint(
             xImg = centreXImg,
             yImg = centreYImg,
@@ -132,29 +178,31 @@ class HeadPointEstimator(
         return true
     }
 
-    private fun learnOffsets(
+    /** Partial view: gives each visible keypoint that has no offset one, relative to the centre; others stay. */
+    private fun addMissingOffsets(
         detection: PoseDetection,
         heightImg: Float,
         centreXImg: Float,
         centreYImg: Float,
     ) {
-        val alpha = config.headOffsetAlpha
         for (k in 0 until HEAD_COUNT) {
-            if (!visible[k]) {
-                continue
-            }
-            val observedX = (detection.keypointXImg(k) - centreXImg) / heightImg
-            val observedY = (detection.keypointYImg(k) - centreYImg) / heightImg
-            if (learned[k]) {
-                offsetXRatios[k] += alpha * (observedX - offsetXRatios[k])
-                offsetYRatios[k] += alpha * (observedY - offsetYRatios[k])
-            } else {
-                offsetXRatios[k] = observedX
-                offsetYRatios[k] = observedY
-                learned[k] = true
-                learnedOffsetCount++
+            if (visible[k] && !learned[k]) {
+                val offsetX = (detection.keypointXImg(k) - centreXImg) / heightImg
+                val offsetY = (detection.keypointYImg(k) - centreYImg) / heightImg
+                setNewOffset(k, offsetX, offsetY)
             }
         }
+    }
+
+    private fun setNewOffset(
+        k: Int,
+        offsetXRatio: Float,
+        offsetYRatio: Float,
+    ) {
+        offsetXRatios[k] = offsetXRatio
+        offsetYRatios[k] = offsetYRatio
+        learned[k] = true
+        learnedOffsetCount++
     }
 
     private companion object {

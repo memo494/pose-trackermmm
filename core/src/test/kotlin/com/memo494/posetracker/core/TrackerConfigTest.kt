@@ -244,6 +244,49 @@ class TrackerConfigTest {
     }
 
     @Test
+    fun timingWindowFrames_hasTheDocumentedDefaultAndBounds() {
+        assertThat(TrackerConfig().timingWindowFrames).isEqualTo(512)
+        assertThat(TrackerConfig.MIN_TIMING_WINDOW_FRAMES).isEqualTo(16)
+        assertThat(TrackerConfig.MAX_TIMING_WINDOW_FRAMES).isEqualTo(4096)
+        assertThat(TrackerConfig(timingWindowFrames = 16).timingWindowFrames).isEqualTo(16)
+        assertThat(TrackerConfig(timingWindowFrames = 4096).timingWindowFrames).isEqualTo(4096)
+    }
+
+    @Test
+    fun timingWindowFrames_outsideItsBounds_isRejected() {
+        for (value in listOf(15, 0, -1, 4097)) {
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(timingWindowFrames = value) }
+        }
+    }
+
+    @Test
+    fun thermalSampleIntervalMs_hasTheDocumentedDefaultAndBounds() {
+        val config = TrackerConfig()
+
+        assertThat(config.thermalSampleIntervalMs).isEqualTo(2000L)
+        assertThat(config.thermalSampleIntervalNs).isEqualTo(2_000_000_000L)
+        assertThat(TrackerConfig.MIN_THERMAL_SAMPLE_INTERVAL_MS).isEqualTo(1000L)
+        assertThat(TrackerConfig(thermalSampleIntervalMs = 1000L).thermalSampleIntervalMs).isEqualTo(1000L)
+        assertThat(TrackerConfig(thermalSampleIntervalMs = TrackerConfig.MAX_THERMAL_SAMPLE_INTERVAL_MS).thermalSampleIntervalMs)
+            .isEqualTo(TrackerConfig.MAX_THERMAL_SAMPLE_INTERVAL_MS)
+    }
+
+    @Test
+    fun thermalSampleIntervalMs_outsideItsBounds_isRejected() {
+        for (value in listOf(999L, 0L, -1L, TrackerConfig.MAX_THERMAL_SAMPLE_INTERVAL_MS + 1L)) {
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(thermalSampleIntervalMs = value) }
+        }
+    }
+
+    @Test
+    fun toString_listsTheTimingAndThermalFields_forConfigTxt() {
+        val text = TrackerConfig().toString()
+
+        assertThat(text).contains("timingWindowFrames=512")
+        assertThat(text).contains("thermalSampleIntervalMs=2000")
+    }
+
+    @Test
     fun importLimits_doNotChangeTheBuiltInModelSizes() {
         assertThat(TrackerConfig().modelInputSize).isEqualTo(416)
         assertThrows(IllegalArgumentException::class.java) { TrackerConfig(modelInputSize = 640) }

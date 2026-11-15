@@ -62,9 +62,7 @@ class TrackingMetrics(
     fun matchedTrackId(
         frameIndex: Int,
         personId: Int,
-    ): Int? {
-        return trackOf(frameIndex, personId)?.trackId
-    }
+    ): Int? = trackOf(frameIndex, personId)?.trackId
 
     /** How often the matched track id of [personId] changes between consecutive matched frames. */
     fun idSwitches(personId: Int): Int {
@@ -296,9 +294,7 @@ class TrackingMetrics(
         axis: Axis,
         x: Double,
         y: Double,
-    ): Double {
-        return if (axis == Axis.X) x else y
-    }
+    ): Double = if (axis == Axis.X) x else y
 
     companion object {
         /** A truth person is matched to a track within this many heights. */

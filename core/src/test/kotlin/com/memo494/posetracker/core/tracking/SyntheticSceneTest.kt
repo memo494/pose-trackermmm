@@ -205,9 +205,10 @@ class SyntheticSceneTest {
     @Test
     fun scoreFunction_isEvaluatedAtTheFrameTimeAndClamped() {
         val scene = SyntheticScene(listOf(stillPerson(score = { t -> 0.5 + 0.4 * t })), durationS = 2.0, fps = 20.0)
-        assertThat(scene.frames[0].detections.single().score).isWithin(1e-6f).of(0.5f)
-        assertThat(scene.frames[10].detections.single().score).isWithin(1e-6f).of(0.7f)
-        assertThat(scene.frames[39].detections.single().score).isAtMost(1f)
+        val scores = scene.frames.map { it.detections.single().score }
+        assertThat(scores[0]).isWithin(1e-6f).of(0.5f)
+        assertThat(scores[10]).isWithin(1e-6f).of(0.7f)
+        assertThat(scores[39]).isAtMost(1f)
     }
 
     @Test

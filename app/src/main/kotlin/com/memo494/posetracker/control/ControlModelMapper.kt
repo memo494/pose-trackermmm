@@ -2,7 +2,10 @@ package com.memo494.posetracker.control
 
 import androidx.annotation.StringRes
 import com.memo494.posetracker.R
+import com.memo494.posetracker.core.modelimport.ImportGuardState
 import com.memo494.posetracker.core.modelimport.ImportRejection
+import com.memo494.posetracker.core.modelimport.ImportStage
+import com.memo494.posetracker.core.modelimport.ImportedModelMeta
 import com.memo494.posetracker.core.modelimport.SniffRejection
 import com.memo494.posetracker.modelimport.BuiltInReason
 import com.memo494.posetracker.modelimport.FailureKind
@@ -73,12 +76,17 @@ internal object ControlModelMapper {
      * (tripped guard, missing file). The session adds only what the store cannot know: a failed load or an unsaved
      * crash marker of the SAME imported model, or unreadable stored state when nothing is imported. Anything
      * else in [status] is stale or already explained, and fails closed to "no notice".
+     *
+     * A guard tripped at the probe of a new file keeps a stored model that still matches its meta ([storedFileMatches],
+     * disk work, so call this off the main thread): that model is active and the "model kept" notice is shown,
+     * unless the last session's failed load of the same model has something newer to say.
      */
     fun stateLoaded(
         stored: StoredModelState,
         status: ModelStatus?,
+        storedFileMatches: (ImportedModelMeta) -> Boolean = { false },
     ): ControlEvent.ModelStateLoaded =
-        when (val choice = ModelChoice.resolve(stored)) {
+        when (val choice = ModelChoice.resolve(stored, storedFileMatches)) {
             is ModelChoice.Imported -> {
                 val active = ActiveModel.Imported(choice.meta.displayName, choice.meta.inputSize)
                 val sameModel = status != null && status.meta == choice.meta
@@ -87,7 +95,7 @@ internal object ControlModelMapper {
                     when (failed) {
                         ModelFallback.LOAD_FAILED -> ModelNotice(ModelNoticeKind.LOAD_FAILED, status?.message)
                         ModelFallback.GUARD_NOT_STORED -> ModelNotice(ModelNoticeKind.GUARD_NOT_STORED)
-                        else -> null
+                        else -> probeTripNotice(stored.guard)
                     }
                 ControlEvent.ModelStateLoaded(active, notice, stored.anyFileStored)
             }
@@ -103,6 +111,10 @@ internal object ControlModelMapper {
                 ControlEvent.ModelStateLoaded(ActiveModel.BuiltIn, notice, stored.anyFileStored)
             }
         }
+
+    /** Only a trip at the probe reaches here with an imported model active (a load trip is always built-in). */
+    private fun probeTripNotice(guard: ImportGuardState): ModelNotice? =
+        if (guard == ImportGuardState.Tripped(ImportStage.PROBE)) ModelNotice(ModelNoticeKind.PROBE_TRIP_MODEL_KEPT) else null
 
     private fun unreadableNotice(status: ModelStatus?): ModelNotice? =
         if (status?.fallback == ModelFallback.STATE_UNREADABLE) {
@@ -149,6 +161,7 @@ internal object ControlModelMapper {
         when (kind) {
             ModelNoticeKind.FILE_MISSING -> R.string.model_notice_file_missing
             ModelNoticeKind.GUARD_TRIPPED_PROBE -> R.string.model_notice_guard_probe
+            ModelNoticeKind.PROBE_TRIP_MODEL_KEPT -> R.string.model_notice_probe_trip_kept
             ModelNoticeKind.GUARD_TRIPPED_LOAD -> R.string.model_notice_guard_load
             ModelNoticeKind.GUARD_NOT_STORED -> R.string.model_notice_guard_not_stored
             ModelNoticeKind.LOAD_FAILED -> R.string.model_notice_load_failed

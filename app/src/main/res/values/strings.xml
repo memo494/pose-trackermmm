@@ -53,7 +53,8 @@
     <string name="model_reject_output_rows">The model output has more than 300 rows [1, N, 57]. Export it with at most 300 detections (the default).</string>
     <string name="model_reject_output_shape">The model output is not a pose output [1, N, 57] (17 keypoints). Detect models and other keypoint counts are not supported.</string>
     <string name="model_notice_file_missing">The imported model file is missing, so the built-in model is used.</string>
-    <string name="model_notice_guard_probe">The app stopped while checking an imported file. Imported models, including a previously imported one, are switched off and the built-in model is used until you import again or press Use built-in model.</string>
+    <string name="model_notice_guard_probe">The app stopped while checking a new model file, so that file was not imported. The built-in model is used. Import again, or press Use built-in model to remove this notice.</string>
+    <string name="model_notice_probe_trip_kept">The app stopped while checking a new model file, so that file was not imported. Your previous imported model is still used.</string>
     <string name="model_notice_guard_load">The app stopped while loading the imported model, so it is switched off and the built-in model is used. Import another file or press Use built-in model.</string>
     <string name="model_notice_guard_not_stored">The imported model was not used because its safety marker could not be saved. The built-in model ran instead.</string>
     <string name="model_notice_load_failed">The imported model could not be loaded, so the built-in model ran instead.</string>

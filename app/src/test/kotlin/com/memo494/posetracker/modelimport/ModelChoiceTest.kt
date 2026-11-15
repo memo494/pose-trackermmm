@@ -73,6 +73,76 @@ class ModelChoiceTest {
             .isEqualTo(ModelChoice.BuiltIn(BuiltInReason.GUARD_TRIPPED_LOAD))
     }
 
+    // ---- a probe trip keeps a stored model that still matches its meta (T9) ----
+
+    private fun resolveVerified(
+        hasMeta: Boolean,
+        fileExists: Boolean,
+        guard: ImportGuardState,
+        intact: Boolean,
+    ): ModelChoice =
+        ModelChoice.resolve(StoredModelState(if (hasMeta) meta else null, fileExists, guard)) { intact }
+
+    @Test
+    fun probeTrip_withAStoredModelThatStillMatches_keepsTheStoredModel() {
+        assertThat(resolveVerified(hasMeta = true, fileExists = true, guard = trippedProbe, intact = true))
+            .isEqualTo(ModelChoice.Imported(meta))
+    }
+
+    @Test
+    fun probeTrip_withAStoredModelThatNoLongerMatches_isBuiltIn() {
+        assertThat(resolveVerified(hasMeta = true, fileExists = true, guard = trippedProbe, intact = false))
+            .isEqualTo(ModelChoice.BuiltIn(BuiltInReason.GUARD_TRIPPED_PROBE))
+    }
+
+    @Test
+    fun probeTrip_withNothingStored_isBuiltInAndTheCheckIsNeverAsked() {
+        var asked = 0
+
+        val choice = ModelChoice.resolve(StoredModelState(null, fileExists = false, guard = trippedProbe)) { asked++ > 0 }
+
+        assertThat(choice).isEqualTo(ModelChoice.BuiltIn(BuiltInReason.GUARD_TRIPPED_PROBE))
+        assertThat(asked).isEqualTo(0)
+    }
+
+    @Test
+    fun probeTrip_withAMetaButNoFile_isBuiltInEvenIfTheCheckSaysYes() {
+        assertThat(resolveVerified(hasMeta = true, fileExists = false, guard = trippedProbe, intact = true))
+            .isEqualTo(ModelChoice.BuiltIn(BuiltInReason.GUARD_TRIPPED_PROBE))
+    }
+
+    @Test
+    fun probeTrip_whenTheCheckThrows_isBuiltIn() {
+        val state = StoredModelState(meta, fileExists = true, guard = trippedProbe)
+
+        val choice = ModelChoice.resolve(state) { throw OutOfMemoryError("pretend") }
+
+        assertThat(choice).isEqualTo(ModelChoice.BuiltIn(BuiltInReason.GUARD_TRIPPED_PROBE))
+    }
+
+    @Test
+    fun probeTrip_withoutACheck_failsClosedToBuiltIn() {
+        val state = StoredModelState(meta, fileExists = true, guard = trippedProbe)
+
+        assertThat(ModelChoice.resolve(state)).isEqualTo(ModelChoice.BuiltIn(BuiltInReason.GUARD_TRIPPED_PROBE))
+    }
+
+    @Test
+    fun loadTrip_withAStoredModelThatMatches_staysBuiltIn() {
+        assertThat(resolveVerified(hasMeta = true, fileExists = true, guard = trippedLoad, intact = true))
+            .isEqualTo(ModelChoice.BuiltIn(BuiltInReason.GUARD_TRIPPED_LOAD))
+    }
+
+    @Test
+    fun otherGuardStates_neverAskTheCheck() {
+        var asked = 0
+        for (guard in listOf(idle, pendingProbe, pendingLoad, trippedLoad)) {
+            ModelChoice.resolve(StoredModelState(meta, fileExists = true, guard = guard)) { asked++ > 0 }
+        }
+
+        assertThat(asked).isEqualTo(0)
+    }
+
     @Test
     fun everyCombination_matchesTheTable() {
         val imported = ModelChoice.Imported(meta)

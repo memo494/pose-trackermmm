@@ -367,7 +367,8 @@ class MainActivity : ComponentActivity() {
     private fun readModelState(): ControlEvent.ModelStateLoaded? =
         try {
             val status: ModelStatus? = ModelStatusHolder.latest().takeUnless { it === acknowledgedStatus }
-            ControlModelMapper.stateLoaded(ImportedModelStore(applicationContext).state(), status)
+            val store = ImportedModelStore(applicationContext)
+            ControlModelMapper.stateLoaded(store.state(), status, store::storedFileMatches)
         } catch (t: Throwable) {
             AppLog.log("reading the model state failed", t)
             null

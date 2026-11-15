@@ -199,6 +199,7 @@ Dependencies: `app → detector → core`, `app → core`. Nothing else.
 | Import single-flight flag (`ModelImporter`) | any thread | process-wide `AtomicBoolean`, set before `import.tflite` is created and cleared in `finally`; a second import answers `Failed(BUSY)`; a recreated screen seeds `importing` from it |
 | `ModelStatusHolder` | any thread | one `AtomicReference`, immutable values; written by the capture thread, read by the screen |
 | Imported model file (hash check) | capture | the capture thread hashes `model-<sha16>.tflite` against its meta before loading it |
+| Imported model file (hash check after a probe trip) | IO worker / capture | `ImportedModelStore.storedFileMatches` reads the file once, only for a probe trip with a meta and a file: on `Dispatchers.IO` for the control screen and on the capture thread at Start; refuses the main thread |
 | Snapshot | any | immutable |
 | Overlay `View`, `WindowManager` calls, Predictor / OneEuro state | main | plain classes, preallocated; no work except drawing |
 | TrackerConfig | DataStore → StateFlow | applied at next frame boundary |
@@ -409,8 +410,13 @@ step back up after 60 s below the threshold. Every step is logged and shown in t
   - *Never worse than the built-in model:* if the imported model cannot be loaded at Start, the session runs
     the built-in model and shows the warning of §6.7. A native crash cannot be caught, so a marker is stored
     before LiteRT first opens the file and before each session's load, and cleared after; a marker found at the
-    next app start (`ImportGuard`: `Idle`, `Pending(stage)`, `Tripped(stage)`) switches the imported model off
-    and the control screen says so.
+    next app start (`ImportGuard`: `Idle`, `Pending(stage)`, `Tripped(stage)`) is handled by its stage. A trip at
+    the **load** switches the imported model off (built-in model, and the control screen says so). A trip at the
+    **probe** suspects only the new file that was being checked (it was never stored): a stored model whose
+    length and sha256 still match its meta stays in use and the screen only shows a notice that the new file was
+    not imported; if nothing is stored, or the stored file does not match (or the check cannot run), the
+    built-in model is used and the screen says so. The first Start of a kept model stores `Idle` after its load,
+    which lifts the probe trip; an accepted import or **Use built-in model** lift any trip.
   - *Classes:* `ModelFileSniffer` (`TFL3` identifier and size limits), `ImportedModelRules` (accept or refuse
     the tensors), `ImportedModelMeta` (name, sha256, bytes, input size, output rows; strict text codec),
     `ImportGuard` (crash-marker state machine) — all in `core/modelimport`; `ModelProbe` and

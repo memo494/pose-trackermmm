@@ -161,6 +161,47 @@ class ControlModelMapperTest {
     }
 
     @Test
+    fun loaded_probeTripWithAStoredModelThatMatches_keepsTheModelAndShowsTheKeptNotice() {
+        val tripped = stored(meta, true, ImportGuardState.Tripped(ImportStage.PROBE))
+
+        val event = ControlModelMapper.stateLoaded(tripped, null) { true }
+
+        val active = ActiveModel.Imported("yolo26n-pose_640.tflite", 640)
+        val notice = ModelNotice(ModelNoticeKind.PROBE_TRIP_MODEL_KEPT)
+        assertThat(event).isEqualTo(ControlEvent.ModelStateLoaded(active, notice, fileStored = true))
+    }
+
+    @Test
+    fun loaded_probeTripWithAStoredModelThatDoesNotMatch_isBuiltInWithTheNotice() {
+        val tripped = stored(meta, true, ImportGuardState.Tripped(ImportStage.PROBE))
+
+        val event = ControlModelMapper.stateLoaded(tripped, null) { false }
+
+        val notice = ModelNotice(ModelNoticeKind.GUARD_TRIPPED_PROBE)
+        assertThat(event).isEqualTo(ControlEvent.ModelStateLoaded(ActiveModel.BuiltIn, notice, fileStored = true))
+    }
+
+    @Test
+    fun loaded_loadTripWithAMatchingFile_isStillBuiltIn() {
+        val tripped = stored(meta, true, ImportGuardState.Tripped(ImportStage.LOAD))
+
+        val event = ControlModelMapper.stateLoaded(tripped, null) { true }
+
+        val notice = ModelNotice(ModelNoticeKind.GUARD_TRIPPED_LOAD)
+        assertThat(event).isEqualTo(ControlEvent.ModelStateLoaded(ActiveModel.BuiltIn, notice, fileStored = true))
+    }
+
+    @Test
+    fun loaded_probeTripKeptModel_aFailedLoadOfThatModelWinsOverTheTripNotice() {
+        val tripped = stored(meta, true, ImportGuardState.Tripped(ImportStage.PROBE))
+        val last = status(ModelFallback.LOAD_FAILED, meta, "boom")
+
+        val event = ControlModelMapper.stateLoaded(tripped, last) { true }
+
+        assertThat(event.notice).isEqualTo(ModelNotice(ModelNoticeKind.LOAD_FAILED, "boom"))
+    }
+
+    @Test
     fun loaded_fileMissing_isBuiltInWithTheMissingNotice() {
         val event = ControlModelMapper.stateLoaded(stored(meta, fileExists = false), null)
 

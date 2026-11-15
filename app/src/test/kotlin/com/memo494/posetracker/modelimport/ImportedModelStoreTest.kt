@@ -4,6 +4,7 @@ import com.google.common.truth.Truth.assertThat
 import com.memo494.posetracker.core.modelimport.ImportGuardState
 import com.memo494.posetracker.core.modelimport.ImportStage
 import com.memo494.posetracker.core.modelimport.ImportedModelMeta
+import com.memo494.posetracker.core.modelpack.Sha256
 import org.junit.Assert.assertThrows
 import org.junit.Rule
 import org.junit.Test
@@ -248,6 +249,63 @@ class ImportedModelStoreTest {
         assertThat(temp.parentFile).isEqualTo(store.modelFileFor(newMeta).parentFile)
         assertThat(temp.name).endsWith(".tflite")
         assertThat(temp.exists()).isFalse()
+    }
+
+    // ---- does the stored file still match its meta (T9) ----
+
+    private fun storedMatchingMeta(store: ImportedModelStore): ImportedModelMeta {
+        val sha = Sha256.hex(newBytes.inputStream())
+        val real = ImportedModelMeta("new.tflite", sha, newBytes.size.toLong(), 640, 300)
+        assertThat(store.accept(stage(store, newBytes), real)).isTrue()
+        return real
+    }
+
+    @Test
+    fun storedFileMatches_whenLengthAndHashAgree() {
+        val store = newStore()
+        val real = storedMatchingMeta(store)
+
+        assertThat(store.storedFileMatches(real)).isTrue()
+    }
+
+    @Test
+    fun storedFileMatches_isFalseWhenTheHashDiffersAtTheSameLength() {
+        val store = newStore()
+        val real = storedMatchingMeta(store)
+        val file = store.modelFileFor(real)
+        file.writeBytes(newBytes.copyOf().also { it[0] = (it[0] + 1).toByte() })
+
+        assertThat(store.storedFileMatches(real)).isFalse()
+    }
+
+    @Test
+    fun storedFileMatches_isFalseWhenTheLengthDiffers() {
+        val store = newStore()
+        val real = storedMatchingMeta(store)
+        store.modelFileFor(real).appendBytes(byteArrayOf(1))
+
+        assertThat(store.storedFileMatches(real)).isFalse()
+    }
+
+    @Test
+    fun storedFileMatches_isFalseWhenTheFileIsMissing() {
+        val store = newStore()
+        val real = storedMatchingMeta(store)
+        store.modelFileFor(real).delete()
+
+        assertThat(store.storedFileMatches(real)).isFalse()
+    }
+
+    @Test
+    fun storedFileMatches_refusesTheMainThread() {
+        val store = newStore()
+        val real = storedMatchingMeta(store)
+        thread.onMainThread = true
+
+        // A file that matches would read as true: the refusal must come first and must not turn into false.
+        assertThrows(IllegalStateException::class.java) { store.storedFileMatches(real) }
+        thread.onMainThread = false
+        assertThat(store.storedFileMatches(real)).isTrue()
     }
 
     // ---- leftover temporary file of a dead process ----

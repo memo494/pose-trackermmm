@@ -34,6 +34,8 @@ class SessionModelLoaderTest {
     private var metaGiven: ImportedModelMeta? = null
     private var importedFailure: Throwable? = null
     private var builtInFailure: Throwable? = null
+    private var storedFileMatches = false
+    private var verifyFailure: Throwable? = null
     private val logs = mutableListOf<String>()
     private val loggedErrors = mutableListOf<Throwable?>()
 
@@ -69,6 +71,10 @@ class SessionModelLoaderTest {
             log = { message, error ->
                 logs.add(message)
                 loggedErrors.add(error)
+            },
+            verifyStored = {
+                verifyFailure?.let { throw it }
+                storedFileMatches
             },
         )
 
@@ -241,6 +247,57 @@ class SessionModelLoaderTest {
         assertThat(loaded.fallback).isEqualTo(ModelFallback.GUARD_TRIPPED_PROBE)
         assertThat(importedLoads).isEqualTo(0)
         assertThat(guardWrites).isEmpty()
+    }
+
+    @Test
+    fun trippedAfterAProbeCrash_keepsAStoredModelThatStillMatches() {
+        state = storedWith(ImportGuardState.Tripped(ImportStage.PROBE))
+        storedFileMatches = true
+
+        val loaded = loader().load()
+
+        assertThat(loaded.detector).isSameInstanceAs(importedDetector)
+        assertThat(loaded.source).isEqualTo(ModelSource.IMPORTED)
+        assertThat(loaded.fallback).isNull()
+        assertThat(importedLoads).isEqualTo(1)
+        assertThat(guardWrites).containsExactly(ImportGuardState.Pending(ImportStage.LOAD), ImportGuardState.Idle).inOrder()
+    }
+
+    @Test
+    fun trippedAfterAProbeCrash_withAStoredModelThatNoLongerMatches_usesTheBuiltInModel() {
+        state = storedWith(ImportGuardState.Tripped(ImportStage.PROBE))
+        storedFileMatches = false
+
+        val loaded = loader().load()
+
+        assertThat(loaded.detector).isSameInstanceAs(builtInDetector)
+        assertThat(loaded.fallback).isEqualTo(ModelFallback.GUARD_TRIPPED_PROBE)
+        assertThat(importedLoads).isEqualTo(0)
+        assertThat(guardWrites).isEmpty()
+    }
+
+    @Test
+    fun trippedAfterAProbeCrash_whenTheCheckThrows_usesTheBuiltInModel() {
+        state = storedWith(ImportGuardState.Tripped(ImportStage.PROBE))
+        verifyFailure = IOException("cannot read the file")
+
+        val loaded = loader().load()
+
+        assertThat(loaded.detector).isSameInstanceAs(builtInDetector)
+        assertThat(loaded.fallback).isEqualTo(ModelFallback.GUARD_TRIPPED_PROBE)
+        assertThat(importedLoads).isEqualTo(0)
+    }
+
+    @Test
+    fun trippedAfterALoadCrash_evenWithAMatchingFile_usesTheBuiltInModel() {
+        state = storedWith(ImportGuardState.Tripped(ImportStage.LOAD))
+        storedFileMatches = true
+
+        val loaded = loader().load()
+
+        assertThat(loaded.fallback).isEqualTo(ModelFallback.GUARD_TRIPPED_LOAD)
+        assertThat(loaded.source).isEqualTo(ModelSource.BUILT_IN)
+        assertThat(importedLoads).isEqualTo(0)
     }
 
     @Test

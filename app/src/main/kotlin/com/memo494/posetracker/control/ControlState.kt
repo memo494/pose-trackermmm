@@ -119,8 +119,17 @@ internal enum class ModelNoticeKind {
     /** The imported model's file is gone. */
     FILE_MISSING,
 
-    /** The app died while the runtime opened an imported file; imported models are switched off. */
+    /**
+     * The app died while the runtime opened a new file (it was never stored) and no stored model could be kept:
+     * the built-in model is used.
+     */
     GUARD_TRIPPED_PROBE,
+
+    /**
+     * The app died while the runtime opened a new file (it was never stored), and the previously imported model
+     * still matches its stored length and sha256, so it stays in use. Goes away at the next Start of that model.
+     */
+    PROBE_TRIP_MODEL_KEPT,
 
     /** The app died while the runtime loaded the imported model; it is switched off. */
     GUARD_TRIPPED_LOAD,

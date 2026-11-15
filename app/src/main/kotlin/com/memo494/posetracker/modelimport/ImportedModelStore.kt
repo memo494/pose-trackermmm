@@ -7,6 +7,7 @@ import com.memo494.posetracker.core.TrackerConfig
 import com.memo494.posetracker.core.modelimport.ImportGuard
 import com.memo494.posetracker.core.modelimport.ImportGuardState
 import com.memo494.posetracker.core.modelimport.ImportedModelMeta
+import com.memo494.posetracker.core.modelpack.Sha256
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -105,6 +106,27 @@ class ImportedModelStore private constructor(
     fun modelFileFor(meta: ImportedModelMeta): File {
         threadCheck()
         return File(directoryLazy.value, modelNameFor(meta))
+    }
+
+    /**
+     * Whether the stored model file of [meta] exists, has [ImportedModelMeta.bytes] bytes and the sha256 of
+     * [ImportedModelMeta.sha256] (length first, so a wrong file is not read). Reads the whole file, so call it
+     * only when needed (after a probe trip), from a worker thread. Fail closed: any problem, an `Error` included,
+     * is `false`. It takes no lock: [accept] names files by content, so a concurrent accept can at worst make the
+     * file vanish, which reads as `false`.
+     *
+     * Like every method here it throws [IllegalStateException] on the main thread, and without reading the file:
+     * the check runs before the `try`, so the catch-all cannot turn that refusal into `false`.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    fun storedFileMatches(meta: ImportedModelMeta): Boolean {
+        threadCheck()
+        val file = File(directoryLazy.value, modelNameFor(meta))
+        return try {
+            file.isFile && file.length() == meta.bytes && file.inputStream().use { Sha256.hex(it) } == meta.sha256
+        } catch (t: Throwable) {
+            false
+        }
     }
 
     /**

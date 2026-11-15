@@ -44,6 +44,9 @@ data class LoadedModel(
  *   means "use the built-in model".
  * @param loadBuiltIn builds the built-in detector (`PoseDetectors.fromAssets`).
  * @param log receives a message and the failure, if any; it must not throw.
+ * @param verifyStored whether the stored model file still has the length and sha256 of its meta
+ *   (`ImportedModelStore.storedFileMatches`); asked only after a probe trip, which keeps such a model. The default
+ *   says no (fail closed).
  */
 class SessionModelLoader(
     private val readState: () -> StoredModelState,
@@ -51,6 +54,7 @@ class SessionModelLoader(
     private val loadImported: (ImportedModelMeta) -> PoseDetector,
     private val loadBuiltIn: () -> PoseDetector,
     private val log: (String, Throwable?) -> Unit,
+    private val verifyStored: (ImportedModelMeta) -> Boolean = { false },
 ) {
     /**
      * Never throws (`Error`s such as `OutOfMemoryError` included).
@@ -60,6 +64,10 @@ class SessionModelLoader(
      *   would be blind): built-in with [ModelFallback.GUARD_NOT_STORED].
      * - A catchable load failure is not a crash: the marker goes back to `Idle` and the built-in model runs with
      *   [ModelFallback.LOAD_FAILED] and a short message.
+     * - A guard tripped at the probe of a new file does not stop a stored model that still matches its meta
+     *   (`ModelChoice.resolve`); it loads like any other. Its load stores `Pending(LOAD)` and then `Idle`, so the
+     *   first Start of the kept model lifts the probe trip on purpose (the trip suspected a file that was never
+     *   stored, and the model that ran has just loaded without killing the process).
      * - Otherwise the built-in model; the fallback mirrors the reason of `ModelChoice.BuiltIn`, and is `null` when
      *   nothing is imported.
      * - The built-in model failing too gives `detector == null` (logged), keeping the other fields.
@@ -67,7 +75,7 @@ class SessionModelLoader(
     fun load(): LoadedModel {
         val choice =
             try {
-                ModelChoice.resolve(readState())
+                ModelChoice.resolve(readState(), verifyStored)
             } catch (t: Throwable) {
                 log("cannot read the stored model state", t)
                 return builtIn(null, ModelFallback.STATE_UNREADABLE, ModelProbe.failureMessage(t))

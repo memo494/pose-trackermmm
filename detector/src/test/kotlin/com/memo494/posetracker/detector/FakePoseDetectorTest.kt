@@ -34,7 +34,8 @@ class FakePoseDetectorTest {
         return frame
     }
 
-    private fun fixtureDetector(): FakePoseDetector = FakePoseDetector(ReplayFixture.parse(fixtureJson), INPUT_SIZE, Accelerator.GPU)
+    private fun fixtureDetector(): FakePoseDetector =
+        FakePoseDetector(ReplayFixture.parse(fixtureJson), INPUT_SIZE, INPUT_SIZE, Accelerator.GPU)
 
     @Test
     fun replaysTheFixtureFramesInOrderAndLoops() {
@@ -72,7 +73,7 @@ class FakePoseDetectorTest {
 
     @Test
     fun emptyListGivesFramesWithTheIncomingSizeAndNoDetections() {
-        val detector = FakePoseDetector(emptyList(), INPUT_SIZE, Accelerator.CPU)
+        val detector = FakePoseDetector(emptyList(), INPUT_SIZE, INPUT_SIZE, Accelerator.CPU)
 
         val result = detector.detect(captureFrame(timestampNs = 42L, widthImg = 12, heightImg = 9))
 
@@ -81,12 +82,23 @@ class FakePoseDetectorTest {
 
     @Test
     fun reportsItsConfigurationAndZeroInferenceTime() {
-        val detector = FakePoseDetector(emptyList(), INPUT_SIZE, Accelerator.CPU)
+        val detector = FakePoseDetector(emptyList(), INPUT_SIZE, INPUT_SIZE, Accelerator.CPU)
         detector.detect(captureFrame(timestampNs = 1L))
 
+        assertThat(detector.inputWidth).isEqualTo(INPUT_SIZE)
+        assertThat(detector.inputHeight).isEqualTo(INPUT_SIZE)
         assertThat(detector.inputSize).isEqualTo(INPUT_SIZE)
         assertThat(detector.accelerator).isEqualTo(Accelerator.CPU)
         assertThat(detector.lastInferenceMs).isEqualTo(0f)
+    }
+
+    @Test
+    fun reportsARectangularInputAsWidthAndHeight() {
+        val detector = FakePoseDetector(emptyList(), RECT_WIDTH, RECT_HEIGHT, Accelerator.GPU)
+
+        assertThat(detector.inputWidth).isEqualTo(RECT_WIDTH)
+        assertThat(detector.inputHeight).isEqualTo(RECT_HEIGHT)
+        assertThat(detector.inputSize).isEqualTo(RECT_WIDTH)
     }
 
     @Test
@@ -107,6 +119,8 @@ class FakePoseDetectorTest {
 
     private companion object {
         const val INPUT_SIZE = 416
+        const val RECT_WIDTH = 832
+        const val RECT_HEIGHT = 384
         const val FIXTURE_FRAMES = 3
         const val INCOMING_WIDTH = 8
         const val INCOMING_HEIGHT = 6

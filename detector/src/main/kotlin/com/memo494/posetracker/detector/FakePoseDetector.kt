@@ -12,14 +12,23 @@ import com.memo494.posetracker.core.model.DetectionFrame
  * recorded frames every result has the incoming size and no detections.
  *
  * @param frames the recorded frames, for example from `ReplayFixture.parse`; copied on construction.
- * @property inputSize the model input size to report, in model pixels.
+ * @property inputWidth the model input width to report, in model pixels (Mdl space).
+ * @property inputHeight the model input height to report, in model pixels (Mdl space).
  * @property accelerator the backend to report.
  */
 class FakePoseDetector(
     frames: List<DetectionFrame>,
-    override val inputSize: Int,
+    override val inputWidth: Int,
+    override val inputHeight: Int,
     override val accelerator: Accelerator,
 ) : PoseDetector {
+    /** Temporary, removed in M1a T3: a square input of [inputSize] x [inputSize] model pixels (Mdl space). */
+    constructor(
+        frames: List<DetectionFrame>,
+        inputSize: Int,
+        accelerator: Accelerator,
+    ) : this(frames, inputSize, inputSize, accelerator)
+
     private val frames: List<DetectionFrame> = frames.toList()
     private var nextIndex = 0
     private var closed = false

@@ -12,7 +12,8 @@ class LiteRtPoseDetectorTest {
     /** Scriptable stand-in for the model: returns [detections] and counts the calls it receives. */
     private class FakeEngine(
         override val accelerator: Accelerator = Accelerator.GPU,
-        override val inputSize: Int = INPUT_SIZE,
+        override val inputWidth: Int = INPUT_SIZE,
+        override val inputHeight: Int = INPUT_SIZE,
         var detections: List<PoseDetection> = emptyList(),
         override var lastInferenceMs: Float = 0f,
         override var lastMaxRawScore: Float = PoseDetector.NOT_MEASURED.toFloat(),
@@ -71,7 +72,7 @@ class LiteRtPoseDetectorTest {
     private fun detectorOver(
         engine: FakeEngine,
         scoreThreshold: Float = THRESHOLD,
-    ): LiteRtPoseDetector = LiteRtPoseDetector.create(RecordingFactory { engine }, scoreThreshold, INPUT_SIZE)
+    ): LiteRtPoseDetector = LiteRtPoseDetector.create(RecordingFactory { engine }, scoreThreshold, INPUT_SIZE, INPUT_SIZE)
 
     /** Runs [block] on a new thread and returns how it ended. */
     private fun <T> onOtherThread(block: () -> T): Result<T> {
@@ -91,7 +92,7 @@ class LiteRtPoseDetectorTest {
                 cpuEngine
             }
 
-        val detector = LiteRtPoseDetector.create(factory, THRESHOLD, INPUT_SIZE)
+        val detector = LiteRtPoseDetector.create(factory, THRESHOLD, INPUT_SIZE, INPUT_SIZE)
 
         assertThat(factory.requested).containsExactly(Accelerator.GPU, Accelerator.CPU).inOrder()
         assertThat(detector.accelerator).isEqualTo(Accelerator.CPU)
@@ -101,7 +102,7 @@ class LiteRtPoseDetectorTest {
     fun workingGpuFactoryIsUsedAndCpuIsNeverRequested() {
         val factory = RecordingFactory { FakeEngine(accelerator = Accelerator.GPU) }
 
-        val detector = LiteRtPoseDetector.create(factory, THRESHOLD, INPUT_SIZE)
+        val detector = LiteRtPoseDetector.create(factory, THRESHOLD, INPUT_SIZE, INPUT_SIZE)
 
         assertThat(factory.requested).containsExactly(Accelerator.GPU)
         assertThat(detector.accelerator).isEqualTo(Accelerator.GPU)
@@ -111,7 +112,7 @@ class LiteRtPoseDetectorTest {
     fun acceleratorIsWhatTheEngineReportsNotWhatWasAsked() {
         val factory = RecordingFactory { FakeEngine(accelerator = Accelerator.CPU) }
 
-        val detector = LiteRtPoseDetector.create(factory, THRESHOLD, INPUT_SIZE)
+        val detector = LiteRtPoseDetector.create(factory, THRESHOLD, INPUT_SIZE, INPUT_SIZE)
 
         assertThat(factory.requested).containsExactly(Accelerator.GPU)
         assertThat(detector.accelerator).isEqualTo(Accelerator.CPU)
@@ -126,7 +127,7 @@ class LiteRtPoseDetectorTest {
 
         val thrown =
             assertThrows(IllegalStateException::class.java) {
-                LiteRtPoseDetector.create(factory, THRESHOLD, INPUT_SIZE)
+                LiteRtPoseDetector.create(factory, THRESHOLD, INPUT_SIZE, INPUT_SIZE)
             }
 
         assertThat(thrown).hasMessageThat().isEqualTo("failed on CPU")
@@ -135,7 +136,7 @@ class LiteRtPoseDetectorTest {
 
     @Test
     fun wrongEngineInputSizeClosesTheEngineAndFails() {
-        val engine = FakeEngine(inputSize = WRONG_INPUT_SIZE)
+        val engine = FakeEngine(inputWidth = WRONG_INPUT_SIZE, inputHeight = WRONG_INPUT_SIZE)
 
         assertThrows(IllegalStateException::class.java) { detectorOver(engine) }
 
@@ -144,24 +145,77 @@ class LiteRtPoseDetectorTest {
 
     @Test
     fun importedSizeIsReportedWhenTheEngineAgrees() {
-        val engine = FakeEngine(inputSize = IMPORTED_INPUT_SIZE)
+        val engine = FakeEngine(inputWidth = IMPORTED_INPUT_SIZE, inputHeight = IMPORTED_INPUT_SIZE)
 
-        val detector = LiteRtPoseDetector.create(RecordingFactory { engine }, THRESHOLD, IMPORTED_INPUT_SIZE)
+        val detector =
+            LiteRtPoseDetector.create(RecordingFactory { engine }, THRESHOLD, IMPORTED_INPUT_SIZE, IMPORTED_INPUT_SIZE)
 
-        assertThat(detector.inputSize).isEqualTo(IMPORTED_INPUT_SIZE)
+        assertThat(detector.inputWidth).isEqualTo(IMPORTED_INPUT_SIZE)
+        assertThat(detector.inputHeight).isEqualTo(IMPORTED_INPUT_SIZE)
         assertThat(engine.closeCalls).isEqualTo(0)
     }
 
     @Test
     fun engineSmallerThanTheImportedSizeIsClosedAndRefused() {
-        val engine = FakeEngine(inputSize = INPUT_SIZE)
+        val engine = FakeEngine(inputWidth = INPUT_SIZE, inputHeight = INPUT_SIZE)
 
         val thrown =
             assertThrows(IllegalStateException::class.java) {
-                LiteRtPoseDetector.create(RecordingFactory { engine }, THRESHOLD, IMPORTED_INPUT_SIZE)
+                LiteRtPoseDetector.create(RecordingFactory { engine }, THRESHOLD, IMPORTED_INPUT_SIZE, IMPORTED_INPUT_SIZE)
             }
 
-        assertThat(thrown).hasMessageThat().contains("$IMPORTED_INPUT_SIZE")
+        assertThat(thrown).hasMessageThat().contains("expected 640x640 but the model has 416x416")
+        assertThat(engine.closeCalls).isEqualTo(1)
+    }
+
+    @Test
+    fun rectangularEngineIsAcceptedWhenBothSidesMatch() {
+        val engine = FakeEngine(inputWidth = RECT_WIDTH, inputHeight = RECT_HEIGHT)
+
+        val detector = LiteRtPoseDetector.create(RecordingFactory { engine }, THRESHOLD, RECT_WIDTH, RECT_HEIGHT)
+
+        assertThat(detector.inputWidth).isEqualTo(RECT_WIDTH)
+        assertThat(detector.inputHeight).isEqualTo(RECT_HEIGHT)
+        assertThat(detector.inputSize).isEqualTo(RECT_WIDTH)
+        assertThat(engine.closeCalls).isEqualTo(0)
+    }
+
+    @Test
+    fun rectangularEngineWithAnotherHeightIsClosedAndRefused() {
+        val engine = FakeEngine(inputWidth = RECT_WIDTH, inputHeight = RECT_HEIGHT + 32)
+
+        val thrown =
+            assertThrows(IllegalStateException::class.java) {
+                LiteRtPoseDetector.create(RecordingFactory { engine }, THRESHOLD, RECT_WIDTH, RECT_HEIGHT)
+            }
+
+        assertThat(thrown).hasMessageThat().contains("expected 832x384 but the model has 832x416")
+        assertThat(engine.closeCalls).isEqualTo(1)
+    }
+
+    @Test
+    fun rectangularEngineWithAnotherWidthIsClosedAndRefused() {
+        val engine = FakeEngine(inputWidth = RECT_WIDTH - 32, inputHeight = RECT_HEIGHT)
+
+        val thrown =
+            assertThrows(IllegalStateException::class.java) {
+                LiteRtPoseDetector.create(RecordingFactory { engine }, THRESHOLD, RECT_WIDTH, RECT_HEIGHT)
+            }
+
+        assertThat(thrown).hasMessageThat().contains("expected 832x384 but the model has 800x384")
+        assertThat(engine.closeCalls).isEqualTo(1)
+    }
+
+    @Test
+    fun squareEngineIsRefusedWhenARectangularInputWasExpected() {
+        val engine = FakeEngine(inputWidth = IMPORTED_INPUT_SIZE, inputHeight = IMPORTED_INPUT_SIZE)
+
+        val thrown =
+            assertThrows(IllegalStateException::class.java) {
+                LiteRtPoseDetector.create(RecordingFactory { engine }, THRESHOLD, RECT_WIDTH, RECT_HEIGHT)
+            }
+
+        assertThat(thrown).hasMessageThat().contains("expected 832x384 but the model has 640x640")
         assertThat(engine.closeCalls).isEqualTo(1)
     }
 
@@ -169,7 +223,8 @@ class LiteRtPoseDetectorTest {
     fun inputSizeAndInferenceTimeComeFromTheEngine() {
         val engine = FakeEngine(lastInferenceMs = 0f)
         val detector = detectorOver(engine)
-        assertThat(detector.inputSize).isEqualTo(INPUT_SIZE)
+        assertThat(detector.inputWidth).isEqualTo(INPUT_SIZE)
+        assertThat(detector.inputHeight).isEqualTo(INPUT_SIZE)
         assertThat(detector.lastInferenceMs).isEqualTo(0f)
 
         engine.lastInferenceMs = INFERENCE_MS
@@ -312,7 +367,7 @@ class LiteRtPoseDetectorTest {
 
     @Test
     fun aDetectorThatDoesNotMeasureRawScoresSaysNotMeasured() {
-        val fake = FakePoseDetector(emptyList(), INPUT_SIZE, Accelerator.GPU)
+        val fake = FakePoseDetector(emptyList(), INPUT_SIZE, INPUT_SIZE, Accelerator.GPU)
 
         assertThat(fake.lastMaxRawScore).isLessThan(0f)
         assertThat(fake.lastRawRowsAboveThreshold).isEqualTo(PoseDetector.NOT_MEASURED)
@@ -323,6 +378,8 @@ class LiteRtPoseDetectorTest {
         const val INPUT_SIZE = 416
         const val WRONG_INPUT_SIZE = 320
         const val IMPORTED_INPUT_SIZE = 640
+        const val RECT_WIDTH = 832
+        const val RECT_HEIGHT = 384
         const val THRESHOLD = 0.15f
         const val INFERENCE_MS = 12.5f
         const val FRAME_WIDTH = 8

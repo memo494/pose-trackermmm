@@ -11,8 +11,15 @@ import java.io.Closeable
  * model is created on that thread and must be run and closed there; never use a detector on the main thread.
  */
 interface PoseDetector : Closeable {
-    /** Side of the square model input, in model pixels (Mdl space); read from the model, never assumed. */
+    /** Width of the model input, in model pixels (Mdl space); read from the model, never assumed. */
+    val inputWidth: Int
+
+    /** Height of the model input, in model pixels (Mdl space); read from the model, never assumed. */
+    val inputHeight: Int
+
+    /** Temporary, removed in M1a T3: the same as [inputWidth], in model pixels (Mdl space). */
     val inputSize: Int
+        get() = inputWidth
 
     /** The compute backend that actually runs the model, which can be [Accelerator.CPU] although GPU was asked for. */
     val accelerator: Accelerator

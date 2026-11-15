@@ -26,7 +26,8 @@ import java.nio.ByteBuffer
 internal class UltralyticsPoseEngine private constructor(
     private val estimator: PoseEstimator,
     override val accelerator: Accelerator,
-    override val inputSize: Int,
+    override val inputWidth: Int,
+    override val inputHeight: Int,
 ) : PoseEngine {
     private var inferenceMs = 0f
     private var sourceBitmap: Bitmap? = null
@@ -104,9 +105,9 @@ internal class UltralyticsPoseEngine private constructor(
          * model turns out to be unusable: the estimator is closed before the exception propagates.
          *
          * @param scoreThreshold minimum person confidence, unitless in [0, 1].
-         * @throws IllegalStateException when the input layout was not recognised as NCHW `[1,3,S,S]`, the
-         *   input is not square, or the accelerator is neither GPU nor CPU; LiteRT exceptions for a model
-         *   that cannot be loaded.
+         * @throws IllegalStateException when the input layout was not recognised as NCHW `[1,3,H,W]` or the
+         *   accelerator is neither GPU nor CPU; LiteRT exceptions for a model that cannot be loaded. The input
+         *   may be rectangular; its width and height are reported as [inputWidth] and [inputHeight].
          */
         fun create(
             context: Context,
@@ -132,18 +133,15 @@ internal class UltralyticsPoseEngine private constructor(
         }
 
         private fun wrap(estimator: PoseEstimator): UltralyticsPoseEngine {
-            check(estimator.inputUsesNchw) { "model input layout was not recognised as NCHW [1,3,S,S]" }
+            check(estimator.inputUsesNchw) { "model input layout was not recognised as NCHW [1,3,H,W]" }
             val modelInput = estimator.inputSize
-            check(modelInput.width == modelInput.height) {
-                "model input ${modelInput.width}x${modelInput.height} is not square"
-            }
             val accelerator =
                 when (val name = estimator.accelerator) {
                     ACCELERATOR_GPU -> Accelerator.GPU
                     ACCELERATOR_CPU -> Accelerator.CPU
                     else -> error("unknown accelerator \"$name\"")
                 }
-            return UltralyticsPoseEngine(estimator, accelerator, modelInput.width)
+            return UltralyticsPoseEngine(estimator, accelerator, modelInput.width, modelInput.height)
         }
     }
 }

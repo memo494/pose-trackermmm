@@ -60,7 +60,8 @@ private class FakeFrameImage(
 private class ScriptedDetector(
     private val events: MutableList<String>,
 ) : PoseDetector {
-    override val inputSize: Int = 320
+    override val inputWidth: Int = 320
+    override val inputHeight: Int = 320
     override val accelerator: Accelerator = Accelerator.GPU
     override var lastInferenceMs: Float = 7.5f
     override var lastMaxRawScore: Float = PoseDetector.NOT_MEASURED.toFloat()

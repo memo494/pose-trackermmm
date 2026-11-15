@@ -18,7 +18,7 @@ object PoseDetectors {
     /**
      * Creates the detector for the model size in [config]: reads `model_info.json` from the assets, stages the
      * matching `.tflite` file into `noBackupFilesDir/models` (its SHA-256 is checked before LiteRT opens it by
-     * path), loads it GPU-first with a CPU fallback and checks that the model reports the configured input size.
+     * path), loads it GPU-first with a CPU fallback and checks that the model reports the configured square input size.
      *
      * Call on the thread that will own the detector (the capture thread) and use and close it there. Never call
      * it on the main thread: it reads and hashes several megabytes and compiles the model.
@@ -26,8 +26,8 @@ object PoseDetectors {
      * @throws java.io.IOException when an asset cannot be read or the staging fails, including
      *   `ModelIntegrityException` when the file does not match its SHA-256.
      * @throws IllegalArgumentException when `model_info.json` is invalid or has no entry for the size.
-     * @throws IllegalStateException when the model is unusable (input layout not NCHW, input not square, unknown
-     *   accelerator, input size different from the configured one).
+     * @throws IllegalStateException when the model is unusable (input layout not NCHW, unknown accelerator,
+     *   input size different from the configured square one).
      * @throws Exception LiteRT exceptions when the CPU attempt cannot load the model either.
      */
     fun fromAssets(
@@ -44,7 +44,7 @@ object PoseDetectors {
                 val useGpu = accelerator == Accelerator.GPU
                 UltralyticsPoseEngine.create(appContext, modelFile, useGpu, config.scoreThreshold)
             }
-        return LiteRtPoseDetector.create(factory, config.scoreThreshold, entry.inputSize)
+        return LiteRtPoseDetector.create(factory, config.scoreThreshold, config.modelInputSize, config.modelInputSize)
     }
 
     /**
@@ -54,7 +54,7 @@ object PoseDetectors {
      *
      * Before LiteRT opens the file it must exist, have exactly [ImportedModelMeta.bytes] bytes and hash to
      * [ImportedModelMeta.sha256] (see [verifyImportedFile]). The detector then has to report
-     * [ImportedModelMeta.inputSize] as its input size.
+     * [ImportedModelMeta.inputWidth] x [ImportedModelMeta.inputHeight] as its input size.
      *
      * Call on the thread that will own the detector (the capture thread) and use and close it there. Never call
      * it on the main thread: it hashes the file and compiles the model. The caller (the session start) falls back
@@ -64,8 +64,8 @@ object PoseDetectors {
      * @throws ModelIntegrityException (an [java.io.IOException]) when the length or the SHA-256 differs from
      *   [meta]; [fromAssets] throws the same type for its hash mismatch.
      * @throws java.io.IOException when the file cannot be read.
-     * @throws IllegalStateException when the model is unusable (input layout not NCHW, input not square, unknown
-     *   accelerator, input size different from [ImportedModelMeta.inputSize]).
+     * @throws IllegalStateException when the model is unusable (input layout not NCHW, unknown accelerator,
+     *   input width or height different from the meta's).
      * @throws Exception LiteRT exceptions when the CPU attempt cannot load the model either.
      */
     fun fromImported(
@@ -81,7 +81,7 @@ object PoseDetectors {
                 val useGpu = accelerator == Accelerator.GPU
                 UltralyticsPoseEngine.create(appContext, file, useGpu, config.scoreThreshold)
             }
-        return LiteRtPoseDetector.create(factory, config.scoreThreshold, meta.inputSize)
+        return LiteRtPoseDetector.create(factory, config.scoreThreshold, meta.inputWidth, meta.inputHeight)
     }
 
     /**

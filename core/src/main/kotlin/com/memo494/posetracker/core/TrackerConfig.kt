@@ -78,6 +78,13 @@ data class TrackerConfig(
     val importMaxInputAspect: Float = DEFAULT_IMPORT_MAX_INPUT_ASPECT,
     val timingWindowFrames: Int = DEFAULT_TIMING_WINDOW_FRAMES,
     val thermalSampleIntervalMs: Long = DEFAULT_THERMAL_SAMPLE_INTERVAL_MS,
+    val headKeypointEnterScore: Float = DEFAULT_HEAD_KEYPOINT_ENTER_SCORE,
+    val headKeypointLeaveScore: Float = DEFAULT_HEAD_KEYPOINT_LEAVE_SCORE,
+    val headOffsetAlpha: Float = DEFAULT_HEAD_OFFSET_ALPHA,
+    val headFallbackTopRatio: Float = DEFAULT_HEAD_FALLBACK_TOP_RATIO,
+    val headMeasurementNoiseRatio: Float = DEFAULT_HEAD_MEASUREMENT_NOISE_RATIO,
+    val headFallbackNoiseRatio: Float = DEFAULT_HEAD_FALLBACK_NOISE_RATIO,
+    val headMinMeanConfidence: Float = DEFAULT_HEAD_MIN_MEAN_CONFIDENCE,
 ) {
     init {
         require(scoreThreshold in MIN_SCORE_THRESHOLD..MAX_SCORE_THRESHOLD) {
@@ -157,6 +164,33 @@ data class TrackerConfig(
         require(thermalSampleIntervalMs in MIN_THERMAL_SAMPLE_INTERVAL_MS..MAX_THERMAL_SAMPLE_INTERVAL_MS) {
             "thermalSampleIntervalMs $thermalSampleIntervalMs outside " +
                 "[$MIN_THERMAL_SAMPLE_INTERVAL_MS, $MAX_THERMAL_SAMPLE_INTERVAL_MS]"
+        }
+        require(headKeypointEnterScore in MIN_HEAD_KEYPOINT_SCORE..MAX_HEAD_KEYPOINT_SCORE) {
+            "headKeypointEnterScore $headKeypointEnterScore outside [$MIN_HEAD_KEYPOINT_SCORE, $MAX_HEAD_KEYPOINT_SCORE]"
+        }
+        require(headKeypointLeaveScore in MIN_HEAD_KEYPOINT_SCORE..MAX_HEAD_KEYPOINT_SCORE) {
+            "headKeypointLeaveScore $headKeypointLeaveScore outside [$MIN_HEAD_KEYPOINT_SCORE, $MAX_HEAD_KEYPOINT_SCORE]"
+        }
+        require(headKeypointLeaveScore <= headKeypointEnterScore) {
+            "headKeypointLeaveScore $headKeypointLeaveScore is above headKeypointEnterScore $headKeypointEnterScore"
+        }
+        require(headOffsetAlpha in MIN_HEAD_OFFSET_ALPHA..MAX_HEAD_OFFSET_ALPHA) {
+            "headOffsetAlpha $headOffsetAlpha outside [$MIN_HEAD_OFFSET_ALPHA, $MAX_HEAD_OFFSET_ALPHA]"
+        }
+        require(headFallbackTopRatio in MIN_HEAD_FALLBACK_TOP_RATIO..MAX_HEAD_FALLBACK_TOP_RATIO) {
+            "headFallbackTopRatio $headFallbackTopRatio outside [$MIN_HEAD_FALLBACK_TOP_RATIO, $MAX_HEAD_FALLBACK_TOP_RATIO]"
+        }
+        require(headMeasurementNoiseRatio in MIN_HEAD_MEASUREMENT_NOISE_RATIO..MAX_HEAD_MEASUREMENT_NOISE_RATIO) {
+            "headMeasurementNoiseRatio $headMeasurementNoiseRatio outside " +
+                "[$MIN_HEAD_MEASUREMENT_NOISE_RATIO, $MAX_HEAD_MEASUREMENT_NOISE_RATIO]"
+        }
+        require(headFallbackNoiseRatio in MIN_HEAD_FALLBACK_NOISE_RATIO..MAX_HEAD_FALLBACK_NOISE_RATIO) {
+            "headFallbackNoiseRatio $headFallbackNoiseRatio outside " +
+                "[$MIN_HEAD_FALLBACK_NOISE_RATIO, $MAX_HEAD_FALLBACK_NOISE_RATIO]"
+        }
+        require(headMinMeanConfidence in MIN_HEAD_MIN_MEAN_CONFIDENCE..MAX_HEAD_MIN_MEAN_CONFIDENCE) {
+            "headMinMeanConfidence $headMinMeanConfidence outside " +
+                "[$MIN_HEAD_MIN_MEAN_CONFIDENCE, $MAX_HEAD_MIN_MEAN_CONFIDENCE]"
         }
     }
 
@@ -353,6 +387,63 @@ data class TrackerConfig(
 
         /** Highest accepted [thermalSampleIntervalMs]: 1 minute, in milliseconds. */
         const val MAX_THERMAL_SAMPLE_INTERVAL_MS = 60_000L
+
+        /** Default [headKeypointEnterScore]: unitless confidence. */
+        const val DEFAULT_HEAD_KEYPOINT_ENTER_SCORE = 0.5f
+
+        /** Default [headKeypointLeaveScore]: unitless confidence. */
+        const val DEFAULT_HEAD_KEYPOINT_LEAVE_SCORE = 0.3f
+
+        /** Lowest accepted [headKeypointEnterScore] / [headKeypointLeaveScore]. */
+        const val MIN_HEAD_KEYPOINT_SCORE = 0.05f
+
+        /** Highest accepted [headKeypointEnterScore] / [headKeypointLeaveScore]. */
+        const val MAX_HEAD_KEYPOINT_SCORE = 0.95f
+
+        /** Default [headOffsetAlpha]: unitless EMA weight. */
+        const val DEFAULT_HEAD_OFFSET_ALPHA = 0.2f
+
+        /** Lowest accepted [headOffsetAlpha] (the interval is (0, 1], so 0 itself is refused). */
+        const val MIN_HEAD_OFFSET_ALPHA = 0.01f
+
+        /** Highest accepted [headOffsetAlpha]. */
+        const val MAX_HEAD_OFFSET_ALPHA = 1.0f
+
+        /** Default [headFallbackTopRatio]: unitless fraction of the box height. */
+        const val DEFAULT_HEAD_FALLBACK_TOP_RATIO = 0.10f
+
+        /** Lowest accepted [headFallbackTopRatio]. */
+        const val MIN_HEAD_FALLBACK_TOP_RATIO = 0.0f
+
+        /** Highest accepted [headFallbackTopRatio]. */
+        const val MAX_HEAD_FALLBACK_TOP_RATIO = 0.5f
+
+        /** Default [headMeasurementNoiseRatio]: unitless fraction of the box height. */
+        const val DEFAULT_HEAD_MEASUREMENT_NOISE_RATIO = 0.03f
+
+        /** Lowest accepted [headMeasurementNoiseRatio]. */
+        const val MIN_HEAD_MEASUREMENT_NOISE_RATIO = 0.005f
+
+        /** Highest accepted [headMeasurementNoiseRatio]. */
+        const val MAX_HEAD_MEASUREMENT_NOISE_RATIO = 0.2f
+
+        /** Default [headFallbackNoiseRatio]: unitless fraction of the box height. */
+        const val DEFAULT_HEAD_FALLBACK_NOISE_RATIO = 0.10f
+
+        /** Lowest accepted [headFallbackNoiseRatio]. */
+        const val MIN_HEAD_FALLBACK_NOISE_RATIO = 0.02f
+
+        /** Highest accepted [headFallbackNoiseRatio]. */
+        const val MAX_HEAD_FALLBACK_NOISE_RATIO = 0.5f
+
+        /** Default [headMinMeanConfidence]: unitless confidence. */
+        const val DEFAULT_HEAD_MIN_MEAN_CONFIDENCE = 0.05f
+
+        /** Lowest accepted [headMinMeanConfidence] (above 0 so the variance stays finite). */
+        const val MIN_HEAD_MIN_MEAN_CONFIDENCE = 0.01f
+
+        /** Highest accepted [headMinMeanConfidence]. */
+        const val MAX_HEAD_MIN_MEAN_CONFIDENCE = 0.5f
 
         /** How far ahead, in seconds, the thermal headroom is forecast; 0 = the current headroom. */
         const val THERMAL_HEADROOM_FORECAST_SECONDS = 0

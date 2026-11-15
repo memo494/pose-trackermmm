@@ -223,13 +223,24 @@ class DiagnosticsReportTest {
 
     // ---- the model block ----
 
-    private val importedMeta = ImportedModelMeta("my-model.tflite", "0123456789abcdef".repeat(4), 12_345_678L, 640, 300)
+    private val importedMeta = ImportedModelMeta("my-model.tflite", "0123456789abcdef".repeat(4), 12_345_678L, 640, 640, 300)
+
+    private fun builtInStatus(
+        width: Int,
+        height: Int,
+    ) = ModelStatus(ModelSource.BUILT_IN, meta = null, fallback = null, message = null, inputWidth = width, inputHeight = height)
+
+    private fun importedStatus(
+        meta: ImportedModelMeta,
+        width: Int,
+        height: Int,
+    ) = ModelStatus(ModelSource.IMPORTED, meta, fallback = null, message = null, inputWidth = width, inputHeight = height)
 
     private fun modelLines(model: ModelStatus?): List<String> = build(stats = stats.copy(model = model)).text("summary.txt").split("\n")
 
     @Test
     fun summary_builtInModel_isDescribedWithoutAFile() {
-        val lines = modelLines(ModelStatus(ModelSource.BUILT_IN, meta = null, fallback = null, message = null, inputSize = 416))
+        val lines = modelLines(builtInStatus(416, 416))
 
         assertThat(lines)
             .containsAtLeast(
@@ -246,7 +257,7 @@ class DiagnosticsReportTest {
 
     @Test
     fun summary_importedModel_showsNameShortHashSizeAndRows() {
-        val lines = modelLines(ModelStatus(ModelSource.IMPORTED, importedMeta, fallback = null, message = null, inputSize = 640))
+        val lines = modelLines(importedStatus(importedMeta, 640, 640))
 
         assertThat(lines)
             .containsAtLeast(
@@ -261,6 +272,22 @@ class DiagnosticsReportTest {
     }
 
     @Test
+    fun summary_rectangularImportedModel_printsWidthXHeightUnderTheSameKey() {
+        val meta = importedMeta.copy(inputWidth = 832, inputHeight = 384)
+        val lines = modelLines(importedStatus(meta, 832, 384))
+
+        assertThat(lines).contains("modelInputSize=832x384")
+        assertThat(lines.filter { it.startsWith("modelInputSize") }).hasSize(1)
+    }
+
+    @Test
+    fun summary_modelWithoutAnInput_printsZero() {
+        val lines = modelLines(ModelStatus(ModelSource.BUILT_IN, null, ModelFallback.LOAD_FAILED, "x", inputWidth = 0, inputHeight = 0))
+
+        assertThat(lines).contains("modelInputSize=0")
+    }
+
+    @Test
     fun summary_fallbackAfterAFailedLoad_namesTheReasonTheMessageAndTheRefusedFile() {
         val status =
             ModelStatus(
@@ -268,7 +295,8 @@ class DiagnosticsReportTest {
                 importedMeta,
                 ModelFallback.LOAD_FAILED,
                 "IllegalStateException: input is not NCHW",
-                inputSize = 416,
+                inputWidth = 416,
+                inputHeight = 416,
             )
 
         val lines = modelLines(status)
@@ -286,7 +314,7 @@ class DiagnosticsReportTest {
 
     @Test
     fun summary_fallbackMessageStaysOnOneLine() {
-        val status = ModelStatus(ModelSource.BUILT_IN, null, ModelFallback.LOAD_FAILED, "a\nb", inputSize = 416)
+        val status = ModelStatus(ModelSource.BUILT_IN, null, ModelFallback.LOAD_FAILED, "a\nb", inputWidth = 416, inputHeight = 416)
 
         assertThat(modelLines(status)).contains("modelFallbackMessage=a b")
     }
@@ -294,7 +322,7 @@ class DiagnosticsReportTest {
     @Test
     fun summary_everyFallbackReasonIsPrintedByName() {
         for (reason in ModelFallback.entries) {
-            val status = ModelStatus(ModelSource.BUILT_IN, null, reason, null, inputSize = 416)
+            val status = ModelStatus(ModelSource.BUILT_IN, null, reason, null, inputWidth = 416, inputHeight = 416)
 
             assertThat(modelLines(status)).contains("modelFallback=${reason.name}")
         }

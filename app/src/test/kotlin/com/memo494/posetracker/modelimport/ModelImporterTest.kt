@@ -130,13 +130,26 @@ class ModelImporterTest {
                 displayName = "yolo26n pose.tflite",
                 sha256 = Sha256.hex(ByteArrayInputStream(bytes)),
                 bytes = 2_000L,
-                inputSize = 640,
+                inputWidth = 640,
+                inputHeight = 640,
                 outputRows = 300,
             )
         assertThat(outcome).isEqualTo(ImportOutcome.Accepted(expected))
         assertThat(store.state()).isEqualTo(StoredModelState(expected, fileExists = true, guard = ImportGuardState.Idle))
         assertThat(store.modelFileFor(expected).readBytes()).isEqualTo(bytes)
         assertThat(directory.list()!!.toSet()).containsExactly(storedName(bytes), "meta.txt")
+    }
+
+    @Test
+    fun rectangularModel_isStoredWithWidthAndHeightApart() {
+        probeResult = ProbeResult.Tensors(listOf(tensor(1, 3, 384, 832)), listOf(tensor(1, 300, 57)))
+
+        val outcome = runImport(tfliteBytes(2_000), name = "yolo26n-pose_832x384.tflite")
+
+        val meta = (outcome as ImportOutcome.Accepted).meta
+        assertThat(meta.inputWidth).isEqualTo(832)
+        assertThat(meta.inputHeight).isEqualTo(384)
+        assertThat(store.state().meta).isEqualTo(meta)
     }
 
     @Test

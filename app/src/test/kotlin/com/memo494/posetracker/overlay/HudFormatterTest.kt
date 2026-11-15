@@ -267,7 +267,14 @@ class HudFormatterTest {
 
     @Test
     fun detections_builtInModelShowsTheInputSizeWithoutAMark() {
-        val state = sample.copy(frame = frameWith(1), rawRowsAboveThreshold = 1, maxRawScore = 0.84f, modelInputSize = 416)
+        val state =
+            sample.copy(
+                frame = frameWith(1),
+                rawRowsAboveThreshold = 1,
+                maxRawScore = 0.84f,
+                modelInputWidth = 416,
+                modelInputHeight = 416,
+            )
 
         assertThat(detections(state)).isEqualTo("det 1/1 max 0.84 in 416")
     }
@@ -279,7 +286,8 @@ class HudFormatterTest {
                 frame = frameWith(1),
                 rawRowsAboveThreshold = 1,
                 maxRawScore = 0.84f,
-                modelInputSize = 640,
+                modelInputWidth = 640,
+                modelInputHeight = 640,
                 modelImported = true,
             )
 
@@ -287,8 +295,72 @@ class HudFormatterTest {
     }
 
     @Test
+    fun detections_rectangularImportedModelShowsWidthXHeightAndTheMark() {
+        val state =
+            sample.copy(
+                frame = frameWith(2),
+                rawRowsAboveThreshold = 3,
+                maxRawScore = 0.89f,
+                modelInputWidth = 832,
+                modelInputHeight = 384,
+                modelImported = true,
+            )
+
+        assertThat(detections(state)).isEqualTo("det 2/3 max 0.89 in 832x384 imp")
+    }
+
+    @Test
+    fun detections_aPortraitModelShowsWidthFirst() {
+        val state =
+            sample.copy(
+                frame = frameWith(1),
+                rawRowsAboveThreshold = 1,
+                maxRawScore = 0.5f,
+                modelInputWidth = 384,
+                modelInputHeight = 832,
+            )
+
+        assertThat(detections(state)).isEqualTo("det 1/1 max 0.50 in 384x832")
+    }
+
+    @Test
+    fun detections_oneUnknownSideLeavesTheSizeOut() {
+        val state = sample.copy(modelInputWidth = 832, modelInputHeight = 0, modelImported = true)
+
+        assertThat(detections(state)).isEqualTo("det --/-- max --")
+    }
+
+    @Test
+    fun detections_longestRectangularTextFitsTheHudLine() {
+        val longest =
+            sample.copy(
+                frame = frameWith(9999),
+                rawRowsAboveThreshold = 9999,
+                maxRawScore = 99.99f,
+                modelInputWidth = TrackerConfig.MAX_IMPORT_INPUT_SIZE_LIMIT,
+                modelInputHeight = TrackerConfig.MAX_IMPORT_INPUT_SIZE_LIMIT - TrackerConfig.IMPORT_INPUT_SIZE_STEP,
+                modelImported = true,
+            )
+        val roomy = CharArray(TrackerConfig.HUD_LINE_CAPACITY_CHARS * 2)
+
+        val length = HudFormatter.formatDetections(longest, roomy)
+
+        assertThat(String(roomy, 0, length)).isEqualTo("det 9999/9999 max 99.99 in 4096x4064 imp")
+        assertThat(length).isAtMost(TrackerConfig.HUD_LINE_CAPACITY_CHARS)
+    }
+
+    @Test
+    fun hudChanged_seesAChangeOfOnlyOneModelSide() {
+        val square = sample.copy(modelInputWidth = 640, modelInputHeight = 640)
+
+        assertThat(HudFormatter.hudChanged(square, square.copy(modelInputHeight = 384), idleFps)).isTrue()
+        assertThat(HudFormatter.hudChanged(square, square.copy(modelInputWidth = 832), idleFps)).isTrue()
+        assertThat(HudFormatter.hudChanged(square, square.copy(), idleFps)).isFalse()
+    }
+
+    @Test
     fun detections_withoutAModelTheSizeIsLeftOut() {
-        val state = sample.copy(modelInputSize = 0, modelImported = false)
+        val state = sample.copy(modelInputWidth = 0, modelInputHeight = 0, modelImported = false)
 
         assertThat(detections(state)).isEqualTo("det --/-- max --")
     }
@@ -300,7 +372,8 @@ class HudFormatterTest {
                 frame = frameWith(9999),
                 rawRowsAboveThreshold = 9999,
                 maxRawScore = 99.99f,
-                modelInputSize = 9984,
+                modelInputWidth = 4096,
+                modelInputHeight = 1024,
                 modelImported = true,
             )
         val roomy = CharArray(TrackerConfig.HUD_LINE_CAPACITY_CHARS * 2)
@@ -308,7 +381,7 @@ class HudFormatterTest {
         val length = HudFormatter.formatDetections(worst, roomy)
 
         assertThat(length).isAtMost(TrackerConfig.HUD_LINE_CAPACITY_CHARS)
-        assertThat(String(roomy, 0, length)).isEqualTo("det 9999/9999 max 99.99 in 9984 imp")
+        assertThat(String(roomy, 0, length)).isEqualTo("det 9999/9999 max 99.99 in 4096x1024 imp")
     }
 
     @Test
@@ -318,7 +391,8 @@ class HudFormatterTest {
                 frame = frameWith(3),
                 rawRowsAboveThreshold = 12,
                 maxRawScore = 0.93f,
-                modelInputSize = 640,
+                modelInputWidth = 640,
+                modelInputHeight = 640,
                 modelImported = true,
             )
 
@@ -327,7 +401,7 @@ class HudFormatterTest {
 
     @Test
     fun detections_aSmallBufferCutsTheTextInsteadOfThrowing() {
-        val state = sample.copy(frame = frameWith(1), modelInputSize = 640, modelImported = true)
+        val state = sample.copy(frame = frameWith(1), modelInputWidth = 640, modelInputHeight = 640, modelImported = true)
         val small = CharArray(20)
 
         val length = HudFormatter.formatDetections(state, small)
@@ -352,7 +426,7 @@ class HudFormatterTest {
 
     @Test
     fun hudChanged_seesTheModelSizeAndTheImportedFlag() {
-        assertThat(HudFormatter.hudChanged(sample, sample.copy(modelInputSize = 640), idleFps)).isTrue()
+        assertThat(HudFormatter.hudChanged(sample, sample.copy(modelInputWidth = 640, modelInputHeight = 640), idleFps)).isTrue()
         assertThat(HudFormatter.hudChanged(sample, sample.copy(modelImported = true), idleFps)).isTrue()
         assertThat(HudFormatter.hudChanged(sample, sample.copy(warning = OverlayWarning.IMPORTED_MODEL_NOT_USED), idleFps)).isTrue()
     }
@@ -361,7 +435,7 @@ class HudFormatterTest {
     fun hudChanged_seesTheModelFieldsWhileIdle() {
         val idle = sample.copy(captureFps = 0f)
 
-        assertThat(HudFormatter.hudChanged(idle, idle.copy(modelInputSize = 640), idleFps)).isTrue()
+        assertThat(HudFormatter.hudChanged(idle, idle.copy(modelInputWidth = 640, modelInputHeight = 640), idleFps)).isTrue()
         assertThat(HudFormatter.hudChanged(idle, idle.copy(modelImported = true), idleFps)).isTrue()
     }
 }

@@ -7,7 +7,7 @@ import com.memo494.posetracker.core.modelimport.ImportedModelMeta
 import org.junit.Test
 
 class ModelChoiceTest {
-    private val meta = ImportedModelMeta("model.tflite", "a".repeat(64), 1_000L, 640, 300)
+    private val meta = ImportedModelMeta("model.tflite", "a".repeat(64), 1_000L, 640, 640, 300)
 
     private val idle = ImportGuardState.Idle
     private val pendingProbe = ImportGuardState.Pending(ImportStage.PROBE)

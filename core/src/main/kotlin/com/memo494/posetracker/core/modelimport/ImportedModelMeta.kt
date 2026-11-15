@@ -24,19 +24,6 @@ data class ImportedModelMeta(
     val inputHeight: Int,
     val outputRows: Int,
 ) {
-    /** Temporary, removed in M1a T3: a square input of [inputSize] x [inputSize] pixels. */
-    constructor(
-        displayName: String,
-        sha256: String,
-        bytes: Long,
-        inputSize: Int,
-        outputRows: Int,
-    ) : this(displayName, sha256, bytes, inputSize, inputSize, outputRows)
-
-    /** Temporary, removed in M1a T3: the same as [inputWidth]. */
-    val inputSize: Int
-        get() = inputWidth
-
     /**
      * The versioned text form: [HEADER] then `name=`, `sha256=`, `bytes=`, `inputWidth=`, `inputHeight=`,
      * `outputRows=`, one per line in that order, joined by `\n` with no trailing newline. Always version 2.

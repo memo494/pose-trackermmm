@@ -59,9 +59,9 @@ private class FakeFrameImage(
 /** A detector that records what it saw and fails on demand. */
 private class ScriptedDetector(
     private val events: MutableList<String>,
+    override val inputWidth: Int = 320,
+    override val inputHeight: Int = 320,
 ) : PoseDetector {
-    override val inputWidth: Int = 320
-    override val inputHeight: Int = 320
     override val accelerator: Accelerator = Accelerator.GPU
     override var lastInferenceMs: Float = 7.5f
     override var lastMaxRawScore: Float = PoseDetector.NOT_MEASURED.toFloat()
@@ -724,7 +724,8 @@ class FramePipelineTest {
 
         pipeline.onFrame(image(), acquireNs())
 
-        assertThat(states.last().modelInputSize).isEqualTo(detector.inputSize)
+        assertThat(states.last().modelInputWidth).isEqualTo(detector.inputWidth)
+        assertThat(states.last().modelInputHeight).isEqualTo(detector.inputHeight)
         assertThat(states.last().modelImported).isFalse()
         assertThat(states.last().warning).isNull()
     }
@@ -737,7 +738,8 @@ class FramePipelineTest {
         pipeline.setContentVisible(false)
 
         assertThat(states).hasSize(2)
-        assertThat(states.all { it.modelImported && it.modelInputSize == detector.inputSize }).isTrue()
+        assertThat(states.all { it.modelImported }).isTrue()
+        assertThat(states.all { it.modelInputWidth == detector.inputWidth && it.modelInputHeight == detector.inputHeight }).isTrue()
     }
 
     @Test
@@ -746,8 +748,21 @@ class FramePipelineTest {
 
         pipeline.setContentVisible(true)
 
-        assertThat(states.single().modelInputSize).isEqualTo(detector.inputSize)
+        assertThat(states.single().modelInputWidth).isEqualTo(detector.inputWidth)
+        assertThat(states.single().modelInputHeight).isEqualTo(detector.inputHeight)
         assertThat(states.single().modelImported).isTrue()
+    }
+
+    @Test
+    fun publishedStates_carryWidthAndHeightOfARectangularModelApart() {
+        val rectangular = ScriptedDetector(events, inputWidth = 832, inputHeight = 384)
+        val pipeline = pipeline(detector = rectangular, modelImported = true)
+
+        pipeline.onFrame(image(), acquireNs())
+        pipeline.setContentVisible(false)
+
+        assertThat(states).hasSize(2)
+        assertThat(states.all { it.modelInputWidth == 832 && it.modelInputHeight == 384 }).isTrue()
     }
 
     @Test
@@ -756,7 +771,8 @@ class FramePipelineTest {
 
         pipeline.onFrame(image(), acquireNs())
 
-        assertThat(states.last().modelInputSize).isEqualTo(0)
+        assertThat(states.last().modelInputWidth).isEqualTo(0)
+        assertThat(states.last().modelInputHeight).isEqualTo(0)
         assertThat(states.last().modelImported).isFalse()
     }
 

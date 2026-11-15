@@ -208,7 +208,8 @@ class ModelImporter(
                         displayName = ImportedModelMeta.sanitiseName(rawDisplayName),
                         sha256 = copy.sha256,
                         bytes = copy.bytes,
-                        inputSize = check.inputSize,
+                        inputWidth = check.inputWidth,
+                        inputHeight = check.inputHeight,
                         outputRows = check.outputRows,
                     )
                 accept(temp, meta)

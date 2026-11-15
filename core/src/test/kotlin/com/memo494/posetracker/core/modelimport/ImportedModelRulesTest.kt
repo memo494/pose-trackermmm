@@ -69,18 +69,18 @@ class ImportedModelRulesTest {
     }
 
     @Test
-    fun inputSizeAlias_isTheWidth() {
+    fun squareInput_hasEqualWidthAndHeight() {
         val square = check(tensor(1, 3, 640, 640)) as ImportCheck.Accepted
-        val wide = check(tensor(1, 3, 288, 640)) as ImportCheck.Accepted
 
-        assertThat(square.inputSize).isEqualTo(640)
-        assertThat(wide.inputSize).isEqualTo(640)
+        assertThat(square.inputWidth).isEqualTo(640)
+        assertThat(square.inputHeight).isEqualTo(640)
     }
 
     @Test
-    fun squareAcceptedCompatConstructor_setsBothSides() {
-        assertThat(ImportCheck.Accepted(inputSize = 416, outputRows = 300))
-            .isEqualTo(ImportCheck.Accepted(inputWidth = 416, inputHeight = 416, outputRows = 300))
+    fun wideInput_hasTheLongSideAsWidth() {
+        val wide = check(tensor(1, 3, 288, 640)) as ImportCheck.Accepted
+
+        assertThat(wide).isEqualTo(ImportCheck.Accepted(inputWidth = 640, inputHeight = 288, outputRows = 300))
     }
 
     @Test

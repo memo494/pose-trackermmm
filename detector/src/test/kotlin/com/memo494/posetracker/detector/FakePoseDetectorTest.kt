@@ -87,7 +87,6 @@ class FakePoseDetectorTest {
 
         assertThat(detector.inputWidth).isEqualTo(INPUT_SIZE)
         assertThat(detector.inputHeight).isEqualTo(INPUT_SIZE)
-        assertThat(detector.inputSize).isEqualTo(INPUT_SIZE)
         assertThat(detector.accelerator).isEqualTo(Accelerator.CPU)
         assertThat(detector.lastInferenceMs).isEqualTo(0f)
     }
@@ -98,7 +97,6 @@ class FakePoseDetectorTest {
 
         assertThat(detector.inputWidth).isEqualTo(RECT_WIDTH)
         assertThat(detector.inputHeight).isEqualTo(RECT_HEIGHT)
-        assertThat(detector.inputSize).isEqualTo(RECT_WIDTH)
     }
 
     @Test

@@ -2,6 +2,7 @@ package com.memo494.posetracker.control
 
 import androidx.annotation.StringRes
 import com.memo494.posetracker.R
+import com.memo494.posetracker.core.model.ModelInputText
 import com.memo494.posetracker.core.modelimport.ImportGuardState
 import com.memo494.posetracker.core.modelimport.ImportRejection
 import com.memo494.posetracker.core.modelimport.ImportStage
@@ -25,10 +26,13 @@ internal object ControlModelMapper {
     /** The importer's [outcome] as pure data for the reducer. */
     fun summary(outcome: ImportOutcome): ImportSummary =
         when (outcome) {
-            is ImportOutcome.Accepted -> ImportSummary.Accepted(outcome.meta.displayName, outcome.meta.inputSize)
+            is ImportOutcome.Accepted -> ImportSummary.Accepted(outcome.meta.displayName, inputText(outcome.meta))
             is ImportOutcome.Rejected -> ImportSummary.Rejected(reason(outcome.kind), outcome.details)
             is ImportOutcome.Failed -> ImportSummary.Failed(failure(outcome.kind), outcome.message)
         }
+
+    /** The input size of [meta] as the screens, the HUD and the diagnostics print it (`640` or `832x384`). */
+    private fun inputText(meta: ImportedModelMeta): String = ModelInputText.text(meta.inputWidth, meta.inputHeight)
 
     /** The one [ImportFailure] of a failure kind. */
     fun failure(kind: FailureKind): ImportFailure =
@@ -88,7 +92,7 @@ internal object ControlModelMapper {
     ): ControlEvent.ModelStateLoaded =
         when (val choice = ModelChoice.resolve(stored, storedFileMatches)) {
             is ModelChoice.Imported -> {
-                val active = ActiveModel.Imported(choice.meta.displayName, choice.meta.inputSize)
+                val active = ActiveModel.Imported(choice.meta.displayName, inputText(choice.meta))
                 val sameModel = status != null && status.meta == choice.meta
                 val failed = if (sameModel) status?.fallback else null
                 val notice =

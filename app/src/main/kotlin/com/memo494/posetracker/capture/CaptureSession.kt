@@ -234,7 +234,7 @@ internal class CaptureSession(
         val newDetector = loaded.detector
         detector = newDetector
         ModelStatusHolder.publish(loaded.status())
-        CaptureLog.log(modelLogLine(loaded), null)
+        CaptureLog.log(loaded.logLine(), null)
         pipeline =
             FramePipeline(
                 newDetector,
@@ -267,9 +267,6 @@ internal class CaptureSession(
             verifyStored = store::storedFileMatches,
         ).load()
     }
-
-    private fun modelLogLine(loaded: LoadedModel): String =
-        "model: ${loaded.source}, input ${loaded.detector?.inputSize ?: 0}, fallback ${loaded.fallback ?: "none"}"
 
     /**
      * Capture thread. Brings the reader and the virtual display in line with the display and content size.

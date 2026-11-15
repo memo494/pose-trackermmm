@@ -1,5 +1,6 @@
 package com.memo494.posetracker.overlay
 
+import com.memo494.posetracker.core.model.ModelInputText
 import com.memo494.posetracker.core.model.TimestampSource
 import com.memo494.posetracker.core.overlay.OverlayWarning
 import com.memo494.posetracker.detector.Accelerator
@@ -60,11 +61,12 @@ object HudFormatter {
     }
 
     /**
-     * Writes the detection line, e.g. `det 2/3 max 0.89 in 416` (built-in model) or
-     * `det 2/3 max 0.89 in 640 imp` (imported model): people in the newest frame after filtering, model
+     * Writes the detection line, e.g. `det 2/3 max 0.89 in 416` (built-in model), `det 2/3 max 0.89 in 640 imp`
+     * or `det 2/3 max 0.89 in 832x384 imp` (imported model): people in the newest frame after filtering, model
      * output rows whose raw score passed the threshold, the highest raw score (two decimals), then the model's
-     * input size and the mark ` imp` when the model is imported. Unknown values print as `--`; without a
-     * model (input size 0) the ` in ...` part is left out. Returns the number of characters written to [out].
+     * input size (one number when square, else width x height, see `ModelInputText`) and the mark ` imp` when
+     * the model is imported. Unknown values print as `--`; without a model (a side of 0) the ` in ...` part is
+     * left out. Returns the number of characters written to [out].
      */
     fun formatDetections(
         state: OverlayState,
@@ -76,9 +78,9 @@ object HudFormatter {
         pos = putWhole(out, pos, state.rawRowsAboveThreshold)
         pos = putText(out, pos, " max ")
         pos = putHundredths(out, pos, quantize(state.maxRawScore, HUNDREDTHS_PER_UNIT))
-        if (state.modelInputSize <= 0) return pos
+        if (state.modelInputWidth <= 0 || state.modelInputHeight <= 0) return pos
         pos = putText(out, pos, MODEL_SIZE_PREFIX)
-        pos = putWhole(out, pos, state.modelInputSize)
+        pos = ModelInputText.write(state.modelInputWidth, state.modelInputHeight, out, pos)
         return if (state.modelImported) putText(out, pos, IMPORTED_MARK) else pos
     }
 
@@ -117,7 +119,8 @@ object HudFormatter {
         if (before.captureHeightImg != after.captureHeightImg) return true
         if (before.dotsVisible != after.dotsVisible) return true
         if (before.warning != after.warning) return true
-        if (before.modelInputSize != after.modelInputSize) return true
+        if (before.modelInputWidth != after.modelInputWidth) return true
+        if (before.modelInputHeight != after.modelInputHeight) return true
         if (before.modelImported != after.modelImported) return true
         if (detectionCount(before) != detectionCount(after)) return true
         if (shownFps(before, idleFps) != shownFps(after, idleFps)) return true

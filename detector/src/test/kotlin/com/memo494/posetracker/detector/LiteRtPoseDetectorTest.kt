@@ -176,7 +176,6 @@ class LiteRtPoseDetectorTest {
 
         assertThat(detector.inputWidth).isEqualTo(RECT_WIDTH)
         assertThat(detector.inputHeight).isEqualTo(RECT_HEIGHT)
-        assertThat(detector.inputSize).isEqualTo(RECT_WIDTH)
         assertThat(engine.closeCalls).isEqualTo(0)
     }
 

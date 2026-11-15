@@ -258,9 +258,10 @@ class ImportedModelMetaTest {
     }
 
     @Test
-    fun inputSizeAlias_isTheWidth() {
-        assertThat(rect.inputSize).isEqualTo(832)
-        assertThat(meta.inputSize).isEqualTo(640)
+    fun rectangularMeta_keepsWidthAndHeightApart() {
+        assertThat(rect.inputWidth).isEqualTo(832)
+        assertThat(rect.inputHeight).isEqualTo(384)
+        assertThat(meta.inputWidth).isEqualTo(meta.inputHeight)
     }
 
     @Test
@@ -318,9 +319,11 @@ class ImportedModelMetaTest {
     }
 
     @Test
-    fun compatConstructor_setsBothSidesToTheSize() {
-        assertThat(ImportedModelMeta("a.tflite", sha, 5L, 640, 300))
-            .isEqualTo(ImportedModelMeta("a.tflite", sha, 5L, inputWidth = 640, inputHeight = 640, outputRows = 300))
+    fun encode_ofARectangularMeta_writesWidthAndHeightLines() {
+        val lines = rect.encode().split("\n")
+
+        assertThat(lines[4]).isEqualTo("inputWidth=832")
+        assertThat(lines[5]).isEqualTo("inputHeight=384")
     }
 
     // ---- sanitiseName ----

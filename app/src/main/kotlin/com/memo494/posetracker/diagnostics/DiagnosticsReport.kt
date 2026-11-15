@@ -1,6 +1,7 @@
 package com.memo494.posetracker.diagnostics
 
 import com.memo494.posetracker.core.TrackerConfig
+import com.memo494.posetracker.core.model.ModelInputText
 import com.memo494.posetracker.core.modelimport.ImportedModelMeta
 import com.memo494.posetracker.modelimport.ModelSource
 import com.memo494.posetracker.modelimport.ModelStatus
@@ -134,7 +135,7 @@ internal object DiagnosticsReport {
         line(out, "modelSource", if (model.source == ModelSource.IMPORTED) SOURCE_IMPORTED else SOURCE_BUILT_IN)
         line(out, "modelFile", inUse?.displayName ?: SOURCE_BUILT_IN)
         line(out, "modelSha256", inUse?.let(::shortSha) ?: NONE)
-        line(out, "modelInputSize", model.inputSize)
+        line(out, "modelInputSize", ModelInputText.text(model.inputWidth, model.inputHeight))
         line(out, "modelOutputRows", inUse?.outputRows ?: NONE)
         line(out, "modelFallback", model.fallback?.name ?: NONE)
         line(out, "modelFallbackMessage", model.message?.let(::oneLine) ?: NONE)

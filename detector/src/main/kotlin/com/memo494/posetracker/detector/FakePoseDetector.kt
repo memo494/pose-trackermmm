@@ -22,13 +22,6 @@ class FakePoseDetector(
     override val inputHeight: Int,
     override val accelerator: Accelerator,
 ) : PoseDetector {
-    /** Temporary, removed in M1a T3: a square input of [inputSize] x [inputSize] model pixels (Mdl space). */
-    constructor(
-        frames: List<DetectionFrame>,
-        inputSize: Int,
-        accelerator: Accelerator,
-    ) : this(frames, inputSize, inputSize, accelerator)
-
     private val frames: List<DetectionFrame> = frames.toList()
     private var nextIndex = 0
     private var closed = false

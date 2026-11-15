@@ -79,14 +79,7 @@ sealed interface ImportCheck {
         val inputWidth: Int,
         val inputHeight: Int,
         val outputRows: Int,
-    ) : ImportCheck {
-        /** Temporary, removed in M1a T3: a square input of [inputSize] x [inputSize] pixels. */
-        constructor(inputSize: Int, outputRows: Int) : this(inputSize, inputSize, outputRows)
-
-        /** Temporary, removed in M1a T3: the same as [inputWidth]. */
-        val inputSize: Int
-            get() = inputWidth
-    }
+    ) : ImportCheck
 
     /**
      * The model does not fit.

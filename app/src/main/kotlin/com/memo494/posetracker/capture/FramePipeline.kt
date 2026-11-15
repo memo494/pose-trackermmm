@@ -49,8 +49,10 @@ internal class FramePipeline(
     private var buffer: ByteArray? = null
     private var contentVisible = true
     private var displaySized = true
-    private val modelInputSize = detector?.inputSize ?: 0
-    private var lastState = OverlayState(modelInputSize = modelInputSize, modelImported = modelImported)
+    private val modelInputWidth = detector?.inputWidth ?: 0
+    private val modelInputHeight = detector?.inputHeight ?: 0
+    private var lastState =
+        OverlayState(modelInputWidth = modelInputWidth, modelInputHeight = modelInputHeight, modelImported = modelImported)
     private var imageClosed = false
     private var failureStreak = 0L
 
@@ -235,7 +237,8 @@ internal class FramePipeline(
                 displayHeightPx = displayHeightPx,
                 maxRawScore = maxRawScore,
                 rawRowsAboveThreshold = detector.lastRawRowsAboveThreshold,
-                modelInputSize = modelInputSize,
+                modelInputWidth = modelInputWidth,
+                modelInputHeight = modelInputHeight,
                 modelImported = modelImported,
             ),
         )
@@ -262,7 +265,8 @@ internal class FramePipeline(
                 warning = currentWarning(),
                 displayWidthPx = displayWidthPx,
                 displayHeightPx = displayHeightPx,
-                modelInputSize = modelInputSize,
+                modelInputWidth = modelInputWidth,
+                modelInputHeight = modelInputHeight,
                 modelImported = modelImported,
             ),
         )

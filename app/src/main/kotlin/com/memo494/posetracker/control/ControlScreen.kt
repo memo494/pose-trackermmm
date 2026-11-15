@@ -175,7 +175,7 @@ private fun ModelBlock(
 private fun activeModelLine(state: ControlState): String =
     when (val model = state.activeModel) {
         ActiveModel.BuiltIn -> stringResource(R.string.model_active_built_in, state.builtInInputSize)
-        is ActiveModel.Imported -> stringResource(R.string.model_active_imported, model.displayName, model.inputSize)
+        is ActiveModel.Imported -> stringResource(R.string.model_active_imported, model.displayName, model.inputText)
     }
 
 @Composable
@@ -222,7 +222,7 @@ private fun ControlScreenPreview() {
             state =
                 ControlState(
                     notice = ControlNotice.OVERLAY_PERMISSION_NEEDED,
-                    activeModel = ActiveModel.Imported("yolo26n-pose_640.tflite", 640),
+                    activeModel = ActiveModel.Imported("yolo26n-pose_640.tflite", "640"),
                     importResult = ImportSummary.Rejected(ModelRejectionReason.INPUT_NHWC, "input [1,640,640,3] float32"),
                 ),
             buildLabel = "v0.1.1 · local",

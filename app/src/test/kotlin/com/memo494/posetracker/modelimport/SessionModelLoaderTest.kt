@@ -12,9 +12,9 @@ import org.junit.Test
 import java.io.IOException
 
 class SessionModelLoaderTest {
-    private val meta = ImportedModelMeta("mine.tflite", "a".repeat(64), 1_000_000L, 640, 300)
-    private val importedDetector = FakePoseDetector(emptyList(), 640, Accelerator.CPU)
-    private val builtInDetector = FakePoseDetector(emptyList(), 416, Accelerator.CPU)
+    private val meta = ImportedModelMeta("mine.tflite", "a".repeat(64), 1_000_000L, 640, 640, 300)
+    private val importedDetector = FakePoseDetector(emptyList(), 640, 640, Accelerator.CPU)
+    private val builtInDetector = FakePoseDetector(emptyList(), 416, 416, Accelerator.CPU)
 
     private var state = StoredModelState(meta, fileExists = true, guard = ImportGuardState.Idle)
     private var readFailure: Throwable? = null
@@ -363,7 +363,17 @@ class SessionModelLoaderTest {
         val status = loader().load().status()
 
         assertThat(status)
-            .isEqualTo(ModelStatus(ModelSource.IMPORTED, meta, fallback = null, message = null, inputSize = 640))
+            .isEqualTo(ModelStatus(ModelSource.IMPORTED, meta, fallback = null, message = null, inputWidth = 640, inputHeight = 640))
+    }
+
+    @Test
+    fun status_ofARectangularModelKeepsWidthAndHeightApart() {
+        val rectangular = FakePoseDetector(emptyList(), 832, 384, Accelerator.GPU)
+
+        val status = LoadedModel(rectangular, ModelSource.IMPORTED, meta, null).status()
+
+        assertThat(status.inputWidth).isEqualTo(832)
+        assertThat(status.inputHeight).isEqualTo(384)
     }
 
     @Test
@@ -375,15 +385,31 @@ class SessionModelLoaderTest {
         assertThat(status.source).isEqualTo(ModelSource.BUILT_IN)
         assertThat(status.fallback).isEqualTo(ModelFallback.LOAD_FAILED)
         assertThat(status.message).isEqualTo("IllegalStateException: bad")
-        assertThat(status.inputSize).isEqualTo(416)
+        assertThat(status.inputWidth).isEqualTo(416)
+        assertThat(status.inputHeight).isEqualTo(416)
     }
 
     @Test
-    fun status_withoutADetectorHasInputSizeZero() {
+    fun status_withoutADetectorHasInputWidthAndHeightZero() {
         state = StoredModelState(null, fileExists = false, guard = ImportGuardState.Idle)
         builtInFailure = IllegalStateException("x")
 
-        assertThat(loader().load().status().inputSize).isEqualTo(0)
+        val status = loader().load().status()
+
+        assertThat(status.inputWidth).isEqualTo(0)
+        assertThat(status.inputHeight).isEqualTo(0)
+    }
+
+    @Test
+    fun logLine_namesTheSourceTheInputTextAndTheFallback() {
+        val rectangular = FakePoseDetector(emptyList(), 832, 384, Accelerator.GPU)
+
+        assertThat(LoadedModel(rectangular, ModelSource.IMPORTED, meta, null).logLine())
+            .isEqualTo("model: IMPORTED, input 832x384, fallback none")
+        assertThat(LoadedModel(builtInDetector, ModelSource.BUILT_IN, meta, ModelFallback.LOAD_FAILED).logLine())
+            .isEqualTo("model: BUILT_IN, input 416, fallback LOAD_FAILED")
+        assertThat(LoadedModel(null, ModelSource.BUILT_IN, null, null).logLine())
+            .isEqualTo("model: BUILT_IN, input 0, fallback none")
     }
 
     @Test

@@ -70,7 +70,17 @@ class ModelProbeTest {
 
         val check = ImportedModelRules.check(listOf(input), listOf(output), config)
 
-        assertThat(check).isEqualTo(ImportCheck.Accepted(inputSize = 640, outputRows = 300))
+        assertThat(check).isEqualTo(ImportCheck.Accepted(inputWidth = 640, inputHeight = 640, outputRows = 300))
+    }
+
+    @Test
+    fun realRectangularShapesAreAcceptedWithWidthAndHeightApart() {
+        val input = ModelProbe.describe(intArrayOf(1, 3, 384, 832), "FLOAT")
+        val output = ModelProbe.describe(intArrayOf(1, 300, 57), "FLOAT")
+
+        val check = ImportedModelRules.check(listOf(input), listOf(output), config)
+
+        assertThat(check).isEqualTo(ImportCheck.Accepted(inputWidth = 832, inputHeight = 384, outputRows = 300))
     }
 
     @Test

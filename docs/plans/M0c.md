@@ -236,6 +236,27 @@ Not in scope (M1): reviewer S3 (GPU cache key by file name+size). S4 → T9.
 → built-in; PROBE trip + hash mismatch → built-in; LOAD trip + valid stored model → built-in (unchanged).
 **Acceptance:** verify green; checklist unchanged except a note in block 5 if the notice text changes.
 
+Lead decisions added 2026-11-15 (after reading the half-done work):
+- **Two notices, two texts** (never one text for two situations). Kept model: new `ModelNoticeKind` with the string
+  "The app stopped while checking a new model file, so that file was not imported. Your previous imported model
+  is still used." Nothing kept (`GUARD_TRIPPED_PROBE`): "The app stopped while checking a new model file, so that
+  file was not imported. The built-in model is used. Import again, or press Use built-in model to remove this
+  notice." The old R1-9 sentence ("including a previously imported one, are switched off") goes.
+- **When the kept-model notice goes away:** `SessionModelLoader` already stores `Idle` after a load that did not
+  kill the process, so the first Start of the kept model lifts the probe trip. That is intended (the trip suspected
+  a file that was never stored) and stays pinned by a test. An accepted import or **Use built-in model** lift it too.
+- The hash check runs only for a probe trip with a meta and a file, on a worker thread (`Dispatchers.IO` for the
+  control screen, the capture thread at Start); ARCHITECTURE §5 and §8 say so.
+
+### CI run 64 (8208279, R1 as pushed by the other session): 1 failing test
+`ModelImporterTest.guardIsPendingProbe_exactlyWhileTheProbeRuns` expects the guard writes `pending:probe`, `idle`.
+Since R1-7 `accept` stores `Idle` again under its own lock, so a successful import writes `pending:probe`, `idle`,
+`idle`. Two tests contradict each other: this one (older) and R1's
+`guardThatCannotBeStored_failsTheAcceptAndKeepsThePreviousModel` (accept must fail when the guard cannot be
+written). **Decision:** R1-7 is the recorded design, so the production code stays and the older expectation is
+updated to the exact new sequence (still `containsExactly(...).inOrder()`, with a comment naming R1-7). Not a
+weakened test: it pins one more write, not fewer. The extra write is one small synchronous commit per import.
+
 ## Then (lead)
 `android-reviewer` on the whole diff → fixes through the implementer → PR ready, CI green → handoff
 `docs/progress/M0c.md`, `docs/REPO_MAP.md`, PR text ending with "How to test on the phone" → ask the owner

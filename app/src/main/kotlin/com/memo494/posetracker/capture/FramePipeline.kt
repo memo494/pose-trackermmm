@@ -8,6 +8,9 @@ import com.memo494.posetracker.core.capture.RowCopy
 import com.memo494.posetracker.core.model.DetectionFrame
 import com.memo494.posetracker.core.model.TimestampSource
 import com.memo494.posetracker.core.overlay.OverlayWarning
+import com.memo494.posetracker.core.stats.Percentiles
+import com.memo494.posetracker.core.stats.TimingSummary
+import com.memo494.posetracker.core.stats.TimingWindow
 import com.memo494.posetracker.detector.PoseDetector
 import com.memo494.posetracker.overlay.OverlayState
 
@@ -21,6 +24,12 @@ import com.memo494.posetracker.overlay.OverlayState
  * [onFrame] never throws and closes every image exactly once, whatever happens (including an
  * `OutOfMemoryError`), so a bad frame can never crash the service or leak an image that would stall the
  * `ImageReader`. Our own per-frame allocations are the published [OverlayState] only (pooled in M1).
+ *
+ * Timing: every **processed** frame (detected and published) adds one sample to each of six [TimingWindow]s:
+ * copy, pre, inference, post, whole frame (acquire to publish) and result age (publish time minus the image
+ * timestamp, only when that stamp was accepted). Dropped and drained frames add nothing. The windows have one
+ * owner, the capture thread; [timingSummary] computes the percentiles on that thread (at the HUD tick) and returns
+ * an immutable snapshot, so no other thread touches a window.
  *
  * @param detector the pose detector, or `null` when it could not be created: frames are still drained and
  *   closed and the HUD shows [OverlayWarning.DETECTOR_UNAVAILABLE].
@@ -55,6 +64,12 @@ internal class FramePipeline(
         OverlayState(modelInputWidth = modelInputWidth, modelInputHeight = modelInputHeight, modelImported = modelImported)
     private var imageClosed = false
     private var failureStreak = 0L
+    private val copyWindow = TimingWindow(config.timingWindowFrames)
+    private val preWindow = TimingWindow(config.timingWindowFrames)
+    private val inferWindow = TimingWindow(config.timingWindowFrames)
+    private val postWindow = TimingWindow(config.timingWindowFrames)
+    private val frameWindow = TimingWindow(config.timingWindowFrames)
+    private val resultAgeWindow = TimingWindow(config.timingWindowFrames)
 
     /** Frames that went through detection and were published. */
     @Volatile
@@ -189,6 +204,21 @@ internal class FramePipeline(
         }
     }
 
+    /**
+     * The percentiles of the timing windows as an immutable snapshot. Capture thread only (the windows are not
+     * thread-safe); called at the HUD tick, not per frame. Allocates the snapshot, so never call it per frame.
+     */
+    fun timingSummary(): TimingSummary =
+        TimingSummary(
+            samples = frameWindow.count,
+            copyMs = Percentiles.of(copyWindow),
+            preMs = Percentiles.of(preWindow),
+            inferMs = Percentiles.of(inferWindow),
+            postMs = Percentiles.of(postWindow),
+            frameMs = Percentiles.of(frameWindow),
+            resultAgeMs = Percentiles.of(resultAgeWindow),
+        )
+
     private fun process(
         image: FrameImage,
         acquireNs: Long,
@@ -205,6 +235,7 @@ internal class FramePipeline(
             publishWithoutDetections(widthImg, heightImg, acquireNs)
             return
         }
+        val copyStartNs = clock.nowNs()
         val rgba = RowCopy.ensureBuffer(buffer, widthImg, heightImg)
         buffer = rgba
         if (!RowCopy.copyRgba(image.pixels, widthImg, heightImg, image.rowStride, image.pixelStride, rgba)) {
@@ -242,9 +273,35 @@ internal class FramePipeline(
                 modelImported = modelImported,
             ),
         )
+        recordTimings(detector, copyStartNs, nowNs, acquireNs, timestampNs, source == TimestampSource.IMAGE)
         frames++
         failureStreak = 0L
     }
+
+    /**
+     * Adds one sample per window for the frame that was just published. Allocation-free (primitives only).
+     * [copyEndNs] is the time the copy ended; the whole frame ends now. [timestampNs] is the frame's timestamp and
+     * [timestampIsImage] says it is the accepted image timestamp (not the arrival time): only then there is a
+     * result age. No nullable `Long`, which would box.
+     */
+    private fun recordTimings(
+        detector: PoseDetector,
+        copyStartNs: Long,
+        copyEndNs: Long,
+        acquireNs: Long,
+        timestampNs: Long,
+        timestampIsImage: Boolean,
+    ) {
+        val publishedNs = clock.nowNs()
+        copyWindow.add(msOf(copyEndNs - copyStartNs))
+        preWindow.add(detector.lastPreMs)
+        inferWindow.add(detector.lastInferenceMs)
+        postWindow.add(detector.lastPostMs)
+        frameWindow.add(msOf(publishedNs - acquireNs))
+        if (timestampIsImage) resultAgeWindow.add(msOf(publishedNs - timestampNs))
+    }
+
+    private fun msOf(durationNs: Long): Float = durationNs.toFloat() / TrackerConfig.NANOS_PER_MILLI
 
     private fun publishWithoutDetections(
         widthImg: Int,

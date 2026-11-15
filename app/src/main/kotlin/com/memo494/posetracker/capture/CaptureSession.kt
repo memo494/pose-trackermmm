@@ -13,10 +13,12 @@ import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
+import android.os.PowerManager
 import android.view.Display
 import android.view.WindowManager
 import com.memo494.posetracker.core.TrackerConfig
 import com.memo494.posetracker.core.capture.CaptureSize
+import com.memo494.posetracker.core.stats.ThermalSampler
 import com.memo494.posetracker.detector.PoseDetector
 import com.memo494.posetracker.detector.PoseDetectors
 import com.memo494.posetracker.diagnostics.CaptureStatsHolder
@@ -39,7 +41,7 @@ import java.util.concurrent.TimeUnit
  *   any thread.
  * - **capture** (`pose-capture` [HandlerThread], created in [start]): the `ImageReader` listener, the
  *   projection callback, the display listener and the HUD tick all run on it. These fields are created,
- *   used and closed on it only and need no lock: `pipeline`, `detector`, `imageReader`, `virtualDisplay`,
+ *   used and closed on it only and need no lock: `pipeline`, `thermalSampler`, `detector`, `imageReader`, `virtualDisplay`,
  *   `currentSize`, `contentSizeKnown`, `contentWidthPx`, `contentHeightPx`, `imageFrame`.
  * - **shared**: `captureThread` and `captureHandler` are written once by [start] on main and read by the
  *   teardown from any thread (`@Volatile`); `teardown` is thread-safe by itself.
@@ -69,6 +71,7 @@ internal class CaptureSession(
     private val displayManager: DisplayManager? = context.getSystemService(DisplayManager::class.java)
     private val windowManager: WindowManager? = context.getSystemService(WindowManager::class.java)
     private val hudIntervalMs = TimeUnit.NANOSECONDS.toMillis(config.hudIntervalNs)
+    private val clock = NanoClock { System.nanoTime() }
 
     @Volatile
     private var captureThread: HandlerThread? = null
@@ -82,6 +85,7 @@ internal class CaptureSession(
     // Capture thread only (see the class KDoc).
     private val imageFrame = ImageFrame()
     private var pipeline: FramePipeline? = null
+    private var thermalSampler: ThermalSampler? = null
     private var detector: PoseDetector? = null
     private var imageReader: ImageReader? = null
     private var virtualDisplay: VirtualDisplay? = null
@@ -104,7 +108,9 @@ internal class CaptureSession(
                     val activePipeline = pipeline
                     if (activePipeline != null) {
                         activePipeline.onHudTick()
-                        CaptureStatsHolder.publish(overlayWindow.stateHolder.latest(), activePipeline)
+                        val thermal = thermalSampler
+                        thermal?.sample(clock.nowNs())
+                        CaptureStatsHolder.publish(overlayWindow.stateHolder.latest(), activePipeline, thermal)
                     }
                 }
             }
@@ -239,11 +245,17 @@ internal class CaptureSession(
             FramePipeline(
                 newDetector,
                 config,
-                NanoClock { System.nanoTime() },
+                clock,
                 overlayWindow.stateHolder::publish,
                 CaptureLog::log,
                 modelImported = loaded.source == ModelSource.IMPORTED,
                 importedModelNotUsed = loaded.importedModelNotUsed,
+            )
+        thermalSampler =
+            ThermalSampler(
+                PowerManagerThermalReader(context.getSystemService(PowerManager::class.java)),
+                config.thermalSampleIntervalNs,
+                CaptureLog::log,
             )
         displayManager?.registerDisplayListener(displayListener, captureHandler)
         applyGeometry()

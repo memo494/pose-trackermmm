@@ -3,8 +3,10 @@ package com.memo494.posetracker.diagnostics
 import com.memo494.posetracker.core.TrackerConfig
 import com.memo494.posetracker.core.model.ModelInputText
 import com.memo494.posetracker.core.modelimport.ImportedModelMeta
+import com.memo494.posetracker.core.stats.Percentiles
 import com.memo494.posetracker.modelimport.ModelSource
 import com.memo494.posetracker.modelimport.ModelStatus
+import java.util.Locale
 
 /** One file of the diagnostics zip: its [name] inside the zip and its [text]. */
 internal class ReportEntry(
@@ -32,6 +34,7 @@ internal object DiagnosticsReport {
     private const val NONE = "none"
     private const val SOURCE_BUILT_IN = "builtin"
     private const val SOURCE_IMPORTED = "imported"
+    private const val NOT_AVAILABLE = "n/a"
 
     /**
      * Always five entries in this order: `summary.txt`, `config.txt`, `log.txt`, `model_info.json` (named
@@ -116,7 +119,41 @@ internal object DiagnosticsReport {
         line(out, "headXImg", stats.headXImg)
         line(out, "headYImg", stats.headYImg)
         appendModel(out, stats.model)
+        appendTiming(out, stats)
     }
+
+    /**
+     * The timing percentiles (`timingSamples`, then `<name>MsP50` / `<name>MsP95` for copy, pre, infer, post, frame
+     * and resultAge) and the thermal reading. A value that is unknown (no sample, NaN, infinite) is `n/a`, never a
+     * number made up.
+     */
+    private fun appendTiming(
+        out: StringBuilder,
+        stats: CaptureStats,
+    ) {
+        val timing = stats.timing
+        line(out, "timingSamples", timing.samples)
+        percentileLines(out, "copyMs", timing.copyMs)
+        percentileLines(out, "preMs", timing.preMs)
+        percentileLines(out, "inferMs", timing.inferMs)
+        percentileLines(out, "postMs", timing.postMs)
+        percentileLines(out, "frameMs", timing.frameMs)
+        percentileLines(out, "resultAgeMs", timing.resultAgeMs)
+        line(out, "thermalStatus", stats.thermalStatus)
+        line(out, "thermalHeadroom", oneDecimal(stats.thermalHeadroom))
+    }
+
+    private fun percentileLines(
+        out: StringBuilder,
+        name: String,
+        percentiles: Percentiles,
+    ) {
+        line(out, "${name}P50", oneDecimal(percentiles.p50))
+        line(out, "${name}P95", oneDecimal(percentiles.p95))
+    }
+
+    /** [value] with one decimal and a dot, or `n/a` when it is NaN or infinite. */
+    private fun oneDecimal(value: Float): String = if (value.isFinite()) String.format(Locale.ROOT, "%.1f", value) else NOT_AVAILABLE
 
     /**
      * The model of the session: `modelFile`, `modelSha256` (first [TrackerConfig.SHA256_SHORT_CHARS] hex characters)

@@ -11,6 +11,13 @@ A one-screen map so agents open the right file without a wide search. Full desig
 
 Package root: `com.memo494.posetracker`. `applicationId` = `com.memo494.posetracker`.
 
+## Added in M1a
+- `core/model/ModelInputText` — the one size-text rule (`640` or `832x384`, WIDTHxHEIGHT).
+- `core/stats/` — `TimingWindow`, `TimingSummary`, `ThermalSampler`, `ThermalStatusText`; filled by
+  `app/capture/FramePipeline`, published through `app/diagnostics/CaptureStatsHolder`.
+- `core/modelimport/` — layout version 2 (`[1,3,H,W]`) and meta v2; `detector` passes width and height.
+- `tools/export_model.py --sizes S|WxH --out DIR` (`--self-test`); rectangular files live in the `models` release.
+
 ## Build & tooling
 - `gradle/libs.versions.toml` — pinned versions (PROTECTED). `settings.gradle.kts` — module list.
 - `scripts/cloud-setup.sh` — installs the Android SDK (paste into the env Setup script, BUILD_PLAN §1.3).
@@ -30,4 +37,4 @@ android-reviewer, debugger, consultant, Explore), `.claude/skills/` (vendored, P
 ## Docs
 `docs/ARCHITECTURE.md` (design), `docs/AI_TEAM.md` (workflow), `docs/BUILD_PLAN.md` (milestone prompts),
 `docs/plans/<M>.md` (lead's plan per milestone), `docs/progress/<M>.md` (handoffs),
-`docs/TEST_CHECKLIST.md` (on-phone checks: sections M0b and M0c).
+`docs/TEST_CHECKLIST.md` (on-phone checks: sections M0b, M0c and M1a).

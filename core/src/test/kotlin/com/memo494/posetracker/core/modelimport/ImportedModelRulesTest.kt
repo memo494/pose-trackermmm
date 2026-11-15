@@ -220,7 +220,7 @@ class ImportedModelRulesTest {
     @Test
     fun tooWideInput_isRejectedAsAspect() {
         // W / H = 4.2 and 8: the width is the long side.
-        for ((h, w) in listOf(160 to 672, 160 to 1280, 192 to 1280, 320 to 1344)) {
+        for ((h, w) in listOf(160 to 672, 160 to 1280, 192 to 1280, 256 to 1056)) {
             assertRejected(check(tensor(1, 3, h, w)), ImportRejection.INPUT_ASPECT)
         }
     }
@@ -228,7 +228,7 @@ class ImportedModelRulesTest {
     @Test
     fun tooTallInput_isRejectedAsAspect() {
         // H / W = 4.2 and 8: the height is the long side.
-        for ((h, w) in listOf(672 to 160, 1280 to 160, 1280 to 192, 1344 to 320)) {
+        for ((h, w) in listOf(672 to 160, 1280 to 160, 1280 to 192, 1056 to 256)) {
             assertRejected(check(tensor(1, 3, h, w)), ImportRejection.INPUT_ASPECT)
         }
     }

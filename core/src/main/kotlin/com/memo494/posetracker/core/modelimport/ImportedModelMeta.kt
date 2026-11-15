@@ -70,38 +70,55 @@ data class ImportedModelMeta(
          * a name [sanitiseName] would change, [bytes] outside 1..[TrackerConfig.MAX_IMPORT_BYTES_LIMIT],
          * [inputWidth] or [inputHeight] outside
          * [TrackerConfig.MIN_IMPORT_INPUT_SIZE_LIMIT]..[TrackerConfig.MAX_IMPORT_INPUT_SIZE_LIMIT] or not a multiple
-         * of [TrackerConfig.IMPORT_INPUT_SIZE_STEP], [outputRows] outside 1..[TrackerConfig.IMPORT_MAX_OUTPUT_ROWS]).
-         * These ranges are sanity checks independent of the configured import limits (the aspect limit is not
-         * checked here). Never throws.
+         * of [TrackerConfig.IMPORT_INPUT_SIZE_STEP], [outputRows] outside 1..[TrackerConfig.IMPORT_MAX_OUTPUT_ROWS],
+         * or a long side more than [TrackerConfig.importMaxInputAspect] of [config] times the short side, so that
+         * a stored text the importer could never have written is refused, for both versions). The size ranges are
+         * sanity checks independent of the configured import size limits; the aspect limit is the configured one.
+         * Never throws.
+         *
+         * @param config supplies the aspect limit; the importer passes its own, a caller without one gets the default.
          */
-        fun decode(text: String): ImportedModelMeta? {
+        fun decode(
+            text: String,
+            config: TrackerConfig = TrackerConfig(),
+        ): ImportedModelMeta? {
             val lines = text.split(LINE_SEPARATOR)
             return when {
-                lines.size == EXPECTED_LINES && lines[0] == HEADER -> decodeV2(lines)
-                lines.size == EXPECTED_LINES_V1 && lines[0] == HEADER_V1 -> decodeV1(lines)
+                lines.size == EXPECTED_LINES && lines[0] == HEADER -> decodeV2(lines, config)
+                lines.size == EXPECTED_LINES_V1 && lines[0] == HEADER_V1 -> decodeV1(lines, config)
                 else -> null
             }
         }
 
-        private fun decodeV2(lines: List<String>): ImportedModelMeta? {
+        private fun decodeV2(
+            lines: List<String>,
+            config: TrackerConfig,
+        ): ImportedModelMeta? {
             val width = lines[LINE_INPUT_WIDTH].removeIfStarts(KEY_INPUT_WIDTH)?.let(::parseCanonical) ?: return null
             val height = lines[LINE_INPUT_HEIGHT].removeIfStarts(KEY_INPUT_HEIGHT)?.let(::parseCanonical) ?: return null
             val rows = lines[LINE_OUTPUT_ROWS].removeIfStarts(KEY_OUTPUT_ROWS)?.let(::parseCanonical) ?: return null
-            return build(lines, width, height, rows)
+            return build(lines, width, height, rows, config)
         }
 
-        private fun decodeV1(lines: List<String>): ImportedModelMeta? {
+        private fun decodeV1(
+            lines: List<String>,
+            config: TrackerConfig,
+        ): ImportedModelMeta? {
             val size = lines[LINE_INPUT_SIZE_V1].removeIfStarts(KEY_INPUT_SIZE_V1)?.let(::parseCanonical) ?: return null
             val rows = lines[LINE_OUTPUT_ROWS_V1].removeIfStarts(KEY_OUTPUT_ROWS)?.let(::parseCanonical) ?: return null
-            return build(lines, size, size, rows)
+            return build(lines, size, size, rows, config)
         }
 
-        /** The version-independent lines (name, sha256, bytes) and the range checks of the numbers already read. */
+        /**
+         * The version-independent lines (name, sha256, bytes) and the range and aspect checks of the numbers already
+         * read.
+         */
         private fun build(
             lines: List<String>,
             width: Long,
             height: Long,
             outputRows: Long,
+            config: TrackerConfig,
         ): ImportedModelMeta? {
             val name = lines[LINE_NAME].removeIfStarts(KEY_NAME) ?: return null
             val sha256 = lines[LINE_SHA256].removeIfStarts(KEY_SHA256) ?: return null
@@ -113,6 +130,7 @@ data class ImportedModelMeta(
                     bytes in 1L..TrackerConfig.MAX_IMPORT_BYTES_LIMIT &&
                     isSaneInputSide(width) &&
                     isSaneInputSide(height) &&
+                    !ImportedModelRules.tooElongated(height.toInt(), width.toInt(), config) &&
                     outputRows in 1L..TrackerConfig.IMPORT_MAX_OUTPUT_ROWS.toLong()
             if (!valid) return null
             return ImportedModelMeta(name, sha256, bytes, width.toInt(), height.toInt(), outputRows.toInt())

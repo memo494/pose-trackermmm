@@ -44,7 +44,7 @@
     <string name="model_reject_input_type">The model input must be float32.</string>
     <string name="model_reject_input_not_nchw">The model input must be channels first: [1, 3, height, width].</string>
     <string name="model_reject_input_nhwc">The model input is channels last: [1, height, width, 3]. Export it channels first: [1, 3, height, width].</string>
-    <string name="model_reject_input_aspect">The model input is too elongated. Its longer side may be at most 4 times its shorter side.</string>
+    <string name="model_reject_input_aspect">The model input is too elongated. Its longer side may be at most %1$s times its shorter side.</string>
     <string name="model_reject_input_size_not_multiple">The model input size must be a multiple of 32.</string>
     <string name="model_reject_input_size_out_of_range">The model input size is outside the supported range.</string>
     <string name="model_reject_output_count">The model must have exactly one output.</string>

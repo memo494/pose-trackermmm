@@ -283,7 +283,7 @@ class DiagnosticsReportTest {
                 "resultAgeMsP50=17.0",
                 "resultAgeMsP95=31.5",
                 "thermalStatus=MODERATE",
-                "thermalHeadroom=0.9",
+                "thermalHeadroom=0.87",
             ).inOrder()
     }
 
@@ -339,6 +339,13 @@ class DiagnosticsReportTest {
     }
 
     @Test
+    fun summary_thermalHeadroom_printsTwoDecimalsSoNearOneIsNotShownAsOne() {
+        assertThat(summaryLines(timedStats.copy(thermalHeadroom = 0.95f))).contains("thermalHeadroom=0.95")
+        assertThat(summaryLines(timedStats.copy(thermalHeadroom = 1.0f))).contains("thermalHeadroom=1.00")
+        assertThat(summaryLines(timedStats.copy(thermalHeadroom = 0.0f))).contains("thermalHeadroom=0.00")
+    }
+
+    @Test
     fun summary_thermalStatusKnownButHeadroomUnknown_printsOnlyWhatIsKnown() {
         val lines = summaryLines(timedStats.copy(thermalStatus = "SEVERE", thermalHeadroom = Float.NaN))
 
@@ -366,7 +373,7 @@ class DiagnosticsReportTest {
 
             val lines = summaryLines(timedStats)
 
-            assertThat(lines).containsAtLeast("inferMsP95=12.3", "thermalHeadroom=0.9")
+            assertThat(lines).containsAtLeast("inferMsP95=12.3", "thermalHeadroom=0.87")
         } finally {
             Locale.setDefault(saved)
         }

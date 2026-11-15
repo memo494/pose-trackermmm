@@ -258,10 +258,13 @@ class ImportedModelMetaTest {
     }
 
     @Test
-    fun rectangularMeta_keepsWidthAndHeightApart() {
-        assertThat(rect.inputWidth).isEqualTo(832)
-        assertThat(rect.inputHeight).isEqualTo(384)
-        assertThat(meta.inputWidth).isEqualTo(meta.inputHeight)
+    fun encodeThenDecode_ofARectangularMeta_keepsWidthAndHeightApart() {
+        val decoded = ImportedModelMeta.decode(rect.encode())
+
+        assertThat(decoded).isEqualTo(rect)
+        assertThat(decoded).isNotEqualTo(rect.copy(inputWidth = 384, inputHeight = 832))
+        assertThat(decoded!!.inputWidth).isEqualTo(832)
+        assertThat(decoded.inputHeight).isEqualTo(384)
     }
 
     @Test
@@ -319,11 +322,47 @@ class ImportedModelMetaTest {
     }
 
     @Test
-    fun encode_ofARectangularMeta_writesWidthAndHeightLines() {
-        val lines = rect.encode().split("\n")
+    fun decodeThenEncode_ofV1Text_givesV2TextWithWidthEqualToHeight() {
+        val rewritten = ImportedModelMeta.decode(encodedV1.joinToString("\n"))!!.encode()
 
-        assertThat(lines[4]).isEqualTo("inputWidth=832")
-        assertThat(lines[5]).isEqualTo("inputHeight=384")
+        assertThat(rewritten).isEqualTo(encoded.joinToString("\n"))
+        assertThat(rewritten.split("\n")).doesNotContain("inputSize=640")
+    }
+
+    // ---- aspect limit of the stored form ----
+
+    @Test
+    fun decode_v2TextOverTheAspectLimit_isNull() {
+        assertThat(ImportedModelMeta.decode(text(4 to "inputWidth=1280", 5 to "inputHeight=160"))).isNull()
+        assertThat(ImportedModelMeta.decode(text(4 to "inputWidth=160", 5 to "inputHeight=1280"))).isNull()
+        assertThat(ImportedModelMeta.decode(meta.copy(inputWidth = 1280, inputHeight = 160).encode())).isNull()
+    }
+
+    @Test
+    fun decode_v2TextExactlyAtTheAspectLimit_decodes() {
+        val wide = meta.copy(inputWidth = 640, inputHeight = 160)
+        val tall = meta.copy(inputWidth = 160, inputHeight = 640)
+
+        assertThat(ImportedModelMeta.decode(wide.encode())).isEqualTo(wide)
+        assertThat(ImportedModelMeta.decode(tall.encode())).isEqualTo(tall)
+    }
+
+    @Test
+    fun decode_takesTheAspectLimitFromTheGivenConfig() {
+        val wide = meta.copy(inputWidth = 1280, inputHeight = 160)
+        val loose = TrackerConfig(importMaxInputAspect = 8.0f)
+        val strict = TrackerConfig(importMaxInputAspect = 1.0f)
+
+        assertThat(ImportedModelMeta.decode(wide.encode(), loose)).isEqualTo(wide)
+        assertThat(ImportedModelMeta.decode(rect.encode(), strict)).isNull()
+        assertThat(ImportedModelMeta.decode(meta.encode(), strict)).isEqualTo(meta)
+    }
+
+    @Test
+    fun decode_v1TextIsSquare_soTheAspectLimitNeverRefusesIt() {
+        val strict = TrackerConfig(importMaxInputAspect = 1.0f)
+
+        assertThat(ImportedModelMeta.decode(encodedV1.joinToString("\n"), strict)).isEqualTo(meta)
     }
 
     // ---- sanitiseName ----

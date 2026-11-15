@@ -35,6 +35,8 @@ internal object DiagnosticsReport {
     private const val SOURCE_BUILT_IN = "builtin"
     private const val SOURCE_IMPORTED = "imported"
     private const val NOT_AVAILABLE = "n/a"
+    private const val MS_DECIMALS = 1
+    private const val THERMAL_DECIMALS = 2
 
     /**
      * Always five entries in this order: `summary.txt`, `config.txt`, `log.txt`, `model_info.json` (named
@@ -140,7 +142,7 @@ internal object DiagnosticsReport {
         percentileLines(out, "frameMs", timing.frameMs)
         percentileLines(out, "resultAgeMs", timing.resultAgeMs)
         line(out, "thermalStatus", stats.thermalStatus)
-        line(out, "thermalHeadroom", oneDecimal(stats.thermalHeadroom))
+        line(out, "thermalHeadroom", decimals(stats.thermalHeadroom, THERMAL_DECIMALS))
     }
 
     private fun percentileLines(
@@ -153,7 +155,16 @@ internal object DiagnosticsReport {
     }
 
     /** [value] with one decimal and a dot, or `n/a` when it is NaN or infinite. */
-    private fun oneDecimal(value: Float): String = if (value.isFinite()) String.format(Locale.ROOT, "%.1f", value) else NOT_AVAILABLE
+    private fun oneDecimal(value: Float): String = decimals(value, MS_DECIMALS)
+
+    /**
+     * [value] with [places] decimals and a dot, or `n/a` when it is NaN or infinite. The thermal headroom uses two
+     * decimals so that 0.95 is not printed as 1.0, which would read as "throttling" although it was not measured.
+     */
+    private fun decimals(
+        value: Float,
+        places: Int,
+    ): String = if (value.isFinite()) String.format(Locale.ROOT, "%.${places}f", value) else NOT_AVAILABLE
 
     /**
      * The model of the session: `modelFile`, `modelSha256` (first [TrackerConfig.SHA256_SHORT_CHARS] hex characters)

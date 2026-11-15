@@ -169,8 +169,11 @@ object ImportedModelRules {
 
     private fun isStepMultiple(side: Int): Boolean = side % TrackerConfig.IMPORT_INPUT_SIZE_STEP == 0
 
-    /** Both sides are positive here (range already checked); compares in `Double`, so 4.0 is exact. */
-    private fun tooElongated(
+    /**
+     * Both sides are positive here (range already checked); compares in `Double`, so 4.0 is exact. Also used by
+     * [ImportedModelMeta.decode], so that the stored form obeys the same aspect rule as the importer.
+     */
+    internal fun tooElongated(
         height: Int,
         width: Int,
         config: TrackerConfig,

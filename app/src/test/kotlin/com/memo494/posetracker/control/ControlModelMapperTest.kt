@@ -14,6 +14,7 @@ import com.memo494.posetracker.modelimport.ModelStatus
 import com.memo494.posetracker.modelimport.RejectionKind
 import com.memo494.posetracker.modelimport.StoredModelState
 import org.junit.Test
+import java.util.Locale
 
 class ControlModelMapperTest {
     private val meta =
@@ -71,6 +72,26 @@ class ControlModelMapperTest {
 
         assertThat(ids).doesNotContain(0)
         assertThat(ids).containsNoDuplicates()
+    }
+
+    @Test
+    fun aspectLimitText_wholeNumberHasNoDecimal() {
+        assertThat(ControlModelMapper.aspectLimitText(4.0f)).isEqualTo("4")
+        assertThat(ControlModelMapper.aspectLimitText(1.0f)).isEqualTo("1")
+        assertThat(ControlModelMapper.aspectLimitText(16.0f)).isEqualTo("16")
+    }
+
+    @Test
+    fun aspectLimitText_otherNumberHasOneDecimalAndADot() {
+        val saved = Locale.getDefault()
+        try {
+            Locale.setDefault(Locale.GERMANY)
+
+            assertThat(ControlModelMapper.aspectLimitText(2.5f)).isEqualTo("2.5")
+            assertThat(ControlModelMapper.aspectLimitText(1.5f)).isEqualTo("1.5")
+        } finally {
+            Locale.setDefault(saved)
+        }
     }
 
     @Test

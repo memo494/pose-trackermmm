@@ -16,6 +16,7 @@ import com.memo494.posetracker.modelimport.ModelFallback
 import com.memo494.posetracker.modelimport.ModelStatus
 import com.memo494.posetracker.modelimport.RejectionKind
 import com.memo494.posetracker.modelimport.StoredModelState
+import java.util.Locale
 
 /**
  * Pure bridges between the model-import types and the control screen: outcomes and stored state become the small
@@ -149,6 +150,13 @@ internal object ControlModelMapper {
             ModelRejectionReason.OUTPUT_ROWS -> R.string.model_reject_output_rows
             ModelRejectionReason.OUTPUT_SHAPE -> R.string.model_reject_output_shape
         }
+
+    /**
+     * The aspect limit [limit] (`TrackerConfig.importMaxInputAspect`) as the sentence of
+     * `model_reject_input_aspect` prints it: no `.0` for a whole number (`4`), otherwise one decimal with a dot.
+     */
+    fun aspectLimitText(limit: Float): String =
+        if (limit % 1f == 0f) limit.toInt().toString() else String.format(Locale.ROOT, "%.1f", limit)
 
     /** The sentence of a failed import; the one for [ImportFailure.IO] takes the technical message as its argument. */
     @StringRes

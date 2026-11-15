@@ -303,7 +303,7 @@ class ImportedModelStore private constructor(
 
     private fun readMeta(file: File): ImportedModelMeta? {
         val text = if (isFile(file)) readText(file) else null
-        return text?.let(ImportedModelMeta::decode)
+        return text?.let { ImportedModelMeta.decode(it) }
     }
 
     /** Reading a damaged file must never crash a session, so even an `Error` (a huge file: OOM) means "no text". */

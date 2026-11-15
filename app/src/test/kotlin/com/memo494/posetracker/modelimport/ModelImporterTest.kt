@@ -576,6 +576,51 @@ class ModelImporterTest {
     }
 
     @Test
+    fun storedLoadTrip_isNotReplacedByTheProbeMarker() {
+        prefs.text = "tripped:load"
+        var textDuringProbe: String? = null
+        duringProbe = { textDuringProbe = prefs.text }
+
+        runImport(tfliteBytes(1_000))
+
+        assertThat(textDuringProbe).isEqualTo("tripped:load")
+        assertThat(guardDuringProbe).isEqualTo(ImportGuardState.Tripped(ImportStage.LOAD))
+        assertThat(prefs.writes).doesNotContain("pending:probe")
+    }
+
+    @Test
+    fun storedProbeTrip_isNotReplacedByTheProbeMarker() {
+        prefs.text = "tripped:probe"
+        var textDuringProbe: String? = null
+        duringProbe = { textDuringProbe = prefs.text }
+        probeResult = ProbeResult.Failed("nope")
+
+        runImport(tfliteBytes(1_000))
+
+        assertThat(textDuringProbe).isEqualTo("tripped:probe")
+        assertThat(guardDuringProbe).isEqualTo(ImportGuardState.Tripped(ImportStage.PROBE))
+        assertThat(prefs.writes).isEmpty()
+    }
+
+    @Test
+    fun processDyingInTheProbeOfANewFile_neverBringsBackAModelSwitchedOffByALoadCrash() {
+        importPreviousModel()
+        prefs.text = "tripped:load"
+        var markerWhenTheProcessDied: String? = null
+        duringProbe = { markerWhenTheProcessDied = prefs.text }
+        probeResult = ProbeResult.Failed("the process died here")
+
+        runImport(tfliteBytes(1_000))
+
+        // A new process starts over the same files and the marker as it was when the probe ran.
+        val freshStore = ImportedModelStore(directory, FakeGuardPrefs(markerWhenTheProcessDied), AtomicBoolean(false), thread::check)
+        val state = freshStore.state()
+        assertThat(state.meta).isNotNull()
+        assertThat(state.fileExists).isTrue()
+        assertThat(ModelChoice.resolve(state) { true }).isEqualTo(ModelChoice.BuiltIn(BuiltInReason.GUARD_TRIPPED_LOAD))
+    }
+
+    @Test
     fun trippedGuard_staysWhenTheStoreFailsToAccept() {
         prefs.text = "tripped:probe"
         val bytes = tfliteBytes(1_000)

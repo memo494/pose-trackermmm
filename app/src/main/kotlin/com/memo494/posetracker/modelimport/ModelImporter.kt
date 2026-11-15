@@ -86,6 +86,11 @@ enum class FailureKind {
  * LiteRT, layout rules, then store. Each step fails closed with its own [ImportOutcome]; only an accept changes
  * what is stored (a refused import never touches the previous model or a `Tripped` guard).
  *
+ * Crash marker: from `Idle` the probe stores `Pending(PROBE)` before LiteRT opens the copy and `Idle` after it.
+ * From a `Tripped` guard (any stage) it writes nothing before or after the probe: the stored trip stays as it is
+ * for the whole probe, so a process death there still reads as the old trip (a model switched off by a load
+ * crash stays off). A `Pending` guard of another operation answers `Failed(BUSY)`.
+ *
  * Threading: [import] reads, hashes and probes a file, so it must run on a worker thread and throws
  * [IllegalStateException] on the main thread. It never throws otherwise: every `Throwable` (`OutOfMemoryError`
  * included) becomes [ImportOutcome.Failed].
@@ -177,11 +182,15 @@ class ModelImporter(
 
         val initialGuard = store.state().guard
         if (initialGuard is ImportGuardState.Pending) return ImportOutcome.Failed(FailureKind.BUSY)
-        if (!store.setGuard(ImportGuard.begin(ImportStage.PROBE))) return ImportOutcome.Failed(FailureKind.GUARD_NOT_STORED)
+        // A stored trip stays untouched for the whole probe: replacing it by the probe marker would let a process
+        // death in the probe read as a trip at the probe, which keeps a stored model that a load crash switched off.
+        // A refusal or a catchable failure is not a crash, and a trip is only lifted by an accept (in the store).
+        val markerOwned = initialGuard !is ImportGuardState.Tripped
+        if (markerOwned && !store.setGuard(ImportGuard.begin(ImportStage.PROBE))) {
+            return ImportOutcome.Failed(FailureKind.GUARD_NOT_STORED)
+        }
         val probed = runProbe(temp)
-        // A refusal or a catchable failure is not a crash: the marker goes back, but a trip is only lifted by an accept.
-        val afterProbe = if (initialGuard is ImportGuardState.Tripped) initialGuard else ImportGuard.succeed()
-        if (!store.setGuard(afterProbe)) return ImportOutcome.Failed(FailureKind.GUARD_NOT_STORED)
+        if (markerOwned && !store.setGuard(ImportGuard.succeed())) return ImportOutcome.Failed(FailureKind.GUARD_NOT_STORED)
 
         val tensors =
             when (probed) {

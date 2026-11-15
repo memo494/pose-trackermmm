@@ -416,7 +416,9 @@ step back up after 60 s below the threshold. Every step is logged and shown in t
     length and sha256 still match its meta stays in use and the screen only shows a notice that the new file was
     not imported; if nothing is stored, or the stored file does not match (or the check cannot run), the
     built-in model is used and the screen says so. The first Start of a kept model stores `Idle` after its load,
-    which lifts the probe trip; an accepted import or **Use built-in model** lift any trip.
+    which lifts the probe trip; an accepted import or **Use built-in model** lift any trip. While a trip is stored
+    the probe of a new file does not replace it (no marker is written before or after that probe), so a model
+    switched off after a load crash stays off even if the process dies in the next probe.
   - *Classes:* `ModelFileSniffer` (`TFL3` identifier and size limits), `ImportedModelRules` (accept or refuse
     the tensors), `ImportedModelMeta` (name, sha256, bytes, input size, output rows; strict text codec),
     `ImportGuard` (crash-marker state machine) — all in `core/modelimport`; `ModelProbe` and

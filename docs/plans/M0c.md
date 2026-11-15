@@ -257,6 +257,17 @@ written). **Decision:** R1-7 is the recorded design, so the production code stay
 updated to the exact new sequence (still `containsExactly(...).inOrder()`, with a comment naming R1-7). Not a
 weakened test: it pins one more write, not fewer. The extra write is one small synchronous commit per import.
 
+### CI run 67 (e5d806f, first run that compiles and passes spotless): 21 failing tests, one cause
+All in `ImportedModelStoreTest`, all at `assertThat(store.accept(stage(store, ...), ...)).isTrue()`. `stage()` takes
+a file from `newTempFile()` and fills it; `accept()` is then the first store access of the "process", so the
+app-start step of T8/S5 deletes that very file (the test's "an import is running" hook says no). Production is not
+affected (`ModelImporter` sets its flag before `newTempFile()`), but the store's safety must not depend on a flag
+another class has to set. **Decision:** `newTempFile()` is a store access like the others: it runs the app-start
+step under the lock before it hands the file out. A file handed out by this process can then never be removed by
+this process's own first-access cleanup. The `importInFlight` check stays as the second guard (it still matters
+when the app-start step is applied again after a trip that could not be stored). No existing test changes; one new
+test pins the rule without the flag.
+
 ## Then (lead)
 `android-reviewer` on the whole diff → fixes through the implementer → PR ready, CI green → handoff
 `docs/progress/M0c.md`, `docs/REPO_MAP.md`, PR text ending with "How to test on the phone" → ask the owner

@@ -530,7 +530,8 @@ class ModelImporterTest {
 
         assertThat(guardDuringProbe).isEqualTo(ImportGuardState.Pending(ImportStage.PROBE))
         assertThat(store.state().guard).isEqualTo(ImportGuardState.Idle)
-        assertThat(prefs.writes).containsExactly("pending:probe", "idle").inOrder()
+        // The last "idle" is the accept's own write under the store lock (R1-7), after the one that ends the probe.
+        assertThat(prefs.writes).containsExactly("pending:probe", "idle", "idle").inOrder()
     }
 
     @Test

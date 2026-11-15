@@ -1,5 +1,10 @@
 package com.memo494.posetracker.diagnostics
 
+import com.memo494.posetracker.core.TrackerConfig
+import com.memo494.posetracker.core.modelimport.ImportedModelMeta
+import com.memo494.posetracker.modelimport.ModelSource
+import com.memo494.posetracker.modelimport.ModelStatus
+
 /** One file of the diagnostics zip: its [name] inside the zip and its [text]. */
 internal class ReportEntry(
     val name: String,
@@ -24,6 +29,8 @@ internal object DiagnosticsReport {
     private const val NO_CRASH = "no crash recorded"
     private const val UNKNOWN = "unknown"
     private const val NONE = "none"
+    private const val SOURCE_BUILT_IN = "builtin"
+    private const val SOURCE_IMPORTED = "imported"
 
     /**
      * Always five entries in this order: `summary.txt`, `config.txt`, `log.txt`, `model_info.json` (named
@@ -107,7 +114,38 @@ internal object DiagnosticsReport {
         line(out, "nanRawRows", stats.nanRawRows)
         line(out, "headXImg", stats.headXImg)
         line(out, "headYImg", stats.headYImg)
+        appendModel(out, stats.model)
     }
+
+    /**
+     * The model of the session: `modelFile`, `modelSha256` (first [TrackerConfig.SHA256_SHORT_CHARS] hex characters)
+     * and `modelOutputRows` describe the imported model in use (`builtin` / `none` otherwise); a refused imported
+     * model is named in `modelFallbackFile`.
+     */
+    private fun appendModel(
+        out: StringBuilder,
+        model: ModelStatus?,
+    ) {
+        if (model == null) {
+            line(out, "modelSource", UNKNOWN)
+            return
+        }
+        val inUse = if (model.source == ModelSource.IMPORTED) model.meta else null
+        line(out, "modelSource", if (model.source == ModelSource.IMPORTED) SOURCE_IMPORTED else SOURCE_BUILT_IN)
+        line(out, "modelFile", inUse?.displayName ?: SOURCE_BUILT_IN)
+        line(out, "modelSha256", inUse?.let(::shortSha) ?: NONE)
+        line(out, "modelInputSize", model.inputSize)
+        line(out, "modelOutputRows", inUse?.outputRows ?: NONE)
+        line(out, "modelFallback", model.fallback?.name ?: NONE)
+        line(out, "modelFallbackMessage", model.message?.let(::oneLine) ?: NONE)
+        val refused = if (model.source == ModelSource.BUILT_IN) model.meta else null
+        if (refused != null) line(out, "modelFallbackFile", "${refused.displayName} ${shortSha(refused)}")
+    }
+
+    private fun shortSha(meta: ImportedModelMeta): String = meta.sha256.take(TrackerConfig.SHA256_SHORT_CHARS)
+
+    /** [text] with line breaks turned into spaces, so that it stays one `key=value` line. */
+    private fun oneLine(text: String): String = text.replace('\n', ' ').replace('\r', ' ')
 
     private fun line(
         out: StringBuilder,

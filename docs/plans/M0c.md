@@ -1,0 +1,364 @@
+# M0c — import a model file, and a 640 model to download (plan)
+
+**Lead:** main session (Fable 5.2 this session, the owner's choice) · **Branch:** `m0c-model-import` (from `main` @ `32c6fba`)
+· **Status:** approved by the owner in chat on 2026-11-13 (he asked for the import button, has no model file
+yet, and accepted "I build the button and prepare a 640 file to download"; he also approved running the model
+export on GitHub). Merging stays his decision.
+
+## Why (phone evidence, v0.1.37, 2026-11-13)
+Landscape works after PR #5. Detection depends on the person's size in the model input: `max 0.72` to `0.84`
+for near people, `0.02` to `0.08` for far ones, flicker in between. An offline sweep on the owner's screenshots
+(table in `docs/plans/M0d.md`) says a 640-wide input turns the medium cases into detections (0.00 → about 0.4
+to 0.5, 0.09 → about 0.7) while the area crop alone does not. The owner then asked for a way to import a
+ready-made model, which also lets him try other models without a new app build.
+
+## Measured after T1 (2026-11-13, offline on the owner's screenshots)
+**The 640 file exists.** `export-model.yml` run 43481280634 (pinned toolchain, ultralytics 8.4.208) published
+`yolo26n-pose_640.tflite` under the release tag `models`: sha256 `a0e1fd6c…c26149`, 12.1 MB, input
+`[1,3,640,640]`, output `[1,300,57]`, three people at 0.85 to 0.89 on the sample image. The rolling `latest`
+APK release was not touched.
+
+**The real 640 model on his frames** (whole screen, as the app captures it; score of the person):
+alley walker 0.00 → 0.35 · bending person 0.09 → 0.68 · man on the ground 0.33 → 0.59 · far workers and the
+snow scene still 0.00. Scores of one person vary a lot with the exact scale (0.15 to 0.68 for the bending
+person), so single frames are an indication, not a guarantee.
+
+**Our own marks hide the person from the model (the open "dot A/B" question).** The overlay is inside the
+capture. Drawing the marks of v0.1.37 on a clean frame and running the 640 model again:
+
+| Marks drawn on the frame | walker (clean 0.34) | bending (clean 0.67) |
+|---|---|---|
+| everything v0.1.37 draws (box, ring, keypoint dots) | 0.05 | 0.20 |
+| keypoint dots only | 0.06 | 0.18 |
+| full box only | 0.07 | 0.75 |
+| ring 0.12 x box width (today) | 0.18 | 0.71 |
+| ring 0.12 x box width, at least 12 dp | 0.43 | 0.70 |
+| corner brackets instead of the box | 0.41 | 0.71 |
+| ring 0.25 x box width + corner brackets | 0.32 | 0.68 |
+| ring 0.40 x box width | 0.45 | 0.22 |
+
+Two people only, but the effect is large: a detected person is marked, the marks push the next frame under the
+threshold, the marks vanish, the person is detected again. That is the blinking the owner reported. T7 removes
+the cause; without it the 640 test on the phone would still blink.
+
+## Goal (what the owner sees)
+On the control screen, while stopped: the active model (`Built-in 416` or the imported file with its input
+size), a button **Import model** (system file picker) and a button **Use built-in model**. A file that fits is
+used from the next Start; a file that does not fit is refused with the reason. The HUD shows the input size and
+marks an imported model. A ready `yolo26n-pose_640.tflite` is on the repository's release page under the tag
+`models`, to download on the phone and import.
+
+**Honest limits:** a 640 model is slower (estimate 45 to 55 ms, 17 to 20 fps on this phone; to be measured).
+People of 12 to 15 % of the video height stay undetected. Version 1 accepts one layout only (below).
+
+## Lead decisions
+- **D1 One imported slot.** The picked file is copied into app-private storage (`noBackupFilesDir`); importing
+  again replaces it; **Use built-in model** switches back and deletes the copy. Import and reset are possible only
+  while the capture is stopped.
+- **D2 Accepted layout, version 1 (fail closed).** Exactly one float32 input `[1, 3, S, S]` (NCHW, square, `S` a
+  multiple of 32 inside the limits in `TrackerConfig`) and exactly one float32 output `[1, N, 57]` (end-to-end
+  pose head, 17 keypoints, 0 < `N` <= 300: the vendored decoder treats 57 columns as end-to-end only up to 300
+  rows; review R1-1). This is the layout of the bundled models and of default `yolo26*-pose`
+  LiteRT exports. Anything else (detect models, the classic `[1, 56, N]` head, another keypoint count, NHWC,
+  non-square) is refused with a message that names the shapes found. Rectangular inputs come with M1.
+- **D3 The real tensors decide.** Validation reads the tensor shapes from the model itself through LiteRT
+  (`CompiledModel`, CPU, on a worker thread, closed afterwards). Ultralytics metadata inside the file may only
+  make a refusal message clearer.
+- **D4 Never worse than the built-in model.** If the imported model cannot be loaded at Start, the session
+  falls back to the built-in model and says so (HUD warning and control-screen notice). A native crash cannot
+  be caught, so a pending marker is written before LiteRT first opens the file (probe) and before the first load
+  in a session, and cleared afterwards; a marker found at the next start disables the imported model and tells
+  the owner.
+- **D5 The 640 file is a download, not part of the app.** `model/**`, the APK and `model_info.json` do not
+  change. The export workflow builds the file with the pinned toolchain (`tools/requirements.lock`, the versions
+  that produced the bundled models), checks it and uploads it to the release tag `models`.
+- **D6 Protected files named explicitly:** `.github/workflows/export-model.yml` (T1 only). Nothing else that is
+  protected changes. No new dependency (`ActivityResultContracts.OpenDocument` is in the activity library
+  already used; `SharedPreferences` and files are the platform's).
+- **D8 Marks (T7, approved by the owner):** ring and corner brackets by default, box and keypoint dots behind a
+  debug switch; evidence in "Measured after T1".
+- **D7 Not in M0c:** rectangular models, other output layouts, several imported models, a benchmark screen
+  (M1), the area crop (M0d), Arabic texts.
+
+## Verification in this environment
+No Android SDK in cloud sessions: **no local `scripts/verify.sh`**. CI runs on pull requests, so the lead opens
+a **draft PR** after T1; implementers commit, push the branch (plain push, never force), wait about 90 s and read
+`scripts/ci-status.sh`, checking that the run's `head_sha` is the pushed commit.
+
+## Tasks (sequential on this branch; agent = implementer)
+
+### T1 — Export a model file for download · S/M · tools + the export workflow
+**Files:** `tools/export_model.py`, `.github/workflows/export-model.yml` (protected, in scope for this task only).
+- Script: remove the unused `import tensorflow as tf`. New options `--sizes 640[,…]` (default: today's
+  `320,416`) and `--out DIR`. With `--out` the script writes only `DIR/yolo26n-pose_<size>.tflite` and
+  `DIR/yolo26n-pose_<size>.json` (tensor shapes and dtypes, sha256, bytes, package versions) and does not touch
+  `model/`. It fails (non-zero exit, nothing published) unless the exported model has one float32 input
+  `[1,3,S,S]` and one float32 output `[1,300,57]`, and `predict()` on the Ultralytics sample image finds at
+  least two people with a score of 0.5 or more. Without `--out` the behaviour stays as it is today.
+- Workflow: `workflow_dispatch` inputs `sizes` and `publish_tag` (both empty by default = today's behaviour,
+  untouched). With `sizes`: install from `tools/requirements.lock`, run the script with `--out`, upload the
+  files as a workflow artifact, and with `publish_tag` create the release if it is missing (pre-release, never
+  marked latest, so the rolling `latest` APK release is not disturbed) and upload the files to it, replacing
+  older ones of the same name. The job summary lists the files and their sha256.
+
+**Check:** the script cannot run here (Ultralytics is not installed), so run `python3 -m py_compile
+tools/export_model.py`, keep every import of Ultralytics, torch and LiteRT inside the functions that need them so
+`--help` works without them, and read the diff carefully. The lead dispatches the workflow on this branch after
+the push (`sizes=640`, `publish_tag=models`) and reads the result.
+**Stop and report** if the pinned install or the export fails twice; do not loosen the checks.
+
+### T2 — Core: rules for an imported model · M · pure Kotlin, new package `core/modelimport`
+**Files:** `core/modelimport/{ModelFileSniffer,ImportedModelRules,ImportedModelMeta,ImportGuard}.kt`,
+`TrackerConfig.kt` (import limits); tests for each.
+- `ModelFileSniffer.looksLikeTflite(header: ByteArray, fileBytes: Long, config)`: the FlatBuffers identifier
+  `TFL3` at bytes 4 to 7 and a size inside `importMinBytes..importMaxBytes`.
+- `ImportedModelRules.check(inputs, outputs, config): ImportCheck` where a tensor is (shape, element type name):
+  `Accepted(inputSize, rows)` or `Rejected(reason: ImportRejection, details: String)`; one reason per rule of D2,
+  and the details always carry the shapes found.
+- `ImportedModelMeta` (display name, sha256, bytes, input size, output rows) with a strict text codec
+  (`encode` / `decode` returning `null` on anything unexpected); display names are sanitised (no path, length cap).
+- `ImportGuard`: the pure state machine of D4 (`Idle`, `Pending(stage)`, `Tripped`) with `begin`, `succeed`,
+  `onAppStart`; text form for one preference value.
+- `TrackerConfig`: `importMinBytes`, `importMaxBytes`, `importMinInputSize`, `importMaxInputSize`,
+  `IMPORT_INPUT_SIZE_STEP` = 32, with bounds like the other fields.
+
+**Tests first:** every accept and every rejection of D2 (wrong rank, batch not 1, channels not 3, NHWC,
+non-square, size not a multiple of 32, below or above the limits, two inputs, two outputs, 56-column and
+`[1,56,N]` outputs, non-float types); sniffer (short header, wrong identifier, too small, too large); codec round
+trip and every malformed text; guard transitions including a marker found at start.
+
+### T3 — Detector: probe a file and build a detector from it · M
+**Files:** `detector/{PoseDetectors,ModelProbe,UltralyticsPoseEngine,LiteRtPoseDetector}.kt` (KDoc where only
+wording changes); tests `LiteRtPoseDetectorTest`, new `ModelProbeTest` for the pure part.
+- `ModelProbe.probe(context, file): ProbedModel` (worker thread only): opens the file with LiteRT
+  (`CompiledModel`, CPU), reads the input and output tensor shapes and element types, closes it. Any exception
+  or `Error` becomes a result the caller can show; nothing is rethrown to the UI thread.
+- `PoseDetectors.fromImported(context, file, meta, config)`: GPU first with the CPU fallback like `fromAssets`,
+  expects `meta.inputSize`, no asset staging. `fromAssets` is unchanged.
+- The engine keeps requiring NCHW and a square input (D2).
+- **Stop and report** if a vendored file must change beyond reading shapes (log any change in
+  `third_party/ULTRALYTICS.md`).
+
+**Tests first:** the detector built from a fake engine reports the imported size and refuses a size that differs
+from the meta; the probe's mapping from raw tensor descriptions to `ImportedModelRules` inputs.
+
+### T4 — App: import use case, storage, and the model choice at Start · M
+*Run as two implementer passes: **T4a** = `ImportedModelStore`, `ModelImporter`, `ModelChoice` and their tests
+(no session wiring); **T4b** = `CaptureSession` wiring, HUD and diagnostics.*
+**Files:** new `app/modelimport/{ImportedModelStore,ModelImporter,ModelChoice}.kt`;
+`app/capture/{CaptureService,CaptureSession}.kt`; `app/overlay/{OverlayState,HudFormatter}.kt`;
+`app/diagnostics/{CaptureStats,CaptureStatsHolder,DiagnosticsReport,DiagnosticsZip}.kt`; tests
+`HudFormatterTest`, `DiagnosticsReportTest`, new `ModelChoiceTest`.
+- `ModelImporter.import(uri)` on a worker thread (never the main thread): sniff → copy to a temporary file
+  inside `noBackupFilesDir/imported` while hashing (size cap enforced during the copy) → guard `begin(PROBE)` →
+  `ModelProbe` → `ImportedModelRules` → on accept: atomic rename, save the meta, guard `succeed`; on reject or
+  failure: delete the temporary file and return the reason. The previous imported model stays until a new one
+  is accepted.
+- `ModelChoice.resolve(meta, fileExists, guard)`: pure; `Imported(meta)` or `BuiltIn(reason?)`.
+- `CaptureSession.startCapture`: resolves the choice on the capture thread; for an imported model guard
+  `begin(LOAD)` → `PoseDetectors.fromImported` → `succeed`; on any failure log it, fall back to `fromAssets`
+  and publish a warning that the built-in model is in use.
+- HUD: the input size, with a mark when the model is imported (within `HUD_LINE_CAPACITY_CHARS`).
+  `summary.txt` and `config.txt`: model source, file name, short sha256, input size, output rows, fallback reason.
+
+**Tests first:** `ModelChoice` for every combination (no meta, file missing, guard tripped, all good); HUD text
+for built-in and imported; the report fields.
+
+### T5 — App: control screen · M
+**Files:** `app/control/{ControlState,ControlScreen}.kt` (the reducer lives in `ControlState.kt`), `MainActivity.kt`,
+`res/values/strings.xml`; test `ControlReducerTest`.
+- State: the active model description, `importing`, the last import result (accepted, or a rejection with its
+  details), guard notice. Events: `ImportClicked`, `ImportPicked(uri?)`, `ImportFinished(result)`,
+  `UseBuiltInClicked`, `ModelStateLoaded`. Effects: `OPEN_MODEL_PICKER`, `RUN_IMPORT`, `CLEAR_IMPORTED`.
+  Import and reset are ignored while running or importing; Start is disabled while importing.
+- Screen: a "Model" block with the active model, **Import model**, **Use built-in model** (only when one is
+  imported), a progress line while importing, and the result text. One short line: only import files you trust.
+- `MainActivity`: `OpenDocument` launcher (`*/*`), runs the importer off the main thread, reads the stored model
+  state off the main thread when the screen starts and after each import.
+
+**Tests first:** the reducer for every new event in the stopped, running and importing states; a rejection keeps
+the previous model; `UseBuiltInClicked` clears the notice.
+
+### T7 — App: marks that do not hide the person from the model · S/M · runs after T5, before T6 · approved by the owner in chat, 2026-11-13
+**Files:** `TrackerConfig.kt` (`minHeadRingRadiusDp` = 12, `boxCornerRatio` = 0.18), new pure helper
+`core/overlay/HeadRing.kt`, `app/overlay/PoseOverlayView.kt`, `app/control/{ControlState,ControlScreen}.kt`,
+`MainActivity.kt`, a persisted "debug marks" switch read when a session starts, `res/values/strings.xml`,
+`docs/TEST_CHECKLIST.md` (the dot A/B block); tests `HeadRingTest`, `TrackerConfigTest`, `ControlReducerTest`.
+- Default drawing: the head ring with radius max(`headRingRadiusRatio` x box width, `minHeadRingRadiusDp`) and
+  short corner brackets instead of the full box. No keypoint dots.
+- Control screen switch **Debug marks (box and body points)**, off by default, used from the next Start: the
+  full box and the keypoint dots as today.
+- Nothing allocated in the draw phase; no magic numbers outside `TrackerConfig`.
+
+**Tests first:** the ring radius (minimum for small boxes, ratio for large ones, exactly equal at the crossover);
+the reducer for the switch in the stopped and running states; the new config bounds.
+**Acceptance:** with the defaults a medium-distance person no longer blinks the way v0.1.37 did; the switch
+brings today's marks back.
+
+### T6 — Docs · S
+**Files:** `docs/ARCHITECTURE.md` (§8 model pack: imported models, D1 to D5; §6.5 the stale `onSizeChanged`
+sentence left by PR #5; §6.7 new diagnostics fields; §12 rows for M0c and M0d; §15 change entry),
+`docs/TEST_CHECKLIST.md` (section "M0c — import a model" from the acceptance list below).
+
+### T8 — Review fixes (android-reviewer, 2026-11-14) · M · runs after R1
+**Scope after R1 (a parallel session landed R1-1…R1-10 at 1c86102, CI red on spotless only):** first make
+spotless green (`ModelImporterTest.kt` ~508). W1 is done by R1-2 and S3 by R1-5 — only add the two-thread test
+below if R1 has no equivalent. Do W2, S5, S6, S7, S8 only where R1 did not already cover them.
+**Files:** `app/modelimport/{ModelImporter,ImportedModelStore}.kt`, `MainActivity.kt`, control reducer/state if
+needed, `docs/ARCHITECTURE.md` §5, `docs/TEST_CHECKLIST.md` M0c block 5; tests in the matching `*Test.kt`.
+- **W1 one import at a time, process-wide.** A process-wide guard (e.g. `AtomicBoolean` in `ModelImporter`'s
+  companion) is taken *before* `newTempFile()` and released in `finally`; a second import while it is held returns
+  `Failed(BUSY)` without touching `import.tmp`. Expose it (`StateFlow<Boolean>` or getter) so a recreated
+  `MainActivity` starts with `importing = true` and Start / **Use built-in model** stay disabled until it ends.
+- **W2 thread table.** ARCHITECTURE §5 rows: probe `CompiledModel` (IO worker, CPU, created and closed in one
+  call); `ImportedModelStore` (any worker, process lock, refuses main); `ModelStatusHolder` (any thread,
+  `AtomicReference`); capture thread hashes the imported file before loading.
+- **S5** delete a leftover `import.tmp` on the first store access of the process (not while an import holds the guard).
+- **S6** sniff the first bytes during the copy and stop early when the file is not TFLite.
+- **S7** checklist block 5: both "too small" and "not a TensorFlow Lite" texts count as a pass.
+- **S8** a saved Debug-marks value read after the user already toggled the switch must not overwrite the toggle.
+
+**Tests first:** two imports on two threads with a blocking fake probe → second is `BUSY`, first's temp file intact;
+recreated-activity state reads `importing = true` while the guard is held; leftover temp deleted on first access but
+not during an import; early stop on a non-TFLite stream (bytes read < file size); reducer ignores a late load after
+a toggle. `@Test` count only goes up.
+**Acceptance:** verify green; rotating during an import cannot start a second one.
+Not in scope (M1): reviewer S3 (GPU cache key by file name+size). S4 → T9.
+
+### T9 — A PROBE trip keeps a good stored model · S · runs after T8 · owner chose option B in chat, 2026-11-14
+**Files:** `app/modelimport/ModelChoice.kt` (~176), `ImportGuard`/notice mapping if needed; tests `ModelChoiceTest`.
+- A `Tripped(PROBE)` guard (process died while probing a *new* file that was never stored) only shows the notice;
+  a previously accepted model whose meta exists and whose length + sha256 still match stays the active choice.
+- Trips at any other stage (LOAD/RUN of the stored model itself) keep today's behaviour: built-in model + notice.
+- Fail closed: if the stored meta is missing, unreadable or the hash check cannot run, use the built-in model.
+
+**Tests first:** PROBE trip + valid stored model → imported model chosen, notice shown; PROBE trip + no stored model
+→ built-in; PROBE trip + hash mismatch → built-in; LOAD trip + valid stored model → built-in (unchanged).
+**Acceptance:** verify green; checklist unchanged except a note in block 5 if the notice text changes.
+
+Lead decisions added 2026-11-15 (after reading the half-done work):
+- **Two notices, two texts** (never one text for two situations). Kept model: new `ModelNoticeKind` with the string
+  "The app stopped while checking a new model file, so that file was not imported. Your previous imported model
+  is still used." Nothing kept (`GUARD_TRIPPED_PROBE`): "The app stopped while checking a new model file, so that
+  file was not imported. The built-in model is used. Import again, or press Use built-in model to remove this
+  notice." The old R1-9 sentence ("including a previously imported one, are switched off") goes.
+- **When the kept-model notice goes away:** `SessionModelLoader` already stores `Idle` after a load that did not
+  kill the process, so the first Start of the kept model lifts the probe trip. That is intended (the trip suspected
+  a file that was never stored) and stays pinned by a test. An accepted import or **Use built-in model** lift it too.
+- The hash check runs only for a probe trip with a meta and a file, on a worker thread (`Dispatchers.IO` for the
+  control screen, the capture thread at Start); ARCHITECTURE §5 and §8 say so.
+
+### CI run 64 (8208279, R1 as pushed by the other session): 1 failing test
+`ModelImporterTest.guardIsPendingProbe_exactlyWhileTheProbeRuns` expects the guard writes `pending:probe`, `idle`.
+Since R1-7 `accept` stores `Idle` again under its own lock, so a successful import writes `pending:probe`, `idle`,
+`idle`. Two tests contradict each other: this one (older) and R1's
+`guardThatCannotBeStored_failsTheAcceptAndKeepsThePreviousModel` (accept must fail when the guard cannot be
+written). **Decision:** R1-7 is the recorded design, so the production code stays and the older expectation is
+updated to the exact new sequence (still `containsExactly(...).inOrder()`, with a comment naming R1-7). Not a
+weakened test: it pins one more write, not fewer. The extra write is one small synchronous commit per import.
+
+### CI run 67 (e5d806f, first run that compiles and passes spotless): 21 failing tests, one cause
+All in `ImportedModelStoreTest`, all at `assertThat(store.accept(stage(store, ...), ...)).isTrue()`. `stage()` takes
+a file from `newTempFile()` and fills it; `accept()` is then the first store access of the "process", so the
+app-start step of T8/S5 deletes that very file (the test's "an import is running" hook says no). Production is not
+affected (`ModelImporter` sets its flag before `newTempFile()`), but the store's safety must not depend on a flag
+another class has to set. **Decision:** `newTempFile()` is a store access like the others: it runs the app-start
+step under the lock before it hands the file out. A file handed out by this process can then never be removed by
+this process's own first-access cleanup. The `importInFlight` check stays as the second guard (it still matters
+when the app-start step is applied again after a trip that could not be stored). No existing test changes; one new
+test pins the rule without the flag.
+
+### Review R2 (android-reviewer, `431708e..efb4d1d`, 2026-11-15) and T10
+One critical finding, three warnings, six suggestions. Checked and fine: the single-flight flag is released on
+every path, the early stop of the copy, `accept` rollback and orphans, `storedFileMatches` without a lock, no
+per-frame allocation in `RedrawPolicy`, no weakened test (718 → 788), docs and checklist match `strings.xml`,
+the only protected file changed is `export-model.yml` (tag validated, `latest` still refused).
+
+| # | Finding | Decision |
+|---|---|---|
+| C1 | T9 can bring back a model that is switched off after a LOAD trip: the importer replaces `tripped:load` by `pending:probe` while it probes a new file; a process death there reads as `Tripped(PROBE)` at the next start, and T9 then keeps the stored model | **T10, before the merge** |
+| W1 | A `Failed(BUSY)` result of a second import (second activity instance, or a pick in the instant between a rotation and the start of the background import) ends `importing` in the screen that waits for the first one; **Use built-in model** could then delete the temporary file of the running import, and Start is enabled | store part in **T10** (`clear()` refuses while an import runs); the screen part goes to the follow-up |
+| W2 | A cloud provider's stream that stalls keeps the import, and so the three buttons, blocked until the app is closed | follow-up (a no-progress timeout or a Cancel button); the way out today is closing the app from recents |
+| W3 | A result published in the instant after the flag is cleared and before a recreated screen subscribes is not shown (the model state is still read again) | follow-up |
+| S1–S6 | re-applied app-start step vs this process's own Pending; meta replaced by one atomic rename now that files are content-named; log a main-thread refusal inside `ModelChoice`; sniff once; cache the hash per process; result handling out of the Activity and tested | follow-up, with W1–W3, as one PR "import flow hardening" after the phone test |
+
+### T10 — R2 fixes before the merge · S · agent = implementer
+**Files:** `app/modelimport/{ModelImporter,ImportedModelStore}.kt`, KDoc of `core/modelimport/ImportGuard.kt` if it
+says who writes what, `docs/ARCHITECTURE.md` §8; tests `ModelImporterTest`, `ImportedModelStoreTest`.
+- **C1 A stored trip is never replaced by the probe marker.** In `ModelImporter`, when the guard found before the
+  probe is `Tripped` (any stage), nothing is written before or after the probe: the trip stays as it is for the
+  whole probe. A process death in that probe therefore still reads as the old trip (a LOAD trip keeps the stored
+  model switched off; a PROBE trip keeps today's T9 behaviour). Only an accept (or **Use built-in model**) lifts
+  it, as before. With an `Idle` guard nothing changes (`pending:probe`, then `idle`).
+- **W1 `ImportedModelStore.clear()` refuses while an import runs** (`importInFlight()`): it returns `false`,
+  deletes nothing and leaves the guard alone (the running import owns the temporary file and the marker).
+
+**Tests first:** a stored `tripped:load` is still `tripped:load` inside the probe and no `pending:probe` is ever
+written; the end-to-end case of C1 (stored model, `tripped:load`, the text of the marker taken inside the probe as
+"the process died here", a fresh-process store over it, `ModelChoice.resolve` with a check that says yes →
+`BuiltIn(GUARD_TRIPPED_LOAD)`); the same for a stored `tripped:probe`; `clear()` during an import changes nothing
+and reports `false`. `@Test` count only goes up.
+**Acceptance:** verify green.
+
+## Then (lead)
+`android-reviewer` on the whole diff → fixes through the implementer → PR ready, CI green → handoff
+`docs/progress/M0c.md`, `docs/REPO_MAP.md`, PR text ending with "How to test on the phone" → ask the owner
+before merging.
+
+## Review R1 (android-reviewer, whole diff 32c6fba...5a2207c, 2026-11-14)
+No blockers. Expected verdict for the real 640 file: sniff ok → probe reads `args_0` `[1,3,640,640]` and
+`output_0` `[1,300,57]` → `Accepted(640, 300)` → loads at Start like the bundled 416 model. Not verifiable
+without a phone: whether LiteRT needs the `.tflite` extension, the GPU program cache with equal cache keys, speed.
+
+Fixes taken (one implementer pass):
+| # | Finding | Fix |
+|---|---|---|
+| R1-1 | The rules accept any `N`; the vendored decoder needs `N` <= 300, so such a model would import and then fail at every Start | `IMPORT_MAX_OUTPUT_ROWS` = 300, rejection `OUTPUT_ROWS` |
+| R1-2 | A rotation during an import re-enables Import; two imports share one temp file, the first can accept the second's bytes | single-flight flag in `ModelImporter`, `importing` seeded from it |
+| R1-3 | `RedrawPolicy` redraws on keypoints that are no longer drawn | compare only what is drawn (`keypointsDrawn`) |
+| R1-4 | The probe opens a temp file without the `.tflite` extension | temp name ends in `.tflite` |
+| R1-5 | GPU cache key = file name + byte size: two imports of equal size share it | stored file named by content (`model-<sha16>.tflite`) |
+| R1-6 | An orphan model file after a process death cannot be cleared from the screen | **Use built-in model** is shown whenever a stored file exists |
+| R1-7 | A process death between accept and clearing the guard leaves a stale trip | the guard is cleared inside `accept`, under the same lock |
+| R1-8 | Two failure texts are hard-coded English | typed failure kinds, string resources |
+| R1-9 | A probe trip also switches off the previous imported model; the notice does not say so | notice text |
+| R1-10 | `publish_tag` could clobber assets of any release except `latest` | tag must start with `models` |
+
+Not taken now: format arguments for the numbers repeated in strings (nit). The Stop-during-load race: the
+reviewer could not construct a leak (teardown runs on the same looper after `startCapture`).
+
+## Acceptance on the phone (becomes the checklist section)
+1. Download `yolo26n-pose_640.tflite` from the `models` release. In the app, stopped: **Import model** → pick the
+   file. The screen shows the file name and `640`.
+2. Start: the corner text shows the input size 640 and the imported mark. Note `ms` and `fps`.
+3. The same video as before: the `max` number for a medium-distance person is clearly higher than with the
+   built-in model, and the box flickers less.
+4. **Use built-in model** → Start: back to 416 and the old speed.
+5. Import a file that is not a model (a photo): refused with a reason, the previous model stays.
+6. Share diagnostics: `summary.txt` names the model source, file and input size.
+
+## Open items
+- Measured `ms` and `fps` at 640 on the phone decide the rectangular size for M1 (352x608 or 384x640).
+- The unmerged branch `fix-export-model-deps` holds a stricter export script (self-check against `predict()`,
+  raw-output goldens, public-domain fixture). Decide in M1 whether to bring it to `main`.
+- Duplicate boxes on one person were seen once (v0.1.37): dedupe in M1 or M3.
+
+## Progress
+| Task | Status | Commit | Notes |
+|---|---|---|---|
+| T1 | done; export run green 2026-11-13 | a8f943a, 0efa029 | script and workflow written; `export-model` dispatched with sizes=640 publish_tag=models: the pre-release `models` holds `yolo26n-pose_640.tflite` and `.json` |
+| T2 | done, android CI green | 35640c3, cfd0b67 | `core/modelimport/*` + import limits in `TrackerConfig`; guard text form `idle`/`pending:<stage>`/`tripped:<stage>`; KDoc of `ImportGuard` says who calls what |
+| T3 | done, android CI green | feda3bc | `ModelProbe.probe(file): ProbeResult` (CPU `CompiledModel`, never throws); `PoseDetectors.fromImported` + internal `verifyImportedFile` (missing: `FileNotFoundException`; length/hash: `ModelIntegrityException`) |
+| T4a | done, android CI green | cdad460, 9573472, f7bbcd4 | `app/modelimport/{ImportedModelStore,ModelImporter,ModelChoice,WorkerThreadCheck}`; accept order: delete old meta, rename model, rename new meta (never a meta for another file); a refused import keeps a `Tripped` guard, only an accept clears it; +55 `@Test`; `app/build.gradle.kts` got `unitTests.isReturnDefaultValues = true` (it was missing) |
+| T4b | done, android CI green | 8e4623e, f06cfda, 5b3bdee | `modelimport/{SessionModelLoader,ModelStatus}` (`ModelStatusHolder`, `ModelSource`, `ModelFallback`), `CaptureSession.loadModel`, `OverlayWarning.IMPORTED_MODEL_NOT_USED` (does not hide the dots), HUD `det 1/1 max 0.84 in 640 imp`, `summary.txt` model block; main-thread check injectable (`isReturnDefaultValues` removed); +61 `@Test` |
+| T5 | done, android CI green | a421689, 9040b7a | reducer: model block (`activeModel`, `importing`, `importResult`, `modelNotice`), events/effects per plan, `ControlStep.importUri` carries the picked uri; `control/ControlModelMapper` maps outcomes and stored state to pure data and every enum value to one string; `MainActivity` runs import/clear/read on `Dispatchers.IO`; an import lost when the activity dies is documented, no service |
+| T7 | done, android CI green | 5939cc0, 937368c | marks: ring (min 12 dp) + corner brackets by default; switch **Debug marks (box and body points)** persisted off the main thread, passed to the service as an Intent extra; +tests in `HeadRingTest`, `CornerBracketsTest`, `TrackerConfigTest`, `ControlReducerTest` |
+| T6 | done, docs only | see commit | `docs/ARCHITECTURE.md` §6.5, §6.7, §8, §12, §13, §15 and `docs/TEST_CHECKLIST.md` section "M0c — import a model, steadier marks" (7 blocks); the old "dot A/B" bullet now points at the **Debug marks** switch |
+| R1 | done, android CI green (run 68) | 5e52d77, 7c74acf, 1c86102, 8208279 | review fixes R1-1 … R1-10, written and pushed by a second session on 2026-11-14 (both sessions reviewed the same diff; the owner then kept this one as the lead). Its first CI runs were red: spotless (fixed in 8208279, committed from the owner's account) and one stale expectation (b0fd5b3, section "CI run 64") |
+| T8 | done, android CI green (run 68) | 4fb1ff7, e5d806f, 947b2c4 | only what R1 had not covered: the copy stops as soon as the header shows it is not TFLite (`CopyResult.NotTflite`; small files still say TOO_SMALL first); the first store access of a process deletes a leftover `import.tflite` unless an import runs; `newTempFile()` runs that app-start step itself (section "CI run 67"); a saved Debug-marks value that arrives after a toggle is ignored (`debugMarksTouched`); ARCHITECTURE §5 rows; checklist block 5 accepts both refusal texts |
+| T9 | done, android CI green (run 68) | cb5b68f | owner's option B: `ModelChoice.resolve(state, storedFileMatches)`; `ImportedModelStore.storedFileMatches` (length, then sha256; refuses the main thread; any failure is "no"); `SessionModelLoader(verifyStored)`; `ModelNoticeKind.PROBE_TRIP_MODEL_KEPT` + `model_notice_probe_trip_kept`, new text for `model_notice_guard_probe`; the first Start of the kept model lifts the trip; ARCHITECTURE §5, §8 |
+| — | done, android CI green (run 68) | efb4d1d | from the owner's review copy of `ControlScreen` (Gemini): only the failure text with a placeholder gets the details argument; no visible change. The same copy's re-wrapped lines in `MainActivity` were not taken (cosmetic, and the copy predated T9) |
+| R2 | done | | second android-reviewer pass on `431708e..efb4d1d` (everything after the first review): one critical (C1), three warnings, six suggestions; table "Review R2" |
+| T10 | done, android CI green (run 69) | 42e2729, 84e313e | C1: `ModelImporter` writes no marker before or after the probe while a trip is stored (`markerOwned`), so a process death in the probe of a new file still reads as the old trip; W1 store part: `ImportedModelStore.clear()` returns `false` and changes nothing while an import runs; +4 `@Test`; KDoc of `ImportGuard`, ARCHITECTURE §8 |
+
+`@Test` = 792 (718 before R1, 426 on `main`). Last green run: 43675096502 (#69) on `84e313e`.

@@ -12,6 +12,7 @@ import android.os.IBinder
 import androidx.core.app.ServiceCompat
 import androidx.core.content.IntentCompat
 import com.memo494.posetracker.core.TrackerConfig
+import com.memo494.posetracker.diagnostics.CaptureStatsHolder
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -91,7 +92,10 @@ class CaptureService : Service() {
             stopSelf()
             return
         }
-        val newSession = CaptureSession(this, projection, TrackerConfig(), ::onSessionFinished)
+        // The switch value travels in the Intent: the service must not read preferences on the main thread.
+        val config = TrackerConfig(debugMarks = intent.getBooleanExtra(EXTRA_DEBUG_MARKS, TrackerConfig.DEFAULT_DEBUG_MARKS))
+        CaptureStatsHolder.debugMarks = config.debugMarks
+        val newSession = CaptureSession(this, projection, config, ::onSessionFinished)
         session = newSession
         _running.value = true
         newSession.start()
@@ -127,6 +131,7 @@ class CaptureService : Service() {
         private const val ACTION_STOP = "com.memo494.posetracker.action.STOP_CAPTURE"
         private const val EXTRA_RESULT_CODE = "com.memo494.posetracker.extra.RESULT_CODE"
         private const val EXTRA_DATA = "com.memo494.posetracker.extra.DATA"
+        private const val EXTRA_DEBUG_MARKS = "com.memo494.posetracker.extra.DEBUG_MARKS"
 
         private val _running = MutableStateFlow(false)
 
@@ -145,16 +150,19 @@ class CaptureService : Service() {
         /**
          * Intent that starts a capture session with the consent result of `createScreenCaptureIntent`
          * ([resultCode] and [data] of the activity result). Send it with `startForegroundService`.
+         * [debugMarks] is the control screen's switch for this session (a missing extra means `false`).
          */
         fun startIntent(
             context: Context,
             resultCode: Int,
             data: Intent,
+            debugMarks: Boolean = TrackerConfig.DEFAULT_DEBUG_MARKS,
         ): Intent =
             Intent(context, CaptureService::class.java).apply {
                 action = ACTION_START
                 putExtra(EXTRA_RESULT_CODE, resultCode)
                 putExtra(EXTRA_DATA, data)
+                putExtra(EXTRA_DEBUG_MARKS, debugMarks)
             }
 
         /** Intent that stops the running capture session (the notification's Stop action). */

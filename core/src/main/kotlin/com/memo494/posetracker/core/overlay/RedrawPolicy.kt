@@ -18,8 +18,12 @@ object RedrawPolicy {
      * Whether the overlay must be redrawn for [current] given what [previous] drew.
      *
      * Redraw when the number of drawn people changed, when the warning changed, when any
-     * box edge or any drawn keypoint moved by more than [deadbandImg] along an axis, when a keypoint
-     * crossed [keypointMinScore], or when the HUD is [hudDue]. Detections count as empty while not shown
+     * box edge or the head point (centre of the head ring) moved by more than [deadbandImg] along an axis,
+     * or when the HUD is [hudDue]. With [keypointsDrawn] (debug marks) also when any drawn keypoint moved by
+     * more than [deadbandImg] or crossed [keypointMinScore]; without it the other keypoints are not on the
+     * screen, so their movement is not a change of the picture (only the head keypoints matter, through the
+     * head point). The ring radius follows the box width, so it is covered by the box edges.
+     * Detections count as empty while not shown
      * (so a shown/hidden change redraws only when it changes the number of drawn people; with none drawn
      * on both sides the flag alone changes nothing on screen), and a missing frame counts as an empty one.
      *
@@ -31,6 +35,8 @@ object RedrawPolicy {
      * @param currentWarning warning to show, if any.
      * @param deadbandImg smallest movement that counts, Img pixels (`redrawDeadbandPx / scale`).
      * @param keypointMinScore keypoints below this confidence are not drawn, unitless in [0, 1].
+     * @param keypointsDrawn whether every keypoint is drawn (`config.debugMarks`); `false` = only the head ring
+     *   and the box marks are drawn.
      * @param hudDue result of [hudDue] for this update.
      */
     fun shouldRedraw(
@@ -42,6 +48,7 @@ object RedrawPolicy {
         currentWarning: OverlayWarning?,
         deadbandImg: Float,
         keypointMinScore: Float,
+        keypointsDrawn: Boolean,
         hudDue: Boolean,
     ): Boolean {
         if (hudDue) return true
@@ -53,7 +60,7 @@ object RedrawPolicy {
         if (previous == null || current == null) return true
         if (previous.widthImg != current.widthImg || previous.heightImg != current.heightImg) return true
         for (i in 0 until previousCount) {
-            if (personChanged(previous.detections[i], current.detections[i], deadbandImg, keypointMinScore)) return true
+            if (personChanged(previous.detections[i], current.detections[i], deadbandImg, keypointMinScore, keypointsDrawn)) return true
         }
         return false
     }
@@ -80,11 +87,13 @@ object RedrawPolicy {
         current: PoseDetection,
         deadbandImg: Float,
         keypointMinScore: Float,
+        keypointsDrawn: Boolean,
     ): Boolean {
         if (moved(previous.boxLeftImg, current.boxLeftImg, deadbandImg)) return true
         if (moved(previous.boxTopImg, current.boxTopImg, deadbandImg)) return true
         if (moved(previous.boxRightImg, current.boxRightImg, deadbandImg)) return true
         if (moved(previous.boxBottomImg, current.boxBottomImg, deadbandImg)) return true
+        if (!keypointsDrawn) return headPointMoved(previous, current, deadbandImg, keypointMinScore)
         if (previous.keypointCount != current.keypointCount) return true
         for (k in 0 until previous.keypointCount) {
             val wasDrawn = previous.keypointScores[k] >= keypointMinScore
@@ -96,6 +105,15 @@ object RedrawPolicy {
         }
         return false
     }
+
+    private fun headPointMoved(
+        previous: PoseDetection,
+        current: PoseDetection,
+        deadbandImg: Float,
+        keypointMinScore: Float,
+    ): Boolean =
+        moved(previous.headXImg(keypointMinScore), current.headXImg(keypointMinScore), deadbandImg) ||
+            moved(previous.headYImg(keypointMinScore), current.headYImg(keypointMinScore), deadbandImg)
 
     private fun moved(
         before: Float,

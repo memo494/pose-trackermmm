@@ -1,5 +1,6 @@
 package com.memo494.posetracker.diagnostics
 
+import com.memo494.posetracker.modelimport.ModelStatus
 import com.memo494.posetracker.overlay.OverlayState
 
 /**
@@ -31,6 +32,7 @@ import com.memo494.posetracker.overlay.OverlayState
  * @property nanRawRows model output rows of the newest frame with a NaN score, count; negative = not measured.
  * @property headXImg head point of the first person of the newest frame with people, Img pixels; NaN = none yet.
  * @property headYImg see [headXImg].
+ * @property model the model of the session (source, file, fallback, input size); `null` = not known.
  */
 internal data class CaptureStats(
     val accelerator: String?,
@@ -56,4 +58,5 @@ internal data class CaptureStats(
     val nanRawRows: Int = OverlayState.NOT_MEASURED_COUNT,
     val headXImg: Float = Float.NaN,
     val headYImg: Float = Float.NaN,
+    val model: ModelStatus? = null,
 )

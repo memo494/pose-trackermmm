@@ -10,13 +10,18 @@ import com.memo494.posetracker.R
 import com.memo494.posetracker.core.TrackerConfig
 import com.memo494.posetracker.core.geometry.FitCenter
 import com.memo494.posetracker.core.model.PoseDetection
+import com.memo494.posetracker.core.overlay.CornerBrackets
+import com.memo494.posetracker.core.overlay.HeadRing
 import com.memo494.posetracker.detector.Accelerator
 import kotlin.math.max
 
 /**
  * The overlay: a plain `View` (no Compose) that draws the newest [OverlayState] over other apps
- * (ARCHITECTURE §6.5). Hollow head rings, thin boxes and small keypoint dots, plus a corner HUD strip
- * and a red banner when the detector runs on the CPU.
+ * (ARCHITECTURE §6.5). By default a hollow head ring (never smaller than `minHeadRingRadiusDp`) and
+ * short corner brackets per person: the overlay is part of the capture, so every other mark lowers the
+ * model's score of the person on the next frame and makes the marks blink. With `config.debugMarks` the
+ * full box and the keypoint dots are drawn too. A corner HUD strip and a red banner when the detector
+ * runs on the CPU are always drawn.
  *
  * It never schedules its own redraw: [OverlayStateHolder] calls `postInvalidateOnAnimation()` only when
  * the picture changed (Consult C1-B; the overlay is part of the capture, so a redraw loop would feed
@@ -41,12 +46,15 @@ class PoseOverlayView(
 ) : View(context) {
     private val density = resources.displayMetrics.density
     private val keypointRadiusPx = TrackerConfig.KEYPOINT_RADIUS_DP * density
+    private val minHeadRingRadiusPx = config.minHeadRingRadiusDp * density
     private val paddingPx = TrackerConfig.HUD_PADDING_DP * density
 
     private val boxPaint =
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
             strokeWidth = config.boxStrokeDp * density
+            // Square caps close the notch where the two strokes of a bracket meet at the box corner.
+            strokeCap = Paint.Cap.SQUARE
             color = context.getColor(R.color.overlay_box_green)
         }
     private val ringPaint =
@@ -141,10 +149,16 @@ class PoseOverlayView(
     ) {
         val leftView = fit.imgToViewX(person.boxLeftImg)
         val rightView = fit.imgToViewX(person.boxRightImg)
-        canvas.drawRect(leftView, fit.imgToViewY(person.boxTopImg), rightView, fit.imgToViewY(person.boxBottomImg), boxPaint)
+        val topView = fit.imgToViewY(person.boxTopImg)
+        val bottomView = fit.imgToViewY(person.boxBottomImg)
+        if (config.debugMarks) {
+            canvas.drawRect(leftView, topView, rightView, bottomView, boxPaint)
+        } else {
+            drawCornerBrackets(canvas, leftView, topView, rightView, bottomView)
+        }
 
         val minScore = config.keypointMinScore
-        val ringRadiusView = (rightView - leftView) * config.headRingRadiusRatio
+        val ringRadiusView = HeadRing.radius(rightView - leftView, config.headRingRadiusRatio, minHeadRingRadiusPx)
         canvas.drawCircle(
             fit.imgToViewX(person.headXImg(minScore)),
             fit.imgToViewY(person.headYImg(minScore)),
@@ -152,6 +166,7 @@ class PoseOverlayView(
             ringPaint,
         )
 
+        if (!config.debugMarks) return
         for (k in 0 until person.keypointCount) {
             if (person.keypointScores[k] >= minScore) {
                 canvas.drawCircle(
@@ -162,6 +177,34 @@ class PoseOverlayView(
                 )
             }
         }
+    }
+
+    /** Two strokes along the box edges at each of the four corners, each `boxCornerRatio` of its side long. */
+    private fun drawCornerBrackets(
+        canvas: Canvas,
+        leftView: Float,
+        topView: Float,
+        rightView: Float,
+        bottomView: Float,
+    ) {
+        val lengthX = CornerBrackets.length(rightView - leftView, config.boxCornerRatio)
+        val lengthY = CornerBrackets.length(bottomView - topView, config.boxCornerRatio)
+        drawCorner(canvas, leftView, topView, lengthX, lengthY)
+        drawCorner(canvas, rightView, topView, -lengthX, lengthY)
+        drawCorner(canvas, leftView, bottomView, lengthX, -lengthY)
+        drawCorner(canvas, rightView, bottomView, -lengthX, -lengthY)
+    }
+
+    /** One bracket: from the corner ([xView], [yView]) [dxView] along x and [dyView] along y (signed, inward). */
+    private fun drawCorner(
+        canvas: Canvas,
+        xView: Float,
+        yView: Float,
+        dxView: Float,
+        dyView: Float,
+    ) {
+        canvas.drawLine(xView, yView, xView + dxView, yView, boxPaint)
+        canvas.drawLine(xView, yView, xView, yView + dyView, boxPaint)
     }
 
     private fun drawHud(

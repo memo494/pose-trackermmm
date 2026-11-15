@@ -18,7 +18,8 @@ import com.memo494.posetracker.detector.Accelerator
  * @property timestampSource where the newest frame's timestamp came from; `null` = no frame yet.
  * @property dotsVisible `false` while the captured content is not visible
  *   (`onCapturedContentVisibilityChanged(false)`); detections are then not drawn.
- * @property warning why detections are hidden and the HUD shows a warning (fail closed); `null` = none.
+ * @property warning why the HUD shows a warning line; `null` = none. Most warnings hide the detections (fail
+ *   closed), see `OverlayWarning.hidesDetections`.
  * @property displayWidthPx width of the display the capture was planned for, pixels; 0 = unknown. The
  *   Img -> View mapping uses this, never a size the view reads itself, so the mapping always belongs to
  *   the same rotation as [captureWidthImg] x [captureHeightImg].
@@ -42,10 +43,12 @@ data class OverlayState(
     val displayHeightPx: Int = 0,
     val maxRawScore: Float = NOT_MEASURED_SCORE,
     val rawRowsAboveThreshold: Int = NOT_MEASURED_COUNT,
+    val modelInputSize: Int = 0,
+    val modelImported: Boolean = false,
 ) {
-    /** Whether [frame] may be drawn: content visible and no fail-closed warning. */
+    /** Whether [frame] may be drawn: content visible and no warning that hides the detections. */
     val detectionsShown: Boolean
-        get() = dotsVisible && warning == null
+        get() = dotsVisible && warning?.hidesDetections != true
 
     companion object {
         /** [maxRawScore] when the detector did not measure it. */

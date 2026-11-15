@@ -20,6 +20,11 @@ import com.memo494.posetracker.core.capture.CaptureSize
 import com.memo494.posetracker.detector.PoseDetector
 import com.memo494.posetracker.detector.PoseDetectors
 import com.memo494.posetracker.diagnostics.CaptureStatsHolder
+import com.memo494.posetracker.modelimport.ImportedModelStore
+import com.memo494.posetracker.modelimport.LoadedModel
+import com.memo494.posetracker.modelimport.ModelSource
+import com.memo494.posetracker.modelimport.ModelStatusHolder
+import com.memo494.posetracker.modelimport.SessionModelLoader
 import com.memo494.posetracker.overlay.OverlayWindow
 import java.util.concurrent.TimeUnit
 
@@ -225,15 +230,11 @@ internal class CaptureSession(
 
     private fun startCapture() {
         if (teardown.isStarted) return
-        val newDetector =
-            try {
-                PoseDetectors.fromAssets(context, config)
-            } catch (e: Throwable) {
-                // No detector is not fatal: the HUD shows DETECTOR_UNAVAILABLE and frames are still drained.
-                CaptureLog.log("detector unavailable", e)
-                null
-            }
+        val loaded = loadModel()
+        val newDetector = loaded.detector
         detector = newDetector
+        ModelStatusHolder.publish(loaded.status())
+        CaptureLog.log(modelLogLine(loaded), null)
         pipeline =
             FramePipeline(
                 newDetector,
@@ -241,11 +242,34 @@ internal class CaptureSession(
                 NanoClock { System.nanoTime() },
                 overlayWindow.stateHolder::publish,
                 CaptureLog::log,
+                modelImported = loaded.source == ModelSource.IMPORTED,
+                importedModelNotUsed = loaded.importedModelNotUsed,
             )
         displayManager?.registerDisplayListener(displayListener, captureHandler)
         applyGeometry()
         captureHandler?.postDelayed(hudTick, hudIntervalMs)
     }
+
+    /**
+     * Capture thread. Chooses and loads the model of this session: the imported one when it is present and not
+     * blocked, else the built-in one (see [SessionModelLoader]). A session without a detector is not fatal: the HUD
+     * shows DETECTOR_UNAVAILABLE and frames are still drained. The detector belongs to this thread and is closed
+     * by the teardown.
+     */
+    private fun loadModel(): LoadedModel {
+        val store = ImportedModelStore(context)
+        return SessionModelLoader(
+            readState = store::state,
+            setGuard = store::setGuard,
+            loadImported = { meta -> PoseDetectors.fromImported(context, store.modelFileFor(meta), meta, config) },
+            loadBuiltIn = { PoseDetectors.fromAssets(context, config) },
+            log = CaptureLog::log,
+            verifyStored = store::storedFileMatches,
+        ).load()
+    }
+
+    private fun modelLogLine(loaded: LoadedModel): String =
+        "model: ${loaded.source}, input ${loaded.detector?.inputSize ?: 0}, fallback ${loaded.fallback ?: "none"}"
 
     /**
      * Capture thread. Brings the reader and the virtual display in line with the display and content size.

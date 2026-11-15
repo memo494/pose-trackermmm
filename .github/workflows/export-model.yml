@@ -4,6 +4,15 @@ name: export-model
 # so this runs after the M0a PR is merged (ARCHITECTURE §8, BUILD_PLAN M0a step 8).
 on:
   workflow_dispatch:
+    inputs:
+      sizes:
+        description: "Download-only export, e.g. 640 (comma-separated). Empty = the normal 320/416 export + PR."
+        type: string
+        default: ""
+      publish_tag:
+        description: "With sizes: release tag to upload the files to (created as a pre-release if missing). Must start with 'models' (for example 'models'); never 'latest'."
+        type: string
+        default: ""
 
 permissions:
   contents: write
@@ -12,6 +21,7 @@ permissions:
 jobs:
   export:
     runs-on: ubuntu-latest # x86_64
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -20,17 +30,21 @@ jobs:
           python-version: "3.12"
 
       - name: Install export deps
+        if: ${{ inputs.sizes == '' }}
         run: |
           python -m pip install --upgrade pip
           pip install -r tools/requirements.txt
 
       - name: Export yolo26n-pose (320, 416) + goldens
+        if: ${{ inputs.sizes == '' }}
         run: python tools/export_model.py
 
       - name: Freeze resolved deps
+        if: ${{ inputs.sizes == '' }}
         run: pip freeze > tools/requirements.lock
 
       - name: Open PR with the exported model
+        if: ${{ inputs.sizes == '' }}
         uses: peter-evans/create-pull-request@v6
         with:
           branch: model-export
@@ -46,3 +60,69 @@ jobs:
           add-paths: |
             model/**
             tools/requirements.lock
+
+      # ---- Download-only export (sizes set): no PR, nothing under model/ (M0c D5) ----
+      - name: Check inputs
+        if: ${{ inputs.sizes != '' || inputs.publish_tag != '' }}
+        env:
+          SIZES: ${{ inputs.sizes }}
+          TAG: ${{ inputs.publish_tag }}
+        run: |
+          if [ -z "$SIZES" ]; then
+            echo "publish_tag needs sizes" >&2
+            exit 1
+          fi
+          if [ -n "$TAG" ]; then
+            if [ "$TAG" = "latest" ]; then
+              echo "publish_tag must not be 'latest' (the rolling APK release)" >&2
+              exit 1
+            fi
+            if ! [[ "$TAG" =~ ^models[A-Za-z0-9._-]*$ ]]; then
+              echo "publish_tag must start with 'models' and may only contain A-Z a-z 0-9 . _ -" >&2
+              exit 1
+            fi
+          fi
+
+      - name: Install pinned export toolchain
+        if: ${{ inputs.sizes != '' }}
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r tools/requirements.lock
+
+      - name: Export and check models (download only)
+        if: ${{ inputs.sizes != '' }}
+        env:
+          SIZES: ${{ inputs.sizes }}
+        run: python tools/export_model.py --sizes "$SIZES" --out dist-models
+
+      - name: List files in the job summary
+        if: ${{ inputs.sizes != '' }}
+        run: |
+          {
+            echo "### Exported models"
+            echo '```'
+            (cd dist-models && sha256sum -- *)
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload models as a workflow artifact
+        if: ${{ inputs.sizes != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: models
+          path: dist-models/
+          if-no-files-found: error
+
+      - name: Publish models to the release
+        if: ${{ inputs.sizes != '' && inputs.publish_tag != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.publish_tag }}
+        run: |
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --prerelease --latest=false --title "Models" \
+              --notes "Model files to import in the app, built by export-model.yml." \
+              --target "$GITHUB_SHA"
+          fi
+          gh release upload "$TAG" dist-models/* --clobber

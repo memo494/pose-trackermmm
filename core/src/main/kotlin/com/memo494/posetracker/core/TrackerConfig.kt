@@ -26,9 +26,26 @@ package com.memo494.posetracker.core
  * @property hudTextSizeSp text size of the debug HUD, in sp.
  * @property headRingRadiusRatio radius of the head ring as a fraction of the person box width
  *   (unitless).
- * @property modelInputSize side of the square model input, in pixels (Mdl space); only
- *   [MODEL_INPUT_SIZE_SMALL] (320) or [MODEL_INPUT_SIZE_LARGE] (416) is accepted because only those
- *   two model files are shipped.
+ * @property minHeadRingRadiusDp smallest radius of the head ring, in dp; the ring is
+ *   `max(headRingRadiusRatio x box width, minHeadRingRadiusDp)` so far people still get a ring that
+ *   is a real mark (a tiny ring does not keep the model's score on the next frame).
+ * @property boxCornerRatio length of each corner-bracket stroke as a fraction of the box side it runs
+ *   along (unitless, in the open interval (0, 0.5), so the two strokes of one side never meet).
+ * @property debugMarks `false` (default): only the head ring and the corner brackets are drawn, because
+ *   the overlay is part of the capture and every extra mark lowers the model's score of the person on the
+ *   next frame. `true`: also the full box and the keypoint dots, for debugging.
+ * @property modelInputSize side of the square model input, in pixels (Mdl space), of the BUILT-IN
+ *   models; only [MODEL_INPUT_SIZE_SMALL] (320) or [MODEL_INPUT_SIZE_LARGE] (416) is accepted because only
+ *   those two model files are shipped. An imported model brings its own size, limited by
+ *   [importMinInputSize]..[importMaxInputSize] (it is not described by this field).
+ * @property importMinBytes smallest accepted size of an imported model file, in bytes (a smaller file
+ *   cannot be a pose model).
+ * @property importMaxBytes largest accepted size of an imported model file, in bytes (the copy into
+ *   app storage is cut off at this size).
+ * @property importMinInputSize smallest accepted side of an imported model's square input, in pixels
+ *   (Mdl space); a multiple of [IMPORT_INPUT_SIZE_STEP].
+ * @property importMaxInputSize largest accepted side of an imported model's square input, in pixels
+ *   (Mdl space); a multiple of [IMPORT_INPUT_SIZE_STEP].
  */
 data class TrackerConfig(
     val scoreThreshold: Float = DEFAULT_SCORE_THRESHOLD,
@@ -42,7 +59,14 @@ data class TrackerConfig(
     val keypointMinScore: Float = DEFAULT_KEYPOINT_MIN_SCORE,
     val hudTextSizeSp: Float = DEFAULT_HUD_TEXT_SIZE_SP,
     val headRingRadiusRatio: Float = DEFAULT_HEAD_RING_RADIUS_RATIO,
+    val minHeadRingRadiusDp: Float = DEFAULT_MIN_HEAD_RING_RADIUS_DP,
+    val boxCornerRatio: Float = DEFAULT_BOX_CORNER_RATIO,
+    val debugMarks: Boolean = DEFAULT_DEBUG_MARKS,
     val modelInputSize: Int = DEFAULT_MODEL_INPUT_SIZE,
+    val importMinBytes: Long = DEFAULT_IMPORT_MIN_BYTES,
+    val importMaxBytes: Long = DEFAULT_IMPORT_MAX_BYTES,
+    val importMinInputSize: Int = DEFAULT_IMPORT_MIN_INPUT_SIZE,
+    val importMaxInputSize: Int = DEFAULT_IMPORT_MAX_INPUT_SIZE,
 ) {
     init {
         require(scoreThreshold in MIN_SCORE_THRESHOLD..MAX_SCORE_THRESHOLD) {
@@ -80,8 +104,37 @@ data class TrackerConfig(
             "headRingRadiusRatio $headRingRadiusRatio outside " +
                 "[$MIN_HEAD_RING_RADIUS_RATIO, $MAX_HEAD_RING_RADIUS_RATIO]"
         }
+        require(minHeadRingRadiusDp in MIN_MIN_HEAD_RING_RADIUS_DP..MAX_MIN_HEAD_RING_RADIUS_DP) {
+            "minHeadRingRadiusDp $minHeadRingRadiusDp outside " +
+                "[$MIN_MIN_HEAD_RING_RADIUS_DP, $MAX_MIN_HEAD_RING_RADIUS_DP]"
+        }
+        require(boxCornerRatio > BOX_CORNER_RATIO_LOWER_EXCLUSIVE && boxCornerRatio < BOX_CORNER_RATIO_UPPER_EXCLUSIVE) {
+            "boxCornerRatio $boxCornerRatio outside ($BOX_CORNER_RATIO_LOWER_EXCLUSIVE, $BOX_CORNER_RATIO_UPPER_EXCLUSIVE)"
+        }
         require(modelInputSize == MODEL_INPUT_SIZE_SMALL || modelInputSize == MODEL_INPUT_SIZE_LARGE) {
             "modelInputSize $modelInputSize is neither $MODEL_INPUT_SIZE_SMALL nor $MODEL_INPUT_SIZE_LARGE"
+        }
+        require(importMinBytes in MIN_IMPORT_BYTES_LIMIT..MAX_IMPORT_BYTES_LIMIT) {
+            "importMinBytes $importMinBytes outside [$MIN_IMPORT_BYTES_LIMIT, $MAX_IMPORT_BYTES_LIMIT]"
+        }
+        require(importMaxBytes in MIN_IMPORT_BYTES_LIMIT..MAX_IMPORT_BYTES_LIMIT) {
+            "importMaxBytes $importMaxBytes outside [$MIN_IMPORT_BYTES_LIMIT, $MAX_IMPORT_BYTES_LIMIT]"
+        }
+        require(importMinBytes <= importMaxBytes) {
+            "importMinBytes $importMinBytes is above importMaxBytes $importMaxBytes"
+        }
+        require(importMinInputSize in MIN_IMPORT_INPUT_SIZE_LIMIT..MAX_IMPORT_INPUT_SIZE_LIMIT) {
+            "importMinInputSize $importMinInputSize outside [$MIN_IMPORT_INPUT_SIZE_LIMIT, $MAX_IMPORT_INPUT_SIZE_LIMIT]"
+        }
+        require(importMaxInputSize in MIN_IMPORT_INPUT_SIZE_LIMIT..MAX_IMPORT_INPUT_SIZE_LIMIT) {
+            "importMaxInputSize $importMaxInputSize outside [$MIN_IMPORT_INPUT_SIZE_LIMIT, $MAX_IMPORT_INPUT_SIZE_LIMIT]"
+        }
+        require(importMinInputSize <= importMaxInputSize) {
+            "importMinInputSize $importMinInputSize is above importMaxInputSize $importMaxInputSize"
+        }
+        require(importMinInputSize % IMPORT_INPUT_SIZE_STEP == 0 && importMaxInputSize % IMPORT_INPUT_SIZE_STEP == 0) {
+            "importMinInputSize $importMinInputSize and importMaxInputSize $importMaxInputSize " +
+                "must be multiples of $IMPORT_INPUT_SIZE_STEP"
         }
     }
 
@@ -194,6 +247,27 @@ data class TrackerConfig(
         /** Highest accepted [headRingRadiusRatio]. */
         const val MAX_HEAD_RING_RADIUS_RATIO = 0.4f
 
+        /** Default [minHeadRingRadiusDp], in dp. */
+        const val DEFAULT_MIN_HEAD_RING_RADIUS_DP = 12.0f
+
+        /** Lowest accepted [minHeadRingRadiusDp], in dp (0 = no minimum). */
+        const val MIN_MIN_HEAD_RING_RADIUS_DP = 0.0f
+
+        /** Highest accepted [minHeadRingRadiusDp], in dp. */
+        const val MAX_MIN_HEAD_RING_RADIUS_DP = 48.0f
+
+        /** Default [boxCornerRatio]: unitless fraction of the box side. */
+        const val DEFAULT_BOX_CORNER_RATIO = 0.18f
+
+        /** [boxCornerRatio] must be above this (exclusive). */
+        const val BOX_CORNER_RATIO_LOWER_EXCLUSIVE = 0.0f
+
+        /** [boxCornerRatio] must be below this (exclusive): at 0.5 the two strokes of one side would meet. */
+        const val BOX_CORNER_RATIO_UPPER_EXCLUSIVE = 0.5f
+
+        /** Default [debugMarks]: the box and the keypoint dots are off. */
+        const val DEFAULT_DEBUG_MARKS = false
+
         /** Small model input side, in pixels (Mdl): the thermal fallback size. */
         const val MODEL_INPUT_SIZE_SMALL = 320
 
@@ -275,7 +349,70 @@ data class TrackerConfig(
         /** Length, in characters, of a SHA-256 digest written as lowercase hex. */
         const val SHA256_HEX_LENGTH = 64
 
+        /** Leading characters of a model's SHA-256 shown in diagnostics and on screen (a short, readable id). */
+        const val SHA256_SHORT_CHARS = 12
+
         /** Leading characters of the model's SHA-256 that go into the staged file name (`<base>-<prefix>.<ext>`). */
         const val STAGED_MODEL_SHA_PREFIX_LENGTH = 16
+
+        /** Default [importMinBytes]: 100 000 bytes; the smallest real pose model is a few megabytes. */
+        const val DEFAULT_IMPORT_MIN_BYTES = 100_000L
+
+        /** Default [importMaxBytes]: 200 MiB, in bytes. */
+        const val DEFAULT_IMPORT_MAX_BYTES = 209_715_200L
+
+        /** Lowest accepted [importMinBytes] / [importMaxBytes], in bytes. */
+        const val MIN_IMPORT_BYTES_LIMIT = 1L
+
+        /** Highest accepted [importMinBytes] / [importMaxBytes]: 1 GiB, in bytes (also the sanity cap of stored metadata). */
+        const val MAX_IMPORT_BYTES_LIMIT = 1_073_741_824L
+
+        /** Default [importMinInputSize], in pixels (Mdl). */
+        const val DEFAULT_IMPORT_MIN_INPUT_SIZE = 160
+
+        /** Default [importMaxInputSize], in pixels (Mdl). */
+        const val DEFAULT_IMPORT_MAX_INPUT_SIZE = 1280
+
+        /** Lowest accepted [importMinInputSize] / [importMaxInputSize], in pixels (Mdl). */
+        const val MIN_IMPORT_INPUT_SIZE_LIMIT = 32
+
+        /** Highest accepted [importMinInputSize] / [importMaxInputSize], in pixels (Mdl; also the sanity cap of stored metadata). */
+        const val MAX_IMPORT_INPUT_SIZE_LIMIT = 4096
+
+        /** An imported model's input side must be a multiple of this, in pixels (the largest YOLO stride). */
+        const val IMPORT_INPUT_SIZE_STEP = 32
+
+        /**
+         * Most rows (`N`) of an imported model's `[1, N, 57]` output: the vendored `PoseEstimator` treats 57
+         * columns as an end-to-end head only up to its `END_TO_END_MAX_ROWS` (300, the Ultralytics default
+         * `max_det`); a model with more rows would import and then fail at every Start. Also the sanity cap
+         * of stored metadata.
+         */
+        const val IMPORT_MAX_OUTPUT_ROWS = 300
+
+        /** Longest stored display name of an imported model, in characters. */
+        const val IMPORT_NAME_MAX_CHARS = 64
+
+        /** Display name used when a picked file's name has nothing usable left after cleaning. */
+        const val IMPORT_FALLBACK_NAME = "model.tflite"
+
+        /** Box values per output row of a pose model: x, y, w, h (or x1, y1, x2, y2). */
+        const val POSE_BOX_VALUES = 4
+
+        /** Score values per output row of a pose model: the person confidence. */
+        const val POSE_SCORE_VALUES = 1
+
+        /** Class values per output row of a pose model: the class index. */
+        const val POSE_CLASS_VALUES = 1
+
+        /** Keypoints per person in the COCO pose layout. */
+        const val POSE_KEYPOINT_COUNT = 17
+
+        /** Values per keypoint: x, y and confidence. */
+        const val POSE_VALUES_PER_KEYPOINT = 3
+
+        /** Columns per output row of an accepted pose model: 4 box + 1 score + 1 class + 17 * 3 keypoint values = 57. */
+        const val POSE_OUTPUT_COLUMNS =
+            POSE_BOX_VALUES + POSE_SCORE_VALUES + POSE_CLASS_VALUES + POSE_KEYPOINT_COUNT * POSE_VALUES_PER_KEYPOINT
     }
 }

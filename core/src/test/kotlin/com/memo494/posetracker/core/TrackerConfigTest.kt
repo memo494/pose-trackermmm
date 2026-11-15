@@ -18,6 +18,9 @@ class TrackerConfigTest {
         assertThat(config.keypointMinScore).isEqualTo(0.5f)
         assertThat(config.hudTextSizeSp).isEqualTo(12f)
         assertThat(config.headRingRadiusRatio).isEqualTo(0.12f)
+        assertThat(config.minHeadRingRadiusDp).isEqualTo(12f)
+        assertThat(config.boxCornerRatio).isEqualTo(0.18f)
+        assertThat(config.debugMarks).isFalse()
     }
 
     @Test
@@ -133,6 +136,42 @@ class TrackerConfigTest {
     }
 
     @Test
+    fun minHeadRingRadiusDp_negativeOrAboveTheMaximum_isRejected() {
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(minHeadRingRadiusDp = -0.5f) }
+        assertThrows(IllegalArgumentException::class.java) {
+            TrackerConfig(minHeadRingRadiusDp = TrackerConfig.MAX_MIN_HEAD_RING_RADIUS_DP + 1f)
+        }
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(minHeadRingRadiusDp = Float.NaN) }
+    }
+
+    @Test
+    fun minHeadRingRadiusDp_atItsBounds_isAccepted() {
+        assertThat(TrackerConfig(minHeadRingRadiusDp = 0f).minHeadRingRadiusDp).isEqualTo(0f)
+        val high = TrackerConfig(minHeadRingRadiusDp = TrackerConfig.MAX_MIN_HEAD_RING_RADIUS_DP)
+        assertThat(high.minHeadRingRadiusDp).isEqualTo(TrackerConfig.MAX_MIN_HEAD_RING_RADIUS_DP)
+    }
+
+    @Test
+    fun boxCornerRatio_zeroNegativeHalfOrMore_isRejected() {
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(boxCornerRatio = 0f) }
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(boxCornerRatio = -0.1f) }
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(boxCornerRatio = 0.5f) }
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(boxCornerRatio = 0.9f) }
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(boxCornerRatio = Float.NaN) }
+    }
+
+    @Test
+    fun boxCornerRatio_justInsideTheOpenInterval_isAccepted() {
+        assertThat(TrackerConfig(boxCornerRatio = 0.01f).boxCornerRatio).isEqualTo(0.01f)
+        assertThat(TrackerConfig(boxCornerRatio = 0.49f).boxCornerRatio).isEqualTo(0.49f)
+    }
+
+    @Test
+    fun debugMarks_canBeTurnedOn() {
+        assertThat(TrackerConfig(debugMarks = true).debugMarks).isTrue()
+    }
+
+    @Test
     fun overlayAdditions_atTheirBounds_areAccepted() {
         val low =
             TrackerConfig(
@@ -174,6 +213,87 @@ class TrackerConfigTest {
                 TrackerConfig(modelInputSize = size)
             }
         }
+    }
+
+    @Test
+    fun importLimits_haveTheDocumentedDefaults() {
+        val config = TrackerConfig()
+
+        assertThat(config.importMinBytes).isEqualTo(100_000L)
+        assertThat(config.importMaxBytes).isEqualTo(200L * 1024L * 1024L)
+        assertThat(config.importMinInputSize).isEqualTo(160)
+        assertThat(config.importMaxInputSize).isEqualTo(1280)
+        assertThat(TrackerConfig.IMPORT_INPUT_SIZE_STEP).isEqualTo(32)
+    }
+
+    @Test
+    fun importLimits_doNotChangeTheBuiltInModelSizes() {
+        assertThat(TrackerConfig().modelInputSize).isEqualTo(416)
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(modelInputSize = 640) }
+    }
+
+    @Test
+    fun importLimits_atTheirBounds_areAccepted() {
+        val low =
+            TrackerConfig(
+                importMinBytes = TrackerConfig.MIN_IMPORT_BYTES_LIMIT,
+                importMaxBytes = TrackerConfig.MIN_IMPORT_BYTES_LIMIT,
+                importMinInputSize = TrackerConfig.MIN_IMPORT_INPUT_SIZE_LIMIT,
+                importMaxInputSize = TrackerConfig.MIN_IMPORT_INPUT_SIZE_LIMIT,
+            )
+        val high =
+            TrackerConfig(
+                importMinBytes = TrackerConfig.MAX_IMPORT_BYTES_LIMIT,
+                importMaxBytes = TrackerConfig.MAX_IMPORT_BYTES_LIMIT,
+                importMinInputSize = TrackerConfig.MAX_IMPORT_INPUT_SIZE_LIMIT,
+                importMaxInputSize = TrackerConfig.MAX_IMPORT_INPUT_SIZE_LIMIT,
+            )
+
+        assertThat(low.importMaxInputSize).isEqualTo(TrackerConfig.MIN_IMPORT_INPUT_SIZE_LIMIT)
+        assertThat(high.importMaxBytes).isEqualTo(TrackerConfig.MAX_IMPORT_BYTES_LIMIT)
+    }
+
+    @Test
+    fun importBytes_outsideTheirBounds_areRejected() {
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(importMinBytes = 0L) }
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(importMinBytes = -1L) }
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(importMaxBytes = 0L) }
+        assertThrows(IllegalArgumentException::class.java) {
+            TrackerConfig(importMaxBytes = TrackerConfig.MAX_IMPORT_BYTES_LIMIT + 1L)
+        }
+    }
+
+    @Test
+    fun importBytes_minAboveMax_isRejected() {
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(importMinBytes = 200L, importMaxBytes = 199L) }
+    }
+
+    @Test
+    fun importInputSize_outsideItsBounds_isRejected() {
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(importMinInputSize = 0) }
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(importMinInputSize = -32) }
+        assertThrows(IllegalArgumentException::class.java) {
+            TrackerConfig(importMaxInputSize = TrackerConfig.MAX_IMPORT_INPUT_SIZE_LIMIT + TrackerConfig.IMPORT_INPUT_SIZE_STEP)
+        }
+    }
+
+    @Test
+    fun importInputSize_notAMultipleOfTheStep_isRejected() {
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(importMinInputSize = 161) }
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(importMaxInputSize = 1281) }
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(importMinInputSize = 100, importMaxInputSize = 1280) }
+    }
+
+    @Test
+    fun importInputSize_minAboveMax_isRejected() {
+        assertThrows(IllegalArgumentException::class.java) {
+            TrackerConfig(importMinInputSize = 640, importMaxInputSize = 608)
+        }
+    }
+
+    @Test
+    fun poseOutputColumns_are4Plus1Plus1Plus17Times3() {
+        assertThat(TrackerConfig.POSE_OUTPUT_COLUMNS).isEqualTo(4 + 1 + 1 + 17 * 3)
     }
 
     @Test

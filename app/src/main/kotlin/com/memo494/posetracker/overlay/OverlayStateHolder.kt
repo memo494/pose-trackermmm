@@ -78,6 +78,7 @@ class OverlayStateHolder(
                 currentWarning = state.warning,
                 deadbandImg = deadbandImg(),
                 keypointMinScore = config.keypointMinScore,
+                keypointsDrawn = config.debugMarks,
                 hudDue = hudDue,
             )
         if (redraw) {

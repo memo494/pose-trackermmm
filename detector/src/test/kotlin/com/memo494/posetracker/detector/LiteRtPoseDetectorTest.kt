@@ -143,6 +143,29 @@ class LiteRtPoseDetectorTest {
     }
 
     @Test
+    fun importedSizeIsReportedWhenTheEngineAgrees() {
+        val engine = FakeEngine(inputSize = IMPORTED_INPUT_SIZE)
+
+        val detector = LiteRtPoseDetector.create(RecordingFactory { engine }, THRESHOLD, IMPORTED_INPUT_SIZE)
+
+        assertThat(detector.inputSize).isEqualTo(IMPORTED_INPUT_SIZE)
+        assertThat(engine.closeCalls).isEqualTo(0)
+    }
+
+    @Test
+    fun engineSmallerThanTheImportedSizeIsClosedAndRefused() {
+        val engine = FakeEngine(inputSize = INPUT_SIZE)
+
+        val thrown =
+            assertThrows(IllegalStateException::class.java) {
+                LiteRtPoseDetector.create(RecordingFactory { engine }, THRESHOLD, IMPORTED_INPUT_SIZE)
+            }
+
+        assertThat(thrown).hasMessageThat().contains("$IMPORTED_INPUT_SIZE")
+        assertThat(engine.closeCalls).isEqualTo(1)
+    }
+
+    @Test
     fun inputSizeAndInferenceTimeComeFromTheEngine() {
         val engine = FakeEngine(lastInferenceMs = 0f)
         val detector = detectorOver(engine)
@@ -299,6 +322,7 @@ class LiteRtPoseDetectorTest {
     private companion object {
         const val INPUT_SIZE = 416
         const val WRONG_INPUT_SIZE = 320
+        const val IMPORTED_INPUT_SIZE = 640
         const val THRESHOLD = 0.15f
         const val INFERENCE_MS = 12.5f
         const val FRAME_WIDTH = 8

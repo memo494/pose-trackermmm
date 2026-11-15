@@ -220,4 +220,40 @@ class OverlayStateHolderTest {
         assertThat(holder.latest()).isSameInstanceAs(newest)
         assertThat(redraws).isEqualTo(0)
     }
+
+    @Test
+    fun theImportedModelNote_isUrgentAndLeavesTheDetectionsShown() {
+        holder.publish(state())
+        val noted = state().copy(warning = OverlayWarning.IMPORTED_MODEL_NOT_USED)
+
+        holder.publish(noted)
+
+        assertThat(noted.detectionsShown).isTrue()
+        assertThat(holder.hud().warning).isEqualTo(OverlayWarning.IMPORTED_MODEL_NOT_USED)
+        assertThat(redraws).isEqualTo(2)
+    }
+
+    @Test
+    fun failClosedWarnings_stillHideTheDetections() {
+        assertThat(state().copy(warning = OverlayWarning.CAPTURE_NOT_DISPLAY_SIZED).detectionsShown).isFalse()
+        assertThat(state().copy(warning = OverlayWarning.DETECTOR_UNAVAILABLE).detectionsShown).isFalse()
+        assertThat(state().copy(dotsVisible = false).detectionsShown).isFalse()
+    }
+
+    @Test
+    fun theModelFields_reachTheHudWhenTheyChange() {
+        holder.publish(state())
+        nowNs += intervalNs
+
+        holder.publish(state().copy(modelInputSize = 640, modelImported = true))
+
+        assertThat(holder.hud().modelInputSize).isEqualTo(640)
+        assertThat(holder.hud().modelImported).isTrue()
+    }
+
+    @Test
+    fun theEmptyState_knowsNoModel() {
+        assertThat(OverlayState.EMPTY.modelInputSize).isEqualTo(0)
+        assertThat(OverlayState.EMPTY.modelImported).isFalse()
+    }
 }

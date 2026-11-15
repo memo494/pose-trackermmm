@@ -61,3 +61,8 @@ Left in place although unused by pose (harmless, would only add diff noise): `Im
 - **`nmsPoseDetections` second-pass threshold** is hard-coded to 0.25 (above our 0.15 score threshold), so detections
   between 0.15 and 0.25 are dropped in the classic layout. Revisit with the tuning in M1.
 - **Input source.** `prepareBitmapForModel` needs a `Bitmap` of exact width (no row stride padding); the adapter provides it.
+- **`readFloat()` allocates (found in M1a).** LiteRT Kotlin `TensorBuffer.readFloat()` returns a new `FloatArray` on
+  every call (JNI `NewFloatArray` in `litert_tensor_buffer_jni.cc`; `TensorBuffer.kt` has no read-into overload).
+  The readback of the 300x57 output (17 100 floats, 68 KB per frame) in `LiteRtModel.run` therefore cannot be made
+  allocation-free with the bundled runtime. The decoder's own temporaries (lists, `RectF`, `Pair`s, `Keypoints`) are
+  removed in M1b; this one array stays and is known, not a bug of ours.

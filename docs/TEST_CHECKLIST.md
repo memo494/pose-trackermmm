@@ -200,15 +200,68 @@ Stop and Start, or the person still blinks as before: Share diagnostics and say 
 
 ---
 
+## M1a — rectangular models and timing numbers
+
+Do M0c first (the app must already work and you must know how to import a model). Blocks 2 and 3 use the same
+video each time: pick one video with people at medium distance, hold the phone **sideways (landscape)**, and
+play it from the same point every time.
+
+### 1. The stored 640 model still works
+1. Install the newest build from the `latest` release. If you still have the 640 model imported, do not import it
+   again.
+2. Press **Start** (allow the screen recording again) and look at the line that starts with `det`.
+
+**Pass:** the `det` line ends with **`in 640 imp`** and rings appear on the people.
+**If it fails:** the model line says **Built-in (416)** or the `det` line shows a warning: Share diagnostics.
+
+### 2. Get and import a wide model
+1. On the phone, open the project's **Releases** page on GitHub, open the release named **Models** (tag `models`)
+   and download **`yolo26n-pose_832x384.tflite`** (about 12 MB). Try this one first. The release also has
+   `yolo26n-pose_640x288.tflite` and `yolo26n-pose_960x448.tflite` for block 3.
+2. Open Pose Tracker (status **Stopped**), press **Import model** and pick that file.
+3. Press **Start**, turn the phone to landscape and play the video.
+
+**Pass:** the line says **Imported yolo26n-pose_832x384.tflite**, the `det` line ends with **`in 832x384 imp`**,
+the line above it shows **GPU**, and there is no red banner.
+**If it fails:** the import is refused, the `det` line still says `in 640 imp` or `in 416`, or the line above says
+**CPU**: Share diagnostics and write down the file name you imported.
+
+A wide model is for landscape. Held upright (portrait) people are **smaller** for it than with 640. That is
+expected, not a fault: in portrait switch back to the 640 model or **Use built-in model**.
+
+### 3. Compare the models on the same video
+1. Landscape, same video, same starting point. For each model below, press **Stop**, import it, **Start**, play
+   the video, and write down three numbers from the corner text: **`ms`** and **`fps`** (the line above `det`)
+   and **`max`** (the `det` line) for the same person.
+2. Do this for **640** (the one you had) and **832x384**, and if you like also **960x448** and **640x288**.
+3. Send all the sets of numbers in one message (model, `ms`, `fps`, `max`).
+
+**Pass:** you have `ms`, `fps` and `max` for at least 640 and 832x384. (Estimates only: 640x288 and 832x384 should
+be faster than 640 and 960x448 about as fast; the numbers you write down are the real answer.)
+**If it fails:** a model runs on **CPU** or shows a red banner: that is a result, write down which size and send
+Share diagnostics.
+
+### 4. The timing numbers in the report
+1. After a run of at least a minute, press **Share diagnostics** and open `summary.txt` in the zip (or send it to
+   the agent).
+
+**Pass:** `summary.txt` has the lines `timingSamples`, `copyMsP50` / `copyMsP95`, `preMs…`, `inferMs…`, `postMs…`,
+`frameMs…`, `resultAgeMs…` (each with `P50` and `P95`) and `thermalStatus` and `thermalHeadroom`, with numbers
+in them (`n/a` is allowed only where the phone cannot tell, for example `thermalHeadroom`). `modelInputSize=` says
+`832x384` for the wide model. The corner text looks the same as before.
+**If it fails:** the lines are missing, or everything says `n/a` after a minute of running: tell the agent.
+
+---
+
 ## What to send back
 1. The **diagnostics zip** (press **Share diagnostics** right after the problem, not hours later).
 2. **One sentence** about what was on the screen (which app, how many people, what you did).
-3. The **block number** of this checklist that failed (for example "block 5"; for the M0c section say "M0c block 5").
+3. The **block number** of this checklist that failed (for example "block 5"; for the M0c section say "M0c block 5", for this one "M1a block 3").
 4. A **screenshot** if the corner text or a warning looked strange.
 5. If everything passed: say "all blocks passed" and the build id from the top of the app.
 
 ## For the agent (not for the owner)
-These checks need a cable and `adb`, or the benchmark screen of M1, and are not part of the steps above:
+These checks need a cable and `adb`, or the benchmark screen of M1b, and are not part of the steps above:
 - logcat must not show "Untrusted touch due to occlusion" while tapping through the overlay;
 - `now - image.timestamp` must be within 0 to 30 ms (the `ts=` value in the zip summary tells whether the
   fallback was used: `arrivalFallbacks` should stay near 0);
@@ -217,3 +270,9 @@ These checks need a cable and `adb`, or the benchmark screen of M1, and are not 
   (ring and corner marks) and once with it on (box and body points), and compare the `max` number of the `det`
   line and how often the marks blink (M0c block 6). Offline, the dots and the box already lowered the next
   frame's score (`docs/plans/M0c.md`, "Measured after T1").
+- `summary.txt` timing fields (M1a), in this order after the model fields: `timingSamples`, then `copyMsP50`,
+  `copyMsP95`, `preMsP50`, `preMsP95`, `inferMsP50`, `inferMsP95`, `postMsP50`, `postMsP95`, `frameMsP50`,
+  `frameMsP95`, `resultAgeMsP50`, `resultAgeMsP95`, `thermalStatus`, `thermalHeadroom`. The percentiles cover the
+  newest `timingWindowFrames` (512) processed frames. `n/a` = no sample or not readable, never a guess. Compare
+  `inferMsP50` with the HUD `ms` of the same run; `frameMsP95` and `resultAgeMsP95` show how bad the slow frames
+  and the result delay are. `modelInputSize` is `640`, `832x384` or `0` (no model).

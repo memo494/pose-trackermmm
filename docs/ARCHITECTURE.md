@@ -1,4 +1,4 @@
-# pose-tracker-android — Architecture (v0.6)
+# pose-tracker-android — Architecture (v0.7)
 
 Real-time Android app: a screen-capture overlay that draws a stable, low-latency dot on each person's head
 over any other app (video, stream, game), using YOLO26n-pose on-device. Built and modified by AI coding agents (Claude Code, Codex); built only
@@ -10,6 +10,9 @@ Ultralytics Flutter plugin (§2.1). Screen capture, overlay, tracking, smoothing
 and tests are ours.
 
 How the app gets built step by step is in `docs/BUILD_PLAN.md`. Changes per version are in §15.
+
+**v0.7 (M1a):** model inputs may be rectangular (`[1, 3, H, W]`, sizes written `WIDTHxHEIGHT`), rectangular models are
+downloads, and `summary.txt` carries timing percentiles and the thermal state (§6.1, §6.7, §8, §12).
 
 ---
 
@@ -23,8 +26,8 @@ landscape).
 ### Target device (primary test phone)
 **Poco X7 Pro** — MediaTek Dimensity 8400-Ultra, Mali-G720 MC7 GPU, 120 Hz AMOLED, Android 15 / HyperOS 2.
 The screen is 1220×2712. Capture runs at ½ scale (610×1356, `TrackerConfig`). How many frames per second the
-virtual display really delivers is measured in M1 (§6.8). The phone is known to run warm under sustained load →
-thermal behaviour is measured in M1 and handled in M5.
+virtual display really delivers is measured in M1b (§6.8). The phone is known to run warm under sustained load →
+thermal behaviour is first logged in M1a (`thermalStatus`, §6.7), measured in M1b and handled in M5.
 
 ### Performance targets on the target device
 | Metric | Goal | Fallback (acceptable) |
@@ -103,8 +106,8 @@ Single-app capture mode (`MediaProjectionConfig` for a single window), gallery-v
   - upstream creates the model on a throwaway executor and runs it on upstream's camera executor; the LiteRT rule is
     create/run/close on one thread (§5);
   - the vendored decoder **allocates per frame** (`LiteRtModel.kt:198-202`, `PoseEstimator.kt:105-150`), which
-    breaks AGENTS rule 8. Our own code complies from M0b; the decoder is made allocation-free in M1 (plan
-    decision D2) and the issue is logged in `third_party/ULTRALYTICS.md` until then.
+    breaks AGENTS rule 8. Our own code complies from M0b; the decoder is made allocation-free in M1b (plan
+    decision D2; M1 was split in M1a and M1b, §12) and the issue is logged in `third_party/ULTRALYTICS.md` until then.
 - **What upstream does not have (our work):** screen capture + overlay, tracking/IDs, smoothing and prediction,
   lock, diagnostics, benchmark, thermal policy, tests (upstream has no Android tests).
 - **Sync policy:** no automatic updates. The lead may propose a sync to a newer upstream commit as its own PR.
@@ -157,7 +160,7 @@ Dependencies: `app → detector → core`, `app → core`. Nothing else.
 ### 4.2 Named spaces; suffixes mandatory in code
 | Space | Suffix | Definition |
 |---|---|---|
-| model | `Mdl` | letterboxed model input (320×320 or 416×416) |
+| model | `Mdl` | letterboxed model input, `width x height` (320×320 or 416×416 for the built-in models; any `WxH` for an imported one) |
 | image | `Img` | the **capture content rect**: the pixels of the captured frame (display × capture scale, e.g. 610×1356) that show the screen content. No rotation, no mirror. Tracking lives here |
 | view | `View` | overlay pixels (the overlay window; origin from `getLocationOnScreen`, size from `onSizeChanged`) |
 
@@ -226,8 +229,10 @@ Dependencies: `app → detector → core`, `app → core`. Nothing else.
 ### 6.1 Detector (`detector/`)
 ```kotlin
 interface PoseDetector : Closeable {
-    val inputSize: Int; val accelerator: Accelerator   // model input side (Mdl px, read from the model); what runs
+    val inputWidth: Int; val inputHeight: Int          // model input size (Mdl px, read from the model; W x H)
+    val accelerator: Accelerator                       // what runs
     val lastInferenceMs: Float                         // model run + output readback of the last detect; 0 before
+    val lastPreMs: Float; val lastPostMs: Float        // pre-processing / post-processing of the last detect (M1a)
     fun detect(frame: CaptureFrame): DetectionFrame    // RGBA pixels in the reused exact-width buffer, size, timestampNs
 }
 ```
@@ -238,7 +243,7 @@ Thread-confined: create, `detect` and `close` on the capture thread (a call from
 - **Input:** `CaptureFrame` wraps the reused exact-width RGBA buffer filled by `RowCopy` (§5). Upstream's
   `prepareBitmapForModel` needs an exact-width source, which a raw `ImageReader` plane is not (row stride
   padding) — hence the copy. Upstream's `ImageUtils.toBitmap` (CameraX `ImageProxy`) is not used.
-- **Per-frame allocations:** our adapter allocates nothing per frame; the vendored decoder still does until M1
+- **Per-frame allocations:** our adapter allocates nothing per frame; the vendored decoder still does until M1b
   (§2.1 known issues).
 - **Accelerator selection:** create with `Options(Accelerator.GPU)` (GPU only). On `LiteRtException`,
   log it and recreate with `Options(Accelerator.CPU)`; HUD shows `CPU` and the red banner appears.
@@ -248,14 +253,22 @@ Thread-confined: create, `detect` and `close` on the capture thread (a call from
 - **Model file:** packaged as an app asset (the `stage<Variant>ModelAssets` build task, §8), staged at start by
   `ModelStager` into `noBackupFilesDir/models` (versioned name, temp file + rename) with a sha256 check, and only
   then opened by LiteRT **by path**; a file that does not match its hash is never opened.
-- Input tensor layout **read from the model** (expected NCHW `(1,3,S,S)`, RGB, 0–1). Never hard-coded. If the
+- Input tensor layout **read from the model** (expected NCHW `(1,3,H,W)`, RGB, 0–1; **not necessarily square** since
+  M1a). Never hard-coded. If the
   vendored `LiteRtModel` could not read the layout by name it silently assumes NHWC; the adapter checks
-  `BasePredictor.inputUsesNchw` and refuses to run (fail closed). It also requires a square input equal to
-  `TrackerConfig.modelInputSize`.
+  `BasePredictor.inputUsesNchw` and refuses to run (fail closed). It also requires the input width and height
+  it was created for: `PoseDetectors.fromAssets` expects the square `TrackerConfig.modelInputSize`,
+  `fromImported` the width and height of the stored meta; `LiteRtPoseDetector.create` closes the engine and throws
+  when either side differs.
 - Output expected `(1,300,57)`: per row box xyxy, score, cls, 17×(x,y,v). Exact column order and
   pixel-vs-normalised scale are **verified by a golden test** against Python `model.predict()` on the same
   image (fixture committed with the model). Rows with score < 0.15 dropped.
-- Timing measured as `run` **plus output readback** (`run` can return before the GPU finishes).
+- Timing measured as `run` **plus output readback** (`run` can return before the GPU finishes). `lastPreMs` and
+  `lastPostMs` come from the vendored result of the same detect; a negative value (`NOT_MEASURED`: the fake detector,
+  or before the first detect) is not a sample (§6.7).
+- Sizes are written **WIDTHxHEIGHT** wherever a person or a log reads them (`832x384`, like `capture 1356x610`); a
+  square size is the single number (`640`). One rule, `core/model/ModelInputText` (a `String` form and an
+  allocation-free `CharArray` form for the HUD); a side that is not positive gives `0`.
 - `FakePoseDetector` replays JSON → tests and a "replay mode" in the debug sheet.
 
 ### 6.2 Head point (`core/tracking/HeadPointEstimator`)
@@ -355,12 +368,35 @@ The overlay is a plain `View` (not `ComposeView`) in a `TYPE_APPLICATION_OVERLAY
   characters), `modelInputSize`, `modelOutputRows`, `modelFallback` (a `ModelFallback` name or `none`),
   `modelFallbackMessage`, and `modelFallbackFile` (name and short sha256 of an imported model that was refused;
   only then).
+- **Model size text (M1a):** `modelInputSize=` and the HUD `in …` use one text (`ModelInputText`): `640` for a square
+  input, `832x384` for a rectangular one (width x height), `0` when there is no model. Example HUD line:
+  `det 2/3 max 0.89 in 832x384 imp`.
+- **Timing in `summary.txt` (M1a).** After the model fields, in this order: `timingSamples`, then `copyMsP50`,
+  `copyMsP95`, `preMsP50`, `preMsP95`, `inferMsP50`, `inferMsP95`, `postMsP50`, `postMsP95`, `frameMsP50`,
+  `frameMsP95`, `resultAgeMsP50`, `resultAgeMsP95` (twelve keys, milliseconds with one decimal), then
+  `thermalStatus` and `thermalHeadroom`.
+  - *What they are:* `copy` = the row copy into the reused buffer; `pre` = image to model input; `infer` = model run
+    plus output readback; `post` = model output to detections; `frame` = acquire → publish; `resultAge` = publish
+    time minus the frame's image timestamp (only frames whose image timestamp was accepted count, §4.1).
+  - *Samples:* one per processed frame (detected and published); a frame that was drained, dropped for its size or
+    not copied adds none. `timingSamples` is how many frames the windows hold, at most `timingWindowFrames` (512,
+    about 17 s of 30 fps): the numbers describe the newest frames, not the whole session. `TimingWindow` is a ring
+    with a scratch array allocated once, so `add` allocates nothing; NaN and negative values (`NOT_MEASURED`) are
+    dropped; an empty window is NaN, written `n/a`.
+  - *Where:* the windows are written and the percentiles computed on the capture thread, at the HUD tick
+    (`FramePipeline.timingSummary`, called from `CaptureStatsHolder.publish`); the diagnostics thread only reads the
+    immutable `CaptureStats`. The clock is `NanoClock`, no new one.
+  - *Thermal:* `thermalStatus` is the name of `PowerManager.currentThermalStatus` (`NONE` … `SHUTDOWN`; API 29+) and
+    `thermalHeadroom` is `getThermalHeadroom(0)` (API 30+, a ratio where 1.0 = throttling). `ThermalSampler` reads
+    at most every `thermalSampleIntervalMs` (2 s; the platform allows about one headroom read per second) and
+    keeps the last answer; whatever cannot be read is `n/a`, never a guessed number (AGENTS rule 1).
+  - *The HUD text does not change:* a changing HUD is captured and feeds back (§6.5).
 
-### 6.8 Capture frame rate & benchmark screen — built in M1
+### 6.8 Capture frame rate & benchmark screen — planned for M1b
 - **Capture fps** is *measured*, not selected: frames delivered per second while the screen content changes
   (a static screen delivers none, §6.3). The HUD shows it (smoothed, ≤ 2 Hz); the capture scale is a
   `TrackerConfig` value (default ½). The Poco X7 Pro's real rate (60 vs 120 Hz source, what the virtual display
-  delivers) is a question the benchmark answers in M1.
+  delivers) is a question the benchmark answers in M1b.
 - **Benchmark screen** shows and exports (CSV, included in diagnostics):
   measured capture fps on moving content (e.g. a looping video the owner plays) and the `now − image.timestamp`
   latency; inference ms (p50/p95, with readback) for 320 and 416, GPU and CPU, run on a fixture image so it does
@@ -389,8 +425,8 @@ step back up after 60 s below the threshold. Every step is logged and shown in t
 ## 8. Model pipeline & licence
 - `export-model.yml` — **manual** (`workflow_dispatch`) GitHub Actions job on ubuntu x86_64. Installs
   `tools/requirements.lock` (pinned ultralytics ≥ 8.4.83 + deps), runs
-  `export(format="litert", nms=False, imgsz=S)` for S = 320 and 416, runs Python `predict()` on the fixture
-  image to produce golden outputs, writes `model_info.json` (I/O shapes, versions, sha256), opens a PR.
+  `export(format="litert", nms=False, imgsz=S)` for S = 320 and 416 (the bundled models; downloads: see below), runs
+  Python `predict()` on the fixture image to produce golden outputs, writes `model_info.json` (I/O shapes, versions, sha256), opens a PR.
 - Normal builds never run Python. Build fails with a clear message if a model or its sha256 mismatches: the check
   is the `stage<Variant>ModelAssets` Gradle task of `app`, which verifies every file listed in `model_info.json`
   and copies only the `.tflite` files and `model_info.json` into the APK assets.
@@ -400,11 +436,13 @@ step back up after 60 s below the threshold. Every step is logged and shown in t
     as `model-<first 16 hex of sha256>.tflite` (named by content, so two imports of equal size never share the
     name the GPU program cache is keyed by); importing again replaces it, **Use built-in model** deletes it. Import
     and reset work only while the capture is stopped; one import runs at a time per process.
-  - *Accepted layout, version 1:* exactly one float32 input `[1, 3, S, S]` (channels first, square, `S` a
-    multiple of 32 between `importMinInputSize` and `importMaxInputSize`) and exactly one float32 output
-    `[1, N, 57]` (end-to-end pose head, 17 keypoints, `0 < N <= 300`: the vendored decoder treats 57 columns as
-    end-to-end only up to 300 rows). Anything else is refused with a reason that names the shapes found;
-    rectangular inputs come with M1.
+  - *Accepted layout, version 2 (M1a):* exactly one float32 input `[1, 3, H, W]` (channels first; height and width
+    each a multiple of 32 between `importMinInputSize` and `importMaxInputSize`, 160 to 1280 by default; the long
+    side at most `importMaxInputAspect` (4.0) times the short side) and exactly one float32 output `[1, N, 57]`
+    (end-to-end pose head, 17 keypoints, `0 < N <= 300`: the vendored decoder treats 57 columns as end-to-end only
+    up to 300 rows). Anything else is refused with a reason that names the shapes found. Version 1 accepted only
+    square inputs; the rejection `input_not_square` is gone, a too elongated input is refused as `input_aspect`
+    (a key is never reused for another meaning). Square models stay accepted.
   - *The real tensors decide:* the shapes are read from the model itself through LiteRT (`ModelProbe`, CPU
     `CompiledModel`, worker thread); metadata inside the file is never trusted.
   - *Never worse than the built-in model:* if the imported model cannot be loaded at Start, the session runs
@@ -420,7 +458,9 @@ step back up after 60 s below the threshold. Every step is logged and shown in t
     the probe of a new file does not replace it (no marker is written before or after that probe), so a model
     switched off after a load crash stays off even if the process dies in the next probe.
   - *Classes:* `ModelFileSniffer` (`TFL3` identifier and size limits), `ImportedModelRules` (accept or refuse
-    the tensors), `ImportedModelMeta` (name, sha256, bytes, input size, output rows; strict text codec),
+    the tensors), `ImportedModelMeta` (name, sha256, bytes, input width and height, output rows; strict text codec, **version 2**:
+    header `posetracker-imported-model v2` with `inputWidth=` and `inputHeight=`; a stored **v1** text with one
+    `inputSize=` line is still read and becomes width = height, so an installed app keeps its model),
     `ImportGuard` (crash-marker state machine) — all in `core/modelimport`; `ModelProbe` and
     `PoseDetectors.fromImported` in `detector`; `ModelImporter` (copy, probe, check, store), `ImportedModelStore`
     (files and preferences), `ModelChoice` (pure choice at Start), `SessionModelLoader` (load with the
@@ -430,6 +470,16 @@ step back up after 60 s below the threshold. Every step is logged and shown in t
     `publish_tag`) builds `yolo26n-pose_640.tflite` with the pinned toolchain (`tools/requirements.lock`), checks
     it and uploads it to the pre-release tagged `models`. It is not in the APK, `model/**` or `model_info.json`,
     and the rolling `latest` APK release is not touched.
+  - *Rectangular downloads (M1a):* the same release also holds `yolo26n-pose_640x288.tflite`,
+    `yolo26n-pose_832x384.tflite` and `yolo26n-pose_960x448.tflite` (input `[1, 3, H, W]`, output `[1, 300, 57]`,
+    each with a `.json`). Names and sizes are WIDTHxHEIGHT. They are for **landscape**: the screen is about 2.2
+    times wider than high, so a landscape input keeps people larger; in portrait a landscape model makes people
+    smaller than the square 640 model does, so use 640 or the built-in model there (a per-geometry choice is M1b).
+    `tools/export_model.py --sizes` takes `S` or `WxH` entries (each side a positive multiple of 32, no
+    duplicates; `640x640` means `640`); `WxH` works only with `--out` (the download path), the default 320/416
+    path under `model/` is unchanged. The export uses `imgsz=(H, W)`, checks the tensors, and runs `predict()` on a
+    landscape sample image for `W > H` (a portrait one otherwise) with the same pass rule (at least two people at
+    score 0.5). `--self-test` checks the parsing and naming without the export toolchain.
 - **Licence: AGPL-3.0 for the whole app** (vendored Ultralytics code + model weights). Fine for private personal use. Any distribution (Play Store, sharing the APK
   publicly) requires open-sourcing app + weights, or an Ultralytics Enterprise licence.
 
@@ -502,7 +552,8 @@ Agents may not loosen asserted thresholds (protected files).
 | M0b | Import the Ultralytics core (§2.1) → screen capture + overlay + raw keypoints in green with our model, portrait + landscape; permissions flow; diagnostics + log screen; CPU banner | **green boxes/keypoints over people in any app**, taps still reach the app below |
 | M0c | Import one model file (layout checked from its real tensors, crash guard, fallback to the built-in model); `yolo26n-pose_640.tflite` as a download under the release tag `models`; steadier marks (head ring + corner brackets, **Debug marks** switch); plan `docs/plans/M0c.md` | import the 640 file, HUD shows `in 640 imp`; a medium-distance person detected and blinking less |
 | M0d | Video-area crop: bigger people for the model (parked, not approved; plan `docs/plans/M0d.md`) | — |
-| M1 | One-thread LiteRT fix, allocation-free vendored decoder (D2), golden decode test (both sizes), **capture fps measurement + benchmark screen**, rectangular model candidates in the benchmark (352x608 or 384x640, decided by the measured ms/fps at 640) | real numbers for fps / ms / heat |
+| M1a | Rectangular model inputs end to end (import layout v2, meta v2, engine, HUD, diagnostics), rectangular models to download (`640x288`, `832x384`, `960x448`), timing statistics (p50/p95 per stage, result age, thermal state) in `summary.txt`; plan `docs/plans/M1.md`. Done in this PR; the one-thread LiteRT item is already true since M0b | import `832x384`, HUD `in 832x384 imp`; real ms / fps per model on one video; timing lines in the diagnostics |
+| M1b | Later: raw-output goldens and the golden decode test, allocation-free pure-Kotlin decoder (D2), benchmark screen with CSV and soak mode, a bundled landscape model with a per-geometry choice | real numbers for fps / ms / heat; no per-frame allocation in the decoder |
 | M2 | Img→View hardening: `FitCenter` extended and checked on the phone across rotation, cutout and resize events (no camera) | green dots exactly on heads in portrait and landscape |
 | M3 | Tracker + Kalman + synthetic tests (30 & 60 fps, idle gaps); IDs | red dots with IDs, stable when crossing |
 | M4 | Forward prediction + OneEuro + handle-window lock + debug sheet | smooth dot, tap-to-lock, tuning sliders |
@@ -511,8 +562,9 @@ Agents may not loosen asserted thresholds (protected files).
 One session per milestone; M4 may need a second session for tuning on the phone.
 
 ## 13. Open items
-- Exact output column order / scale — settled by golden test in M1.
-- Real capture fps of the virtual display on the Poco X7 Pro (and `image.timestamp` reliability) — measured in M0b/M1.
+- Exact output column order / scale — settled by the golden decode test in M1b.
+- Real capture fps of the virtual display on the Poco X7 Pro (and `image.timestamp` reliability) — measured in M0b;
+  the timing lines of M1a (`resultAgeMsP50/P95`, `captureFps`) add numbers, the benchmark screen is M1b.
 - **HyperOS restrictions:** battery/auto-start limits killing the foreground service, extra "display pop-up"
   toggles, overlay or notification quirks — checked on the phone in M0b; findings go in `docs/TEST_CHECKLIST.md`.
 - **Dot A/B (overlay in the capture):** answered offline in M0c: the keypoint dots and the full box lower the
@@ -520,10 +572,16 @@ One session per milestone; M4 may need a second session for tuning on the phone.
   only), so the default marks are now a ring and corner brackets (§6.5). Still to check on the phone, with the
   **Debug marks** switch off and on (`docs/TEST_CHECKLIST.md`, M0c).
 - **People of 12–15 % of the video height stay undetected** at 640 (and far workers and the snow scene still
-  score 0.00); the area crop is M0d, rectangular inputs M1.
-- **Duplicate boxes on one person** were seen once (v0.1.37): dedupe in M1 or M3.
+  score 0.00); the area crop is M0d (parked), rectangular inputs M1a (the phone numbers decide which size to use).
+- **Duplicate boxes on one person** were seen once (v0.1.37): dedupe before association, in M3.
 - **Unmerged branch `fix-export-model-deps`** holds a stricter export script (self-check against `predict()`,
-  raw-output goldens, public-domain fixture); decide in M1 whether to bring it to `main`.
+  raw-output goldens, public-domain fixture); its raw-output goldens are needed for M1b.
+- **M1b:** raw-output goldens (script on `fix-export-model-deps`), pure decoder + golden test, benchmark screen, a
+  bundled landscape model with a per-geometry choice once the phone numbers of M1a are in.
+- **Rectangular model on the Mali GPU:** if one compiles only for the CPU, the red banner shows it; report the size.
+- **`readFloat()` allocates:** the LiteRT Kotlin `TensorBuffer.readFloat()` returns a new `FloatArray` per call, so
+  the 300x57 output readback (68 KB per frame) cannot be allocation-free with the bundled runtime
+  (`third_party/ULTRALYTICS.md`).
 - **DRM / secure apps capture black** (`FLAG_SECURE`): expected and unfixable by us; no dots there. Only
   documented, plus the HUD may say "no frames".
 - `displayLeadMs` default — tuned on the phone in M4.
@@ -536,6 +594,18 @@ answers hard questions. Each change is verified in the session with `scripts/ver
 and always by GitHub Actions, which is the source of truth. The owner's laptop is not used for builds.
 
 ## 15. Changes
+- **v0.7 (M1a, 2026-11-15):** (A) rectangular model inputs end to end: accepted layout version 2 (`[1, 3, H, W]`, each
+  side a multiple of 32, long/short at most `importMaxInputAspect` 4.0; rejection `input_aspect` replaces
+  `input_not_square`), imported-model meta version 2 (`inputWidth`, `inputHeight`; v1 still read), `PoseEngine` /
+  `PoseDetector` carry width and height, sizes are written WIDTHxHEIGHT (`640` when square) in the HUD, the log and
+  `modelInputSize=` (§6.1, §6.7, §8); (B) rectangular models to download from the `models` release
+  (`yolo26n-pose_640x288`, `_832x384`, `_960x448`), `export_model.py --sizes S|WxH` with `--out` and `--self-test`
+  (§8); (C) timing statistics in `summary.txt`: `timingSamples`, p50/p95 of copy, pre, inference, post, whole
+  frame and result age, `thermalStatus`, `thermalHeadroom`; `PoseDetector.lastPreMs` / `lastPostMs`; computed on
+  the capture thread at the HUD tick, HUD text unchanged (§6.7); (D) §12: M1 split into M1a (this change) and M1b
+  (golden decode test, pure decoder, benchmark screen, bundled landscape model); the one-thread LiteRT item
+  was already true since M0b; §13 open items updated; known issue logged: `TensorBuffer.readFloat()` allocates
+  (`third_party/ULTRALYTICS.md`).
 - **v0.6.4 (M0c, 2026-11-14):** (A) one imported model file (§8): layout of version 1 checked from the real
   tensors, crash guard, fallback to the built-in model, control-screen block **Model**; (B) the 640 model is a
   download under the release tag `models`, built by `export-model.yml`, not part of the APK; (C) marks: head ring

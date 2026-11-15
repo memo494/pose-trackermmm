@@ -194,12 +194,15 @@ class ImportedModelStore private constructor(
 
     /**
      * Deletes every model file, the temporary file and the meta, and sets the guard to `Idle` (lifting a trip).
-     * Returns `true` only when everything is gone and the guard was stored.
+     * Returns `true` only when everything is gone and the guard was stored. While an import runs it returns `false`
+     * and changes nothing (no file deleted, the guard not written): the running import owns the temporary file and
+     * the marker.
      */
     fun clear(): Boolean {
         threadCheck()
         synchronized(LOCK) {
             currentGuard()
+            if (importInFlight()) return false
             val directory = directoryLazy.value
             // The meta goes first: a meta without a file is harmless, a file with a stale meta is not.
             var done = true

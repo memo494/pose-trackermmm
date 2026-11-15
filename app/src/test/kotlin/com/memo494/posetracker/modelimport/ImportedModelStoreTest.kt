@@ -233,6 +233,23 @@ class ImportedModelStoreTest {
     }
 
     @Test
+    fun clear_whileAnImportRuns_refusesAndChangesNothing() {
+        val store = newStore()
+        storeOldModel(store)
+        val temp = stage(store, newBytes)
+        store.setGuard(ImportGuardState.Pending(ImportStage.PROBE))
+        importRunning = true
+
+        assertThat(store.clear()).isFalse()
+
+        assertThat(store.modelFileFor(oldMeta).readBytes()).isEqualTo(oldBytes)
+        assertThat(File(directory, "meta.txt").exists()).isTrue()
+        assertThat(temp.readBytes()).isEqualTo(newBytes)
+        assertThat(prefs.text).isEqualTo("pending:probe")
+        assertThat(store.state().meta).isEqualTo(oldMeta)
+    }
+
+    @Test
     fun clear_onAnEmptyStore_isFine() {
         assertThat(newStore().clear()).isTrue()
     }

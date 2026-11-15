@@ -9,6 +9,9 @@ import com.memo494.posetracker.core.tracking.HeadTestDetections.allHead
 import com.memo494.posetracker.core.tracking.HeadTestDetections.person
 import com.memo494.posetracker.core.tracking.HeadTestDetections.scoresOf
 import org.junit.jupiter.api.Test
+import java.util.Random
+import kotlin.math.abs
+import kotlin.math.ceil
 import kotlin.math.hypot
 
 class HeadPointEstimatorTest {
@@ -156,7 +159,46 @@ class HeadPointEstimatorTest {
     }
 
     @Test
-    fun offsets_areUpdatedByAnEmaOfTheKeypointPositionRelativeToTheCentre() {
+    fun offsets_inAFullView_areAnEmaOfTheKeypointPositionRelativeToThePlainMean() {
+        val scores = scoresOf(0.9f, 0.8f, 0.7f, 0.6f, 0.9f)
+        val height = 100f
+        val alpha = config.headOffsetAlpha
+        val firstXs = floatArrayOf(100f, 120f, 150f, 90f, 135f)
+        val firstYs = floatArrayOf(100f, 95f, 102f, 99f, 110f)
+        val secondXs = floatArrayOf(100f, 130f, 150f, 90f, 135f)
+        val secondYs = floatArrayOf(100f, 95f, 102f, 109f, 110f)
+
+        estimator.update(fiveKeypoints(firstXs, firstYs, scores, height), out)
+
+        // The first observation sets every offset directly, against the unweighted mean of the five keypoints.
+        val firstMeanX = firstXs.average().toFloat()
+        val firstMeanY = firstYs.average().toFloat()
+        assertThat(out.headXImg).isWithin(TOLERANCE_PX).of(firstMeanX)
+        assertThat(out.headYImg).isWithin(TOLERANCE_PX).of(firstMeanY)
+        val expectedX = FloatArray(TrackerConfig.HEAD_KEYPOINT_COUNT)
+        val expectedY = FloatArray(TrackerConfig.HEAD_KEYPOINT_COUNT)
+        for (k in 0 until TrackerConfig.HEAD_KEYPOINT_COUNT) {
+            expectedX[k] = (firstXs[k] - firstMeanX) / height
+            expectedY[k] = (firstYs[k] - firstMeanY) / height
+            assertThat(estimator.offsetXRatio(k)).isWithin(TOLERANCE_RATIO).of(expectedX[k])
+            assertThat(estimator.offsetYRatio(k)).isWithin(TOLERANCE_RATIO).of(expectedY[k])
+        }
+
+        estimator.update(fiveKeypoints(secondXs, secondYs, scores, height), out)
+
+        // offset <- offset + alpha * ((keypoint - plainMean2) / h - offset), for every keypoint.
+        val secondMeanX = secondXs.average().toFloat()
+        val secondMeanY = secondYs.average().toFloat()
+        for (k in 0 until TrackerConfig.HEAD_KEYPOINT_COUNT) {
+            val wantedX = expectedX[k] + alpha * ((secondXs[k] - secondMeanX) / height - expectedX[k])
+            val wantedY = expectedY[k] + alpha * ((secondYs[k] - secondMeanY) / height - expectedY[k])
+            assertThat(estimator.offsetXRatio(k)).isWithin(TOLERANCE_RATIO).of(wantedX)
+            assertThat(estimator.offsetYRatio(k)).isWithin(TOLERANCE_RATIO).of(wantedY)
+        }
+    }
+
+    @Test
+    fun offsets_inAPartialView_areNeverChangedByAMovedKeypoint() {
         val first =
             person(
                 300f,
@@ -179,13 +221,106 @@ class HeadPointEstimatorTest {
         assertThat(estimator.offsetXRatio(0)).isWithin(TOLERANCE_RATIO).of(-0.1f)
         assertThat(estimator.offsetXRatio(1)).isWithin(TOLERANCE_RATIO).of(0.1f)
         assertThat(estimator.offsetYRatio(0)).isWithin(TOLERANCE_RATIO).of(0f)
+        val offsetsAfterFirst = offsets()
 
         estimator.update(second, out)
 
-        // Centre estimates 110 and 120, mean 115; offset <- offset + 0.2 * ((kp - 115) / 100 - offset).
+        // Two of five keypoints are a partial view: the offsets stay exactly as they were, only the centre moves.
+        assertOffsetsWithin(offsetsAfterFirst, 0f)
+        assertThat(estimator.offsetXRatio(0)).isWithin(TOLERANCE_RATIO).of(-0.1f)
+        assertThat(estimator.offsetXRatio(1)).isWithin(TOLERANCE_RATIO).of(0.1f)
+        // Centre estimates 110 and 120 from the unchanged offsets.
         assertThat(out.headXImg).isWithin(TOLERANCE_PX).of(115f)
-        assertThat(estimator.offsetXRatio(0)).isWithin(TOLERANCE_RATIO).of(-0.11f)
-        assertThat(estimator.offsetXRatio(1)).isWithin(TOLERANCE_RATIO).of(0.11f)
+    }
+
+    @Test
+    fun aTrackThatStartsWithAPartialView_endsAtThePlainMeanOnceAllFiveAreVisible() {
+        val height = 200f
+        val partial = scoresOf(0.9f, 0.9f, 0f, 0.9f, 0f)
+        repeat(10) { estimator.update(person(300f, 400f, height, partial), out) }
+        val biasInH = hypot(out.headXImg - 300f, out.headYImg - 400f) / height
+        // The mean of nose, left eye and left ear alone sits about 0.024 h off the mean of all five.
+        assertThat(biasInH).isGreaterThan(0.01f)
+
+        repeat(ceil(3f / config.headOffsetAlpha).toInt()) { estimator.update(person(300f, 400f, height), out) }
+
+        val errorInH = hypot(out.headXImg - 300f, out.headYImg - 400f) / height
+        assertThat(errorInH).isLessThan(0.005f)
+    }
+
+    @Test
+    fun aPartialView_addsAnOffsetOnlyForAKeypointThatHadNone_andLeavesTheOthersAlone() {
+        val height = 100f
+        val nowhere = 0f to 0f
+        val twoKeypoints = scoresOf(0.9f, 0.9f)
+        repeat(10) { i ->
+            val moved = mapOf(0 to (100f + i to 100f), 1 to (120f - i to 100f + i), 2 to nowhere)
+            estimator.update(person(300f, 200f, height, twoKeypoints, moved), out)
+        }
+        val offsetsBefore = offsets()
+        assertThat(estimator.hasOffset(3)).isFalse()
+
+        repeat(20) { i ->
+            val moved = mapOf(0 to (150f + 3 * i to 90f), 1 to (170f to 130f - i), 3 to (140f to 105f))
+            estimator.update(person(300f, 200f, height, scoresOf(0.9f, 0.9f, 0f, 0.9f), moved), out)
+        }
+
+        for (k in intArrayOf(0, 1)) {
+            assertThat(estimator.offsetXRatio(k)).isEqualTo(offsetsBefore[2 * k])
+            assertThat(estimator.offsetYRatio(k)).isEqualTo(offsetsBefore[2 * k + 1])
+        }
+        assertThat(estimator.hasOffset(3)).isTrue()
+        assertThat(estimator.hasOffset(2)).isFalse()
+        assertThat(estimator.hasOffset(4)).isFalse()
+        assertThat(estimator.learnedOffsetCount).isEqualTo(3)
+    }
+
+    @Test
+    fun thousandFullViewFramesWithNoiseAndUnequalConfidences_keepTheOffsetsCentredAndTheOutputOnThePlainMean() {
+        val random = Random(SEED)
+        val height = 200f
+        val scores = scoresOf(0.95f, 0.85f, 0.75f, 0.65f, 0.55f)
+        var errorSumInH = 0f
+
+        for (frame in 1..1000) {
+            val moved = HashMap<Int, Pair<Float, Float>>()
+            var sumX = 0f
+            var sumY = 0f
+            for (k in 0 until TrackerConfig.HEAD_KEYPOINT_COUNT) {
+                val x = 300f + OFFSET_X_IN_H[k] * height + NOISE_IN_H * height * random.nextGaussian().toFloat()
+                val y = 400f + OFFSET_Y_IN_H[k] * height + NOISE_IN_H * height * random.nextGaussian().toFloat()
+                moved[k] = x to y
+                sumX += x
+                sumY += y
+            }
+            estimator.update(person(300f, 400f, height, scores, moved), out)
+            val plainMeanX = sumX / TrackerConfig.HEAD_KEYPOINT_COUNT
+            val plainMeanY = sumY / TrackerConfig.HEAD_KEYPOINT_COUNT
+            errorSumInH += hypot(out.headXImg - plainMeanX, out.headYImg - plainMeanY) / height
+        }
+
+        var offsetSumX = 0f
+        var offsetSumY = 0f
+        for (k in 0 until TrackerConfig.HEAD_KEYPOINT_COUNT) {
+            offsetSumX += estimator.offsetXRatio(k)
+            offsetSumY += estimator.offsetYRatio(k)
+        }
+        assertThat(abs(offsetSumX)).isLessThan(1e-3f)
+        assertThat(abs(offsetSumY)).isLessThan(1e-3f)
+        assertThat(errorSumInH / 1000f).isLessThan(0.002f)
+    }
+
+    @Test
+    fun firstFullViewFrameOfANewTrack_isExactlyThePlainMean_whateverTheConfidences() {
+        val height = 100f
+        val xs = floatArrayOf(100f, 140f, 150f, 90f, 135f)
+        val ys = floatArrayOf(100f, 95f, 102f, 99f, 130f)
+
+        estimator.update(fiveKeypoints(xs, ys, scoresOf(0.95f, 0.5f, 0.6f, 0.9f, 0.55f), height), out)
+
+        assertThat(out.estimated).isFalse()
+        assertThat(out.headXImg).isWithin(1e-3f * height).of(xs.average().toFloat())
+        assertThat(out.headYImg).isWithin(1e-3f * height).of(ys.average().toFloat())
     }
 
     @Test
@@ -360,6 +495,20 @@ class HeadPointEstimatorTest {
         assertThat(out.headXImg).isWithin(TOLERANCE_PX).of(300f)
     }
 
+    /** A person whose five head keypoints are at the given absolute positions; the box is [heightImg] high. */
+    private fun fiveKeypoints(
+        xs: FloatArray,
+        ys: FloatArray,
+        scores: FloatArray,
+        heightImg: Float,
+    ): PoseDetection {
+        val moved = HashMap<Int, Pair<Float, Float>>()
+        for (k in 0 until TrackerConfig.HEAD_KEYPOINT_COUNT) {
+            moved[k] = xs[k] to ys[k]
+        }
+        return person(xs[0], ys[0], heightImg, scores, moved)
+    }
+
     /** Feeds [frames] frames of a person with all five head keypoints visible, the head moving in a straight line. */
     private fun learn(
         frames: Int,
@@ -400,5 +549,7 @@ class HeadPointEstimatorTest {
         const val TOLERANCE_PX = 0.05f
         const val TOLERANCE_RATIO = 1e-4f
         const val RELATIVE_TOLERANCE = 1e-4f
+        const val SEED = 20_261_116L
+        const val NOISE_IN_H = 0.01f
     }
 }

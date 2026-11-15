@@ -161,8 +161,7 @@ class FramePipelineTest {
         pixelsError: Throwable? = null,
         closeError: Throwable? = null,
         onPixelsRead: (() -> Unit)? = null,
-    ): FakeFrameImage =
-        FakeFrameImage(events, widthImg, heightImg, timestampNs, rowStride, pixelsError, closeError, onPixelsRead)
+    ): FakeFrameImage = FakeFrameImage(events, widthImg, heightImg, timestampNs, rowStride, pixelsError, closeError, onPixelsRead)
 
     private fun acquireNs(): Long = NOW_NS - MS_NS
 

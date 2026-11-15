@@ -223,7 +223,24 @@ class TrackerConfigTest {
         assertThat(config.importMaxBytes).isEqualTo(200L * 1024L * 1024L)
         assertThat(config.importMinInputSize).isEqualTo(160)
         assertThat(config.importMaxInputSize).isEqualTo(1280)
+        assertThat(config.importMaxInputAspect).isEqualTo(4.0f)
         assertThat(TrackerConfig.IMPORT_INPUT_SIZE_STEP).isEqualTo(32)
+    }
+
+    @Test
+    fun importMaxInputAspect_atItsBounds_isAccepted() {
+        val low = TrackerConfig(importMaxInputAspect = TrackerConfig.MIN_IMPORT_MAX_INPUT_ASPECT_LIMIT)
+        val high = TrackerConfig(importMaxInputAspect = TrackerConfig.MAX_IMPORT_MAX_INPUT_ASPECT_LIMIT)
+
+        assertThat(low.importMaxInputAspect).isEqualTo(1.0f)
+        assertThat(high.importMaxInputAspect).isEqualTo(16.0f)
+    }
+
+    @Test
+    fun importMaxInputAspect_outsideItsBounds_isRejected() {
+        for (value in listOf(0.99f, 0.0f, -4.0f, 16.01f, Float.NaN, Float.POSITIVE_INFINITY)) {
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(importMaxInputAspect = value) }
+        }
     }
 
     @Test

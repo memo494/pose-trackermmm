@@ -71,7 +71,7 @@ internal enum class ModelRejectionReason {
     INPUT_TYPE,
     INPUT_NOT_NCHW,
     INPUT_NHWC,
-    INPUT_NOT_SQUARE,
+    INPUT_ASPECT,
     INPUT_SIZE_NOT_MULTIPLE,
     INPUT_SIZE_OUT_OF_RANGE,
     OUTPUT_COUNT,

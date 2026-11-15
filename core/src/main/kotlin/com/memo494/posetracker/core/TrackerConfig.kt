@@ -42,10 +42,13 @@ package com.memo494.posetracker.core
  *   cannot be a pose model).
  * @property importMaxBytes largest accepted size of an imported model file, in bytes (the copy into
  *   app storage is cut off at this size).
- * @property importMinInputSize smallest accepted side of an imported model's square input, in pixels
+ * @property importMinInputSize smallest accepted width or height of an imported model's input, in pixels
  *   (Mdl space); a multiple of [IMPORT_INPUT_SIZE_STEP].
- * @property importMaxInputSize largest accepted side of an imported model's square input, in pixels
+ * @property importMaxInputSize largest accepted width or height of an imported model's input, in pixels
  *   (Mdl space); a multiple of [IMPORT_INPUT_SIZE_STEP].
+ * @property importMaxInputAspect largest accepted ratio of the long side to the short side of an imported
+ *   model's input, unitless in [[MIN_IMPORT_MAX_INPUT_ASPECT_LIMIT], [MAX_IMPORT_MAX_INPUT_ASPECT_LIMIT]];
+ *   1.0 accepts only square inputs, 4.0 (default) accepts 768x192 and refuses 832x192.
  */
 data class TrackerConfig(
     val scoreThreshold: Float = DEFAULT_SCORE_THRESHOLD,
@@ -67,6 +70,7 @@ data class TrackerConfig(
     val importMaxBytes: Long = DEFAULT_IMPORT_MAX_BYTES,
     val importMinInputSize: Int = DEFAULT_IMPORT_MIN_INPUT_SIZE,
     val importMaxInputSize: Int = DEFAULT_IMPORT_MAX_INPUT_SIZE,
+    val importMaxInputAspect: Float = DEFAULT_IMPORT_MAX_INPUT_ASPECT,
 ) {
     init {
         require(scoreThreshold in MIN_SCORE_THRESHOLD..MAX_SCORE_THRESHOLD) {
@@ -135,6 +139,10 @@ data class TrackerConfig(
         require(importMinInputSize % IMPORT_INPUT_SIZE_STEP == 0 && importMaxInputSize % IMPORT_INPUT_SIZE_STEP == 0) {
             "importMinInputSize $importMinInputSize and importMaxInputSize $importMaxInputSize " +
                 "must be multiples of $IMPORT_INPUT_SIZE_STEP"
+        }
+        require(importMaxInputAspect in MIN_IMPORT_MAX_INPUT_ASPECT_LIMIT..MAX_IMPORT_MAX_INPUT_ASPECT_LIMIT) {
+            "importMaxInputAspect $importMaxInputAspect outside " +
+                "[$MIN_IMPORT_MAX_INPUT_ASPECT_LIMIT, $MAX_IMPORT_MAX_INPUT_ASPECT_LIMIT]"
         }
     }
 
@@ -379,7 +387,16 @@ data class TrackerConfig(
         /** Highest accepted [importMinInputSize] / [importMaxInputSize], in pixels (Mdl; also the sanity cap of stored metadata). */
         const val MAX_IMPORT_INPUT_SIZE_LIMIT = 4096
 
-        /** An imported model's input side must be a multiple of this, in pixels (the largest YOLO stride). */
+        /** Default [importMaxInputAspect]: long side at most 4 times the short side. */
+        const val DEFAULT_IMPORT_MAX_INPUT_ASPECT = 4.0f
+
+        /** Lowest accepted [importMaxInputAspect]: 1.0, square inputs only. */
+        const val MIN_IMPORT_MAX_INPUT_ASPECT_LIMIT = 1.0f
+
+        /** Highest accepted [importMaxInputAspect]. */
+        const val MAX_IMPORT_MAX_INPUT_ASPECT_LIMIT = 16.0f
+
+        /** An imported model's input width and height must each be a multiple of this, in pixels (the largest YOLO stride). */
         const val IMPORT_INPUT_SIZE_STEP = 32
 
         /**

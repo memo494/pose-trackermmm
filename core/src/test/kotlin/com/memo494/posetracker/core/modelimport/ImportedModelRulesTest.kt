@@ -31,12 +31,12 @@ class ImportedModelRulesTest {
 
     @Test
     fun builtInLayout416_isAccepted() {
-        assertThat(check(tensor(1, 3, 416, 416))).isEqualTo(ImportCheck.Accepted(inputSize = 416, outputRows = 300))
+        assertThat(check(tensor(1, 3, 416, 416))).isEqualTo(ImportCheck.Accepted(inputWidth = 416, inputHeight = 416, outputRows = 300))
     }
 
     @Test
     fun the640Export_isAccepted() {
-        assertThat(check(tensor(1, 3, 640, 640))).isEqualTo(ImportCheck.Accepted(inputSize = 640, outputRows = 300))
+        assertThat(check(tensor(1, 3, 640, 640))).isEqualTo(ImportCheck.Accepted(inputWidth = 640, inputHeight = 640, outputRows = 300))
     }
 
     @Test
@@ -44,8 +44,50 @@ class ImportedModelRulesTest {
         for (size in listOf(config.importMinInputSize, 320, 352, config.importMaxInputSize)) {
             val result = check(tensor(1, 3, size, size))
 
-            assertThat(result).isEqualTo(ImportCheck.Accepted(inputSize = size, outputRows = 300))
+            assertThat(result).isEqualTo(ImportCheck.Accepted(inputWidth = size, inputHeight = size, outputRows = 300))
         }
+    }
+
+    @Test
+    fun rectangularInputs_areAcceptedWithWidthAndHeightTheRightWayRound() {
+        // The tensor is [1, 3, H, W]; sizes are WIDTHxHEIGHT everywhere a person reads them.
+        val cases = listOf(832 to 384, 384 to 832, 640 to 288)
+
+        for ((width, height) in cases) {
+            val result = check(tensor(1, 3, height, width))
+
+            assertThat(result).isEqualTo(ImportCheck.Accepted(inputWidth = width, inputHeight = height, outputRows = 300))
+        }
+    }
+
+    @Test
+    fun rectangularInput_keepsHeightAndWidthApart() {
+        val accepted = check(tensor(1, 3, 384, 832)) as ImportCheck.Accepted
+
+        assertThat(accepted.inputHeight).isEqualTo(384)
+        assertThat(accepted.inputWidth).isEqualTo(832)
+    }
+
+    @Test
+    fun inputSizeAlias_isTheWidth() {
+        val square = check(tensor(1, 3, 640, 640)) as ImportCheck.Accepted
+        val wide = check(tensor(1, 3, 288, 640)) as ImportCheck.Accepted
+
+        assertThat(square.inputSize).isEqualTo(640)
+        assertThat(wide.inputSize).isEqualTo(640)
+    }
+
+    @Test
+    fun squareAcceptedCompatConstructor_setsBothSides() {
+        assertThat(ImportCheck.Accepted(inputSize = 416, outputRows = 300))
+            .isEqualTo(ImportCheck.Accepted(inputWidth = 416, inputHeight = 416, outputRows = 300))
+    }
+
+    @Test
+    fun aspectExactlyAtTheLimit_isAcceptedOnBothAxes() {
+        assertThat(check(tensor(1, 3, 160, 640))).isEqualTo(ImportCheck.Accepted(640, 160, 300))
+        assertThat(check(tensor(1, 3, 640, 160))).isEqualTo(ImportCheck.Accepted(160, 640, 300))
+        assertThat(check(tensor(1, 3, 320, 1280))).isEqualTo(ImportCheck.Accepted(1280, 320, 300))
     }
 
     @Test
@@ -53,8 +95,23 @@ class ImportedModelRulesTest {
         for (rows in listOf(1, 299, 300)) {
             val result = check(tensor(1, 3, 640, 640), tensor(1, rows, 57))
 
-            assertThat(result).isEqualTo(ImportCheck.Accepted(inputSize = 640, outputRows = rows))
+            assertThat(result).isEqualTo(ImportCheck.Accepted(inputWidth = 640, inputHeight = 640, outputRows = rows))
         }
+    }
+
+    @Test
+    fun aspectLimitComesFromTheConfig() {
+        val loose = TrackerConfig(importMaxInputAspect = 8.0f)
+        val strict = TrackerConfig(importMaxInputAspect = 1.0f)
+        val wide = listOf(tensor(1, 3, 160, 1280))
+        val rect = listOf(tensor(1, 3, 384, 832))
+        val out = listOf(tensor(1, 300, 57))
+
+        assertThat(ImportedModelRules.check(wide, out, loose)).isInstanceOf(ImportCheck.Accepted::class.java)
+        assertRejected(ImportedModelRules.check(wide, out, config), ImportRejection.INPUT_ASPECT)
+        assertRejected(ImportedModelRules.check(rect, out, strict), ImportRejection.INPUT_ASPECT)
+        assertThat(ImportedModelRules.check(listOf(tensor(1, 3, 640, 640)), out, strict))
+            .isEqualTo(ImportCheck.Accepted(640, 640, 300))
     }
 
     @Test
@@ -65,7 +122,7 @@ class ImportedModelRulesTest {
         val tooBig = ImportedModelRules.check(listOf(tensor(1, 3, 448, 448)), listOf(tensor(1, 300, 57)), custom)
         val tooSmall = ImportedModelRules.check(listOf(tensor(1, 3, 288, 288)), listOf(tensor(1, 300, 57)), custom)
 
-        assertThat(accepted).isEqualTo(ImportCheck.Accepted(inputSize = 416, outputRows = 300))
+        assertThat(accepted).isEqualTo(ImportCheck.Accepted(inputWidth = 416, inputHeight = 416, outputRows = 300))
         assertRejected(tooBig, ImportRejection.INPUT_SIZE_OUT_OF_RANGE)
         assertRejected(tooSmall, ImportRejection.INPUT_SIZE_OUT_OF_RANGE)
     }
@@ -154,23 +211,79 @@ class ImportedModelRulesTest {
     }
 
     @Test
-    fun nonSquareInput_isRejected() {
-        for ((h, w) in listOf(640 to 480, 480 to 640, 352 to 608, -1 to 640)) {
-            assertRejected(check(tensor(1, 3, h, w)), ImportRejection.INPUT_NOT_SQUARE)
+    fun nonSquareInputsWithinTheLimits_areNoLongerRejectedForBeingNonSquare() {
+        for ((h, w) in listOf(480 to 640, 640 to 480, 352 to 608, 608 to 352)) {
+            assertThat(check(tensor(1, 3, h, w))).isInstanceOf(ImportCheck.Accepted::class.java)
         }
     }
 
     @Test
-    fun squareInputNotAMultipleOf32_isRejected() {
-        for (size in listOf(161, 170, 330, 641, 1279)) {
-            assertRejected(check(tensor(1, 3, size, size)), ImportRejection.INPUT_SIZE_NOT_MULTIPLE)
+    fun tooWideInput_isRejectedAsAspect() {
+        // W / H = 4.2 and 8: the width is the long side.
+        for ((h, w) in listOf(160 to 672, 160 to 1280, 192 to 1280, 320 to 1344)) {
+            assertRejected(check(tensor(1, 3, h, w)), ImportRejection.INPUT_ASPECT)
         }
     }
 
     @Test
-    fun squareInputOutsideTheLimits_isRejected() {
-        for (size in listOf(-1, 0, 32, 128, 1312, 4096)) {
-            assertRejected(check(tensor(1, 3, size, size)), ImportRejection.INPUT_SIZE_OUT_OF_RANGE)
+    fun tooTallInput_isRejectedAsAspect() {
+        // H / W = 4.2 and 8: the height is the long side.
+        for ((h, w) in listOf(672 to 160, 1280 to 160, 1280 to 192, 1344 to 320)) {
+            assertRejected(check(tensor(1, 3, h, w)), ImportRejection.INPUT_ASPECT)
+        }
+    }
+
+    @Test
+    fun aspectDetails_nameTheShapeFound() {
+        val rejected = assertRejected(check(tensor(1, 3, 160, 1280)), ImportRejection.INPUT_ASPECT)
+
+        assertThat(rejected.details).isEqualTo("input [1,3,160,1280] float32; output [1,300,57] float32")
+    }
+
+    @Test
+    fun inputNotAMultipleOf32_isRejectedOnEitherAxis() {
+        val shapes =
+            listOf(
+                intArrayOf(1, 3, 161, 161),
+                intArrayOf(1, 3, 330, 330),
+                intArrayOf(1, 3, 641, 641),
+                intArrayOf(1, 3, 1279, 1279),
+                // height off, width fine
+                intArrayOf(1, 3, 385, 832),
+                // width off, height fine
+                intArrayOf(1, 3, 384, 833),
+                intArrayOf(1, 3, 640, 650),
+                intArrayOf(1, 3, 650, 640),
+            )
+
+        for (shape in shapes) {
+            assertRejected(check(TensorDescription(shape.toList(), "float32")), ImportRejection.INPUT_SIZE_NOT_MULTIPLE)
+        }
+    }
+
+    @Test
+    fun inputOutsideTheLimits_isRejectedOnEitherAxis() {
+        val shapes =
+            listOf(
+                intArrayOf(1, 3, -1, 640),
+                intArrayOf(1, 3, 640, -1),
+                intArrayOf(1, 3, 0, 0),
+                intArrayOf(1, 3, 32, 32),
+                intArrayOf(1, 3, 128, 128),
+                intArrayOf(1, 3, 1312, 1312),
+                intArrayOf(1, 3, 4096, 4096),
+                // height too small, width fine
+                intArrayOf(1, 3, 128, 320),
+                // width too small, height fine
+                intArrayOf(1, 3, 320, 128),
+                // height too large, width fine
+                intArrayOf(1, 3, 1312, 1280),
+                // width too large, height fine
+                intArrayOf(1, 3, 1280, 1312),
+            )
+
+        for (shape in shapes) {
+            assertRejected(check(TensorDescription(shape.toList(), "float32")), ImportRejection.INPUT_SIZE_OUT_OF_RANGE)
         }
     }
 
@@ -178,8 +291,18 @@ class ImportedModelRulesTest {
     fun sizeJustOutsideTheLimits_isRejectedAndAtTheLimitsAccepted() {
         assertThat(check(tensor(1, 3, 160, 160))).isInstanceOf(ImportCheck.Accepted::class.java)
         assertThat(check(tensor(1, 3, 1280, 1280))).isInstanceOf(ImportCheck.Accepted::class.java)
+        assertThat(check(tensor(1, 3, 160, 640))).isInstanceOf(ImportCheck.Accepted::class.java)
+        assertThat(check(tensor(1, 3, 1280, 320))).isInstanceOf(ImportCheck.Accepted::class.java)
         assertRejected(check(tensor(1, 3, 128, 128)), ImportRejection.INPUT_SIZE_OUT_OF_RANGE)
         assertRejected(check(tensor(1, 3, 1312, 1312)), ImportRejection.INPUT_SIZE_OUT_OF_RANGE)
+    }
+
+    @Test
+    fun inputRuleOrder_isRangeThenMultipleThenAspect() {
+        // Out of range wins over not-a-multiple, and both win over aspect.
+        assertRejected(check(tensor(1, 3, 161, 2000)), ImportRejection.INPUT_SIZE_OUT_OF_RANGE)
+        assertRejected(check(tensor(1, 3, 161, 1280)), ImportRejection.INPUT_SIZE_NOT_MULTIPLE)
+        assertRejected(check(tensor(1, 3, 160, 1280)), ImportRejection.INPUT_ASPECT)
     }
 
     // ---- output ----
@@ -319,7 +442,7 @@ class ImportedModelRulesTest {
             "input_type",
             "input_not_nchw",
             "input_nhwc",
-            "input_not_square",
+            "input_aspect",
             "input_size_not_multiple",
             "input_size_out_of_range",
             "output_count",

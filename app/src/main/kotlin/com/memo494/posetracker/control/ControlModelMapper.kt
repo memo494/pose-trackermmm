@@ -60,7 +60,7 @@ internal object ControlModelMapper {
             ImportRejection.INPUT_TYPE -> ModelRejectionReason.INPUT_TYPE
             ImportRejection.INPUT_NOT_NCHW -> ModelRejectionReason.INPUT_NOT_NCHW
             ImportRejection.INPUT_NHWC -> ModelRejectionReason.INPUT_NHWC
-            ImportRejection.INPUT_NOT_SQUARE -> ModelRejectionReason.INPUT_NOT_SQUARE
+            ImportRejection.INPUT_ASPECT -> ModelRejectionReason.INPUT_ASPECT
             ImportRejection.INPUT_SIZE_NOT_MULTIPLE -> ModelRejectionReason.INPUT_SIZE_NOT_MULTIPLE
             ImportRejection.INPUT_SIZE_OUT_OF_RANGE -> ModelRejectionReason.INPUT_SIZE_OUT_OF_RANGE
             ImportRejection.OUTPUT_COUNT -> ModelRejectionReason.OUTPUT_COUNT
@@ -136,7 +136,7 @@ internal object ControlModelMapper {
             ModelRejectionReason.INPUT_TYPE -> R.string.model_reject_input_type
             ModelRejectionReason.INPUT_NOT_NCHW -> R.string.model_reject_input_not_nchw
             ModelRejectionReason.INPUT_NHWC -> R.string.model_reject_input_nhwc
-            ModelRejectionReason.INPUT_NOT_SQUARE -> R.string.model_reject_input_not_square
+            ModelRejectionReason.INPUT_ASPECT -> R.string.model_reject_input_aspect
             ModelRejectionReason.INPUT_SIZE_NOT_MULTIPLE -> R.string.model_reject_input_size_not_multiple
             ModelRejectionReason.INPUT_SIZE_OUT_OF_RANGE -> R.string.model_reject_input_size_out_of_range
             ModelRejectionReason.OUTPUT_COUNT -> R.string.model_reject_output_count

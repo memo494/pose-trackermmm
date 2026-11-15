@@ -281,7 +281,7 @@ class ModelImporterTest {
                 ImportRejection.INPUT_TYPE to (listOf(tensor(1, 3, 640, 640, type = "uint8")) to listOf(goodOut)),
                 ImportRejection.INPUT_NOT_NCHW to (listOf(tensor(1, 640, 640)) to listOf(goodOut)),
                 ImportRejection.INPUT_NHWC to (listOf(tensor(1, 640, 640, 3)) to listOf(goodOut)),
-                ImportRejection.INPUT_NOT_SQUARE to (listOf(tensor(1, 3, 640, 480)) to listOf(goodOut)),
+                ImportRejection.INPUT_ASPECT to (listOf(tensor(1, 3, 1280, 160)) to listOf(goodOut)),
                 ImportRejection.INPUT_SIZE_NOT_MULTIPLE to (listOf(tensor(1, 3, 650, 650)) to listOf(goodOut)),
                 ImportRejection.INPUT_SIZE_OUT_OF_RANGE to (listOf(tensor(1, 3, 32, 32)) to listOf(goodOut)),
                 ImportRejection.OUTPUT_COUNT to (listOf(goodIn) to listOf(goodOut, goodOut)),

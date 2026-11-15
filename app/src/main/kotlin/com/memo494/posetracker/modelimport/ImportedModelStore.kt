@@ -150,11 +150,16 @@ class ImportedModelStore private constructor(
      * A fresh, empty temporary file inside the store's directory (the same file system as the model files, so
      * [accept] can rename it). Any leftover from an earlier run is deleted first.
      *
+     * Like every method here it is a store access: the first one of the process runs the app-start step (and with
+     * it the cleanup of a leftover temporary file of a dead process) before a file is handed out, so the store can
+     * never delete a temporary file that this process was given, whatever the in-flight flag says.
+     *
      * @throws IOException when the directory cannot be created or the leftover cannot be deleted.
      */
     fun newTempFile(): File {
         threadCheck()
         synchronized(LOCK) {
+            currentGuard()
             val directory = ensureDirectory() ?: throw IOException("Cannot create $DIRECTORY_NAME directory")
             val temp = File(directory, TEMP_NAME)
             if (temp.exists() && !temp.delete()) throw IOException("Cannot delete the old temporary file")
@@ -222,8 +227,9 @@ class ImportedModelStore private constructor(
         val prefs = prefsLazy.value
         val stored = ImportGuard.decode(prefs.read())
         if (!appStartApplied.compareAndSet(false, true)) return stored
-        // The importer sets its flag before newTempFile(), so a temporary file seen here with the flag clear is a
-        // leftover of a dead process (the temporary file name is fixed, so it would also be replaced on the next import).
+        // newTempFile() runs this step before it hands a file out, so on the first access of the process a temporary
+        // file is a leftover of a dead process, never one of this process. The flag is a second guard: it keeps the
+        // file of a running import when the step is applied again after a trip that could not be stored.
         if (!importInFlight()) deleteLeftoverTemp()
         val applied = ImportGuard.onAppStart(stored)
         // If the trip cannot be stored, apply it again on the next call: a stale Pending must not read as usable.

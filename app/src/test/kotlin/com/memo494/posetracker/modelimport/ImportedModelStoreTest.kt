@@ -335,6 +335,18 @@ class ImportedModelStoreTest {
     }
 
     @Test
+    fun tempFileHandedOutByThisProcess_survivesTheFirstOtherAccess_withoutTheImportFlag() {
+        val store = newStore()
+        val temp = stage(store, newBytes)
+
+        store.state()
+
+        assertThat(importRunning).isFalse()
+        assertThat(temp.exists()).isTrue()
+        assertThat(store.accept(temp, newMeta)).isTrue()
+    }
+
+    @Test
     fun laterAccess_doesNotDeleteTheTempFileOfAnImportInProgress() {
         val store = newStore()
         store.state()

@@ -19,6 +19,8 @@ class LiteRtPoseDetectorTest {
         override var lastMaxRawScore: Float = PoseDetector.NOT_MEASURED.toFloat(),
         override var lastRawRowsAboveThreshold: Int = PoseDetector.NOT_MEASURED,
         override var lastNanRawRows: Int = PoseDetector.NOT_MEASURED,
+        override var lastPreMs: Float = PoseDetector.NOT_MEASURED.toFloat(),
+        override var lastPostMs: Float = PoseDetector.NOT_MEASURED.toFloat(),
     ) : PoseEngine {
         var detectCalls = 0
         var closeCalls = 0
@@ -371,6 +373,48 @@ class LiteRtPoseDetectorTest {
         assertThat(fake.lastMaxRawScore).isLessThan(0f)
         assertThat(fake.lastRawRowsAboveThreshold).isEqualTo(PoseDetector.NOT_MEASURED)
         assertThat(fake.lastNanRawRows).isEqualTo(PoseDetector.NOT_MEASURED)
+    }
+
+    @Test
+    fun preAndPostTimesComeFromTheEngine() {
+        val engine = FakeEngine(lastPreMs = 1.5f, lastPostMs = 0.75f)
+        val detector = detectorOver(engine)
+
+        assertThat(detector.lastPreMs).isEqualTo(1.5f)
+        assertThat(detector.lastPostMs).isEqualTo(0.75f)
+    }
+
+    @Test
+    fun preAndPostTimesFollowTheEngineAfterEachDetect() {
+        val engine = FakeEngine()
+        val detector = detectorOver(engine)
+        assertThat(detector.lastPreMs).isEqualTo(PoseDetector.NOT_MEASURED.toFloat())
+        assertThat(detector.lastPostMs).isEqualTo(PoseDetector.NOT_MEASURED.toFloat())
+
+        engine.lastPreMs = 2.25f
+        engine.lastPostMs = 0.5f
+        detector.detect(captureFrame())
+
+        assertThat(detector.lastPreMs).isEqualTo(2.25f)
+        assertThat(detector.lastPostMs).isEqualTo(0.5f)
+    }
+
+    @Test
+    fun anEngineThatDoesNotMeasurePreAndPostSaysNotMeasured() {
+        val engine =
+            object : PoseEngine {
+                override val accelerator: Accelerator = Accelerator.CPU
+                override val inputWidth: Int = INPUT_SIZE
+                override val inputHeight: Int = INPUT_SIZE
+                override val lastInferenceMs: Float = 0f
+
+                override fun detect(frame: CaptureFrame): List<PoseDetection> = emptyList()
+
+                override fun close() = Unit
+            }
+
+        assertThat(engine.lastPreMs).isEqualTo(PoseDetector.NOT_MEASURED.toFloat())
+        assertThat(engine.lastPostMs).isEqualTo(PoseDetector.NOT_MEASURED.toFloat())
     }
 
     private companion object {

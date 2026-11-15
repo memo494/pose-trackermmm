@@ -43,6 +43,20 @@ interface PoseDetector : Closeable {
         get() = NOT_MEASURED
 
     /**
+     * Diagnostics: pre-processing (image to model input) of the last [detect] call, in milliseconds.
+     * [NOT_MEASURED] (negative) when the detector does not measure it or before the first call.
+     */
+    val lastPreMs: Float
+        get() = NOT_MEASURED.toFloat()
+
+    /**
+     * Diagnostics: post-processing (model output to detections) of the last [detect] call, in milliseconds.
+     * [NOT_MEASURED] (negative) when the detector does not measure it or before the first call.
+     */
+    val lastPostMs: Float
+        get() = NOT_MEASURED.toFloat()
+
+    /**
      * Detects the people in [frame].
      *
      * The result is in Img space (pixels of the capture content rect) and carries the timestamp, its source and

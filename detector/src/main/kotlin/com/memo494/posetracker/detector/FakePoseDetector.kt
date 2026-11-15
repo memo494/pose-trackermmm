@@ -29,6 +29,12 @@ class FakePoseDetector(
     /** Always 0: nothing is inferred. */
     override val lastInferenceMs: Float = 0f
 
+    /** Always [PoseDetector.NOT_MEASURED]: nothing is pre-processed. */
+    override val lastPreMs: Float = PoseDetector.NOT_MEASURED.toFloat()
+
+    /** Always [PoseDetector.NOT_MEASURED]: nothing is post-processed. */
+    override val lastPostMs: Float = PoseDetector.NOT_MEASURED.toFloat()
+
     override fun detect(frame: CaptureFrame): DetectionFrame {
         check(!closed) { "FakePoseDetector is closed" }
         if (frames.isEmpty()) {

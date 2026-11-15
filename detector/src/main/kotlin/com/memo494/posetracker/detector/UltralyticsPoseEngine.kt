@@ -30,6 +30,8 @@ internal class UltralyticsPoseEngine private constructor(
     override val inputHeight: Int,
 ) : PoseEngine {
     private var inferenceMs = 0f
+    private var preMs = PoseDetector.NOT_MEASURED.toFloat()
+    private var postMs = PoseDetector.NOT_MEASURED.toFloat()
     private var sourceBitmap: Bitmap? = null
     private var wrappedArray: ByteArray? = null
     private var wrappedBuffer: ByteBuffer? = null
@@ -47,6 +49,12 @@ internal class UltralyticsPoseEngine private constructor(
     override val lastNanRawRows: Int
         get() = estimator.lastNanRawRows
 
+    override val lastPreMs: Float
+        get() = preMs
+
+    override val lastPostMs: Float
+        get() = postMs
+
     override fun detect(frame: CaptureFrame): List<PoseDetection> {
         check(!closed) { "UltralyticsPoseEngine is closed" }
         val bitmap = sourceBitmapFor(frame.widthImg, frame.heightImg)
@@ -55,6 +63,8 @@ internal class UltralyticsPoseEngine private constructor(
         bitmap.copyPixelsFromBuffer(pixels)
         val result = estimator.predict(bitmap, frame.widthImg, frame.heightImg)
         inferenceMs = result.inferenceMs.toFloat()
+        preMs = result.preMs.toFloat()
+        postMs = result.postMs.toFloat()
         return YoloResultMapper.toDetections(result)
     }
 

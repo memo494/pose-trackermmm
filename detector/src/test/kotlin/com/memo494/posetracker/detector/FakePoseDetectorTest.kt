@@ -92,6 +92,18 @@ class FakePoseDetectorTest {
     }
 
     @Test
+    fun doesNotMeasurePreAndPostTime_beforeOrAfterDetect() {
+        val detector = FakePoseDetector(emptyList(), INPUT_SIZE, INPUT_SIZE, Accelerator.CPU)
+        assertThat(detector.lastPreMs).isEqualTo(PoseDetector.NOT_MEASURED.toFloat())
+        assertThat(detector.lastPostMs).isEqualTo(PoseDetector.NOT_MEASURED.toFloat())
+
+        detector.detect(captureFrame(timestampNs = 1L))
+
+        assertThat(detector.lastPreMs).isEqualTo(PoseDetector.NOT_MEASURED.toFloat())
+        assertThat(detector.lastPostMs).isEqualTo(PoseDetector.NOT_MEASURED.toFloat())
+    }
+
+    @Test
     fun reportsARectangularInputAsWidthAndHeight() {
         val detector = FakePoseDetector(emptyList(), RECT_WIDTH, RECT_HEIGHT, Accelerator.GPU)
 

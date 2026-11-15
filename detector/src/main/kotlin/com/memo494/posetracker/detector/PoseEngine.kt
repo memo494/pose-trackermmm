@@ -36,6 +36,14 @@ internal interface PoseEngine : Closeable {
     val lastNanRawRows: Int
         get() = PoseDetector.NOT_MEASURED
 
+    /** Pre-processing (image to model input) of the last [detect], in ms; [PoseDetector.NOT_MEASURED] before the first call. */
+    val lastPreMs: Float
+        get() = PoseDetector.NOT_MEASURED.toFloat()
+
+    /** Post-processing (model output to detections) of the last [detect], in ms; [PoseDetector.NOT_MEASURED] before the first call. */
+    val lastPostMs: Float
+        get() = PoseDetector.NOT_MEASURED.toFloat()
+
     /**
      * Runs the model on [frame] and returns every person it found, in Img space, in the order the model
      * ranks them, without any score or count limit applied.

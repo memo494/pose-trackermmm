@@ -268,6 +268,38 @@ this process's own first-access cleanup. The `importInFlight` check stays as the
 when the app-start step is applied again after a trip that could not be stored). No existing test changes; one new
 test pins the rule without the flag.
 
+### Review R2 (android-reviewer, `431708e..efb4d1d`, 2026-11-15) and T10
+One critical finding, three warnings, six suggestions. Checked and fine: the single-flight flag is released on
+every path, the early stop of the copy, `accept` rollback and orphans, `storedFileMatches` without a lock, no
+per-frame allocation in `RedrawPolicy`, no weakened test (718 → 788), docs and checklist match `strings.xml`,
+the only protected file changed is `export-model.yml` (tag validated, `latest` still refused).
+
+| # | Finding | Decision |
+|---|---|---|
+| C1 | T9 can bring back a model that is switched off after a LOAD trip: the importer replaces `tripped:load` by `pending:probe` while it probes a new file; a process death there reads as `Tripped(PROBE)` at the next start, and T9 then keeps the stored model | **T10, before the merge** |
+| W1 | A `Failed(BUSY)` result of a second import (second activity instance, or a pick in the instant between a rotation and the start of the background import) ends `importing` in the screen that waits for the first one; **Use built-in model** could then delete the temporary file of the running import, and Start is enabled | store part in **T10** (`clear()` refuses while an import runs); the screen part goes to the follow-up |
+| W2 | A cloud provider's stream that stalls keeps the import, and so the three buttons, blocked until the app is closed | follow-up (a no-progress timeout or a Cancel button); the way out today is closing the app from recents |
+| W3 | A result published in the instant after the flag is cleared and before a recreated screen subscribes is not shown (the model state is still read again) | follow-up |
+| S1–S6 | re-applied app-start step vs this process's own Pending; meta replaced by one atomic rename now that files are content-named; log a main-thread refusal inside `ModelChoice`; sniff once; cache the hash per process; result handling out of the Activity and tested | follow-up, with W1–W3, as one PR "import flow hardening" after the phone test |
+
+### T10 — R2 fixes before the merge · S · agent = implementer
+**Files:** `app/modelimport/{ModelImporter,ImportedModelStore}.kt`, KDoc of `core/modelimport/ImportGuard.kt` if it
+says who writes what, `docs/ARCHITECTURE.md` §8; tests `ModelImporterTest`, `ImportedModelStoreTest`.
+- **C1 A stored trip is never replaced by the probe marker.** In `ModelImporter`, when the guard found before the
+  probe is `Tripped` (any stage), nothing is written before or after the probe: the trip stays as it is for the
+  whole probe. A process death in that probe therefore still reads as the old trip (a LOAD trip keeps the stored
+  model switched off; a PROBE trip keeps today's T9 behaviour). Only an accept (or **Use built-in model**) lifts
+  it, as before. With an `Idle` guard nothing changes (`pending:probe`, then `idle`).
+- **W1 `ImportedModelStore.clear()` refuses while an import runs** (`importInFlight()`): it returns `false`,
+  deletes nothing and leaves the guard alone (the running import owns the temporary file and the marker).
+
+**Tests first:** a stored `tripped:load` is still `tripped:load` inside the probe and no `pending:probe` is ever
+written; the end-to-end case of C1 (stored model, `tripped:load`, the text of the marker taken inside the probe as
+"the process died here", a fresh-process store over it, `ModelChoice.resolve` with a check that says yes →
+`BuiltIn(GUARD_TRIPPED_LOAD)`); the same for a stored `tripped:probe`; `clear()` during an import changes nothing
+and reports `false`. `@Test` count only goes up.
+**Acceptance:** verify green.
+
 ## Then (lead)
 `android-reviewer` on the whole diff → fixes through the implementer → PR ready, CI green → handoff
 `docs/progress/M0c.md`, `docs/REPO_MAP.md`, PR text ending with "How to test on the phone" → ask the owner
@@ -314,7 +346,7 @@ reviewer could not construct a leak (teardown runs on the same looper after `sta
 ## Progress
 | Task | Status | Commit | Notes |
 |---|---|---|---|
-| T1 | done, not yet run in CI | a8f943a, 0efa029 | script and workflow written; not run here (no Ultralytics); lead dispatches sizes=640 publish_tag=models |
+| T1 | done; export run green 2026-11-13 | a8f943a, 0efa029 | script and workflow written; `export-model` dispatched with sizes=640 publish_tag=models: the pre-release `models` holds `yolo26n-pose_640.tflite` and `.json` |
 | T2 | done, android CI green | 35640c3, cfd0b67 | `core/modelimport/*` + import limits in `TrackerConfig`; guard text form `idle`/`pending:<stage>`/`tripped:<stage>`; KDoc of `ImportGuard` says who calls what |
 | T3 | done, android CI green | feda3bc | `ModelProbe.probe(file): ProbeResult` (CPU `CompiledModel`, never throws); `PoseDetectors.fromImported` + internal `verifyImportedFile` (missing: `FileNotFoundException`; length/hash: `ModelIntegrityException`) |
 | T4a | done, android CI green | cdad460, 9573472, f7bbcd4 | `app/modelimport/{ImportedModelStore,ModelImporter,ModelChoice,WorkerThreadCheck}`; accept order: delete old meta, rename model, rename new meta (never a meta for another file); a refused import keeps a `Tripped` guard, only an accept clears it; +55 `@Test`; `app/build.gradle.kts` got `unitTests.isReturnDefaultValues = true` (it was missing) |
@@ -322,4 +354,10 @@ reviewer could not construct a leak (teardown runs on the same looper after `sta
 | T5 | done, android CI green | a421689, 9040b7a | reducer: model block (`activeModel`, `importing`, `importResult`, `modelNotice`), events/effects per plan, `ControlStep.importUri` carries the picked uri; `control/ControlModelMapper` maps outcomes and stored state to pure data and every enum value to one string; `MainActivity` runs import/clear/read on `Dispatchers.IO`; an import lost when the activity dies is documented, no service |
 | T7 | done, android CI green | 5939cc0, 937368c | marks: ring (min 12 dp) + corner brackets by default; switch **Debug marks (box and body points)** persisted off the main thread, passed to the service as an Intent extra; +tests in `HeadRingTest`, `CornerBracketsTest`, `TrackerConfigTest`, `ControlReducerTest` |
 | T6 | done, docs only | see commit | `docs/ARCHITECTURE.md` §6.5, §6.7, §8, §12, §13, §15 and `docs/TEST_CHECKLIST.md` section "M0c — import a model, steadier marks" (7 blocks); the old "dot A/B" bullet now points at the **Debug marks** switch |
-| R1 | — | | review fixes R1-1 … R1-10 |
+| R1 | done, android CI green (run 68) | 5e52d77, 7c74acf, 1c86102, 8208279 | review fixes R1-1 … R1-10, written and pushed by a second session on 2026-11-14 (both sessions reviewed the same diff; the owner then kept this one as the lead). Its first CI runs were red: spotless (fixed in 8208279, committed from the owner's account) and one stale expectation (b0fd5b3, section "CI run 64") |
+| T8 | done, android CI green (run 68) | 4fb1ff7, e5d806f, 947b2c4 | only what R1 had not covered: the copy stops as soon as the header shows it is not TFLite (`CopyResult.NotTflite`; small files still say TOO_SMALL first); the first store access of a process deletes a leftover `import.tflite` unless an import runs; `newTempFile()` runs that app-start step itself (section "CI run 67"); a saved Debug-marks value that arrives after a toggle is ignored (`debugMarksTouched`); ARCHITECTURE §5 rows; checklist block 5 accepts both refusal texts |
+| T9 | done, android CI green (run 68) | cb5b68f | owner's option B: `ModelChoice.resolve(state, storedFileMatches)`; `ImportedModelStore.storedFileMatches` (length, then sha256; refuses the main thread; any failure is "no"); `SessionModelLoader(verifyStored)`; `ModelNoticeKind.PROBE_TRIP_MODEL_KEPT` + `model_notice_probe_trip_kept`, new text for `model_notice_guard_probe`; the first Start of the kept model lifts the trip; ARCHITECTURE §5, §8 |
+| — | done, android CI green (run 68) | efb4d1d | from the owner's review copy of `ControlScreen` (Gemini): only the failure text with a placeholder gets the details argument; no visible change. The same copy's re-wrapped lines in `MainActivity` were not taken (cosmetic, and the copy predated T9) |
+| R2 | see `docs/progress/M0c.md` | | second android-reviewer pass on `431708e..efb4d1d` (everything after the first review) |
+
+`@Test` = 788 (was 718 before R1). Last green run: 43673985840 (#68) on `efb4d1d`, APK v0.1.68.

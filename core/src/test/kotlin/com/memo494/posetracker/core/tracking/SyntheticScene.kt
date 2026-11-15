@@ -129,7 +129,11 @@ class SceneFrame(
     val timeS: Double,
     val frame: DetectionFrame,
     val truth: List<TruthPerson>,
-)
+) {
+    /** The detections of [frame]. */
+    val detections: List<PoseDetection>
+        get() = frame.detections
+}
 
 /**
  * Deterministic synthetic detections for tracker tests. The only randomness is one `java.util.Random(seed)`,

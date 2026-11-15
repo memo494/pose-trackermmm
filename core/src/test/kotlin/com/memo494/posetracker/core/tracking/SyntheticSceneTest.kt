@@ -74,7 +74,7 @@ class SyntheticSceneTest {
     @Test
     fun noiseFreeLayout_putsBoxAndHeadAtTheDocumentedPlaces() {
         val scene = SyntheticScene(listOf(stillPerson()), durationS = 0.1)
-        val detection = scene.frames[0].frame.detections.single()
+        val detection = scene.frames[0].detections.single()
         assertThat(detection.boxLeftImg).isWithin(1e-3f).of(460f)
         assertThat(detection.boxRightImg).isWithin(1e-3f).of(540f)
         assertThat(detection.boxTopImg).isWithin(1e-3f).of(280f)
@@ -86,7 +86,7 @@ class SyntheticSceneTest {
     @Test
     fun headKeypoints_averageToTheTrueHeadCentre() {
         val scene = SyntheticScene(listOf(stillPerson()), durationS = 0.1)
-        val detection = scene.frames[0].frame.detections.single()
+        val detection = scene.frames[0].detections.single()
         var sumX = 0.0
         var sumY = 0.0
         for (k in 0 until TrackerConfig.HEAD_KEYPOINT_COUNT) {
@@ -101,7 +101,7 @@ class SyntheticSceneTest {
     @Test
     fun otherKeypoints_lieInsideTheBoxAtHighConfidence() {
         val scene = SyntheticScene(listOf(stillPerson()), durationS = 0.1)
-        val detection = scene.frames[0].frame.detections.single()
+        val detection = scene.frames[0].detections.single()
         for (k in TrackerConfig.HEAD_KEYPOINT_COUNT until SyntheticScene.KEYPOINT_COUNT) {
             assertThat(detection.keypointXImg(k)).isAtLeast(detection.boxLeftImg)
             assertThat(detection.keypointXImg(k)).isAtMost(detection.boxRightImg)
@@ -123,7 +123,7 @@ class SyntheticSceneTest {
         var noseSumSquares = 0.0
         var leftSumSquares = 0.0
         for (sceneFrame in scene.frames) {
-            val detection = sceneFrame.frame.detections.single()
+            val detection = sceneFrame.detections.single()
             val noseError = detection.keypointXImg(0) - headX
             val leftError = detection.boxLeftImg - (headX - 0.2 * height)
             noseSumSquares += noseError * noseError
@@ -190,13 +190,13 @@ class SyntheticSceneTest {
         val scene = SyntheticScene(listOf(person), durationS = 2.0, fps = 20.0)
         assertThat(scene.frames.count { it.truth.isNotEmpty() }).isEqualTo(21)
         assertThat(scene.frames[9].truth).isEmpty()
-        assertThat(scene.frames[9].frame.detections).isEmpty()
+        assertThat(scene.frames[9].detections).isEmpty()
         val middle = scene.frames[20].truth.single()
         assertThat(middle.personId).isEqualTo(3)
         assertThat(middle.headXImg).isWithin(1e-9).of(200.0)
         assertThat(middle.headYImg).isWithin(1e-9).of(150.0)
         assertThat(middle.heightImg).isWithin(1e-9).of(300.0)
-        val detection = scene.frames[20].frame.detections.single()
+        val detection = scene.frames[20].detections.single()
         assertThat(detection.boxBottomImg - detection.boxTopImg).isWithin(1e-3f).of(300f)
         assertThat(scene.frames[30].truth).hasSize(1)
         assertThat(scene.frames[31].truth).isEmpty()
@@ -205,32 +205,33 @@ class SyntheticSceneTest {
     @Test
     fun scoreFunction_isEvaluatedAtTheFrameTimeAndClamped() {
         val scene = SyntheticScene(listOf(stillPerson(score = { t -> 0.5 + 0.4 * t })), durationS = 2.0, fps = 20.0)
-        assertThat(scene.frames[0].frame.detections.single().score).isWithin(1e-6f).of(0.5f)
-        assertThat(scene.frames[10].frame.detections.single().score).isWithin(1e-6f).of(0.7f)
-        assertThat(scene.frames[39].frame.detections.single().score).isAtMost(1f)
+        assertThat(scene.frames[0].detections.single().score).isWithin(1e-6f).of(0.5f)
+        assertThat(scene.frames[10].detections.single().score).isWithin(1e-6f).of(0.7f)
+        assertThat(scene.frames[39].detections.single().score).isAtMost(1f)
     }
 
     @Test
     fun dropout_emitsNothingButTheTruthStaysAndTheMeasurementIsNaN() {
         val scene = SyntheticScene(listOf(stillPerson(dropouts = listOf(TimeInterval(0.5, 1.0)))), durationS = 2.0, fps = 20.0)
         assertThat(scene.frames).hasSize(40)
-        assertThat(scene.frames.count { it.frame.detections.isEmpty() }).isEqualTo(10)
+        assertThat(scene.frames.count { it.detections.isEmpty() }).isEqualTo(10)
         assertThat(scene.frames.all { it.truth.size == 1 }).isTrue()
         val dropped = scene.frames[12]
-        assertThat(dropped.frame.detections).isEmpty()
-        assertThat(dropped.truth.single().measuredHeadXImg.isNaN()).isTrue()
-        assertThat(dropped.truth.single().headXImg).isEqualTo(headX)
-        val shown = scene.frames[5]
-        assertThat(shown.truth.single().measuredHeadXImg).isWithin(1e-3).of(headX)
-        assertThat(shown.truth.single().measuredHeadYImg).isWithin(1e-3).of(headY)
+        assertThat(dropped.detections).isEmpty()
+        val droppedTruth = dropped.truth.single()
+        assertThat(droppedTruth.measuredHeadXImg.isNaN()).isTrue()
+        assertThat(droppedTruth.headXImg).isEqualTo(headX)
+        val shownTruth = scene.frames[5].truth.single()
+        assertThat(shownTruth.measuredHeadXImg).isWithin(1e-3).of(headX)
+        assertThat(shownTruth.measuredHeadYImg).isWithin(1e-3).of(headY)
     }
 
     @Test
     fun duplicate_emitsTheSamePersonTwiceWithASmallOffsetAndALowerScore() {
         val scene = SyntheticScene(listOf(stillPerson(duplicates = listOf(TimeInterval(0.5, 1.0)))), durationS = 2.0, fps = 20.0)
-        assertThat(scene.frames.count { it.frame.detections.size == 2 }).isEqualTo(10)
-        assertThat(scene.frames.count { it.frame.detections.size == 1 }).isEqualTo(30)
-        val both = scene.frames[12].frame.detections
+        assertThat(scene.frames.count { it.detections.size == 2 }).isEqualTo(10)
+        assertThat(scene.frames.count { it.detections.size == 1 }).isEqualTo(30)
+        val both = scene.frames[12].detections
         assertThat(both[1].score).isLessThan(both[0].score)
         assertThat(both[1].score).isGreaterThan(both[0].score - 0.1f)
         val shift = both[1].boxLeftImg - both[0].boxLeftImg
@@ -243,24 +244,24 @@ class SyntheticSceneTest {
     fun falsePositive_addsAnExtraDetectionOfNobodyWithLowHeadConfidence() {
         val fp = FalsePositive(TimeInterval(0.5, 1.0), 900.0, 200.0, 120.0, 0.55)
         val scene = SyntheticScene(listOf(stillPerson()), durationS = 2.0, fps = 20.0, falsePositives = listOf(fp))
-        assertThat(scene.frames.count { it.frame.detections.size == 2 }).isEqualTo(10)
+        assertThat(scene.frames.count { it.detections.size == 2 }).isEqualTo(10)
         assertThat(scene.frames.all { it.truth.size == 1 }).isTrue()
-        val extra = scene.frames[12].frame.detections[1]
+        val extra = scene.frames[12].detections[1]
         assertThat(extra.score).isWithin(1e-6f).of(0.55f)
         assertThat(extra.boxBottomImg - extra.boxTopImg).isWithin(1e-3f).of(120f)
         for (k in 0 until TrackerConfig.HEAD_KEYPOINT_COUNT) {
             assertThat(extra.keypointScores[k]).isEqualTo(SyntheticScene.LOW_CONFIDENCE)
         }
         assertThat(extra.keypointScores[TrackerConfig.HEAD_KEYPOINT_COUNT]).isEqualTo(SyntheticScene.KEYPOINT_CONFIDENCE)
-        assertThat(scene.frames[2].frame.detections).hasSize(1)
+        assertThat(scene.frames[2].detections).hasSize(1)
     }
 
     @Test
     fun keypointDropout_lowersOnlyTheChosenConfidencesAndKeepsThePositions() {
         val dropout = KeypointDropout(TimeInterval(0.5, 1.0), setOf(0, 1, 2))
         val scene = SyntheticScene(listOf(stillPerson(keypointDropouts = listOf(dropout))), durationS = 2.0, fps = 20.0)
-        val inside = scene.frames[12].frame.detections.single()
-        val outside = scene.frames[2].frame.detections.single()
+        val inside = scene.frames[12].detections.single()
+        val outside = scene.frames[2].detections.single()
         for (k in 0 until SyntheticScene.KEYPOINT_COUNT) {
             val expected = if (k <= 2) SyntheticScene.LOW_CONFIDENCE else SyntheticScene.KEYPOINT_CONFIDENCE
             assertThat(inside.keypointScores[k]).isEqualTo(expected)
@@ -268,6 +269,6 @@ class SyntheticSceneTest {
             assertThat(inside.keypointXImg(k)).isEqualTo(outside.keypointXImg(k))
             assertThat(inside.keypointYImg(k)).isEqualTo(outside.keypointYImg(k))
         }
-        assertThat(scene.frames.count { it.frame.detections.single().keypointScores[0] == SyntheticScene.LOW_CONFIDENCE }).isEqualTo(10)
+        assertThat(scene.frames.count { it.detections.single().keypointScores[0] == SyntheticScene.LOW_CONFIDENCE }).isEqualTo(10)
     }
 }

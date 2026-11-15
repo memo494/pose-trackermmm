@@ -50,16 +50,16 @@ unit-tested), root `build.gradle.kts` (Spotless exclusion for `**/com/ultralytic
 Left in place although unused by pose (harmless, would only add diff noise): `ImageUtils.processGrayscaleImage` and
 `copyRgbBitmapToFloatBuffer`, `BasePredictor.modelMaskCropRect`, `depthColors` and other palette helpers in `Utils.kt`.
 
-## Known issues (fix in M1; plan decision D2)
+## Known issues (fix in M1b; plan decision D2)
 
 - **Threading.** Upstream creates the model on a throwaway executor and runs it on its camera executor. LiteRT's rule is
-  create/run/close on one thread (ARCHITECTURE §5). Our adapter must own a single inference thread; M1 verifies it.
+  create/run/close on one thread (ARCHITECTURE §5). Our adapter owns a single inference thread (true since M0b).
 - **Per-frame allocations** (AGENTS rule 8). The decoder allocates every frame: `LiteRtModel.run` (`readAsFloats`, a new
   `FloatArray` per output) and `PoseEstimator.postProcessPose`/`postProcessEndToEndPose` (lists, `RectF`, `Pair`s,
   `Keypoints`). `PoseEstimator.predict` also builds `YOLOResult`. Our own code complies with rule 8 from M0b; the vendored
-  decoder is rewritten allocation-free in M1 ("buffers allocated once").
+  decoder is rewritten allocation-free in M1b ("buffers allocated once").
 - **`nmsPoseDetections` second-pass threshold** is hard-coded to 0.25 (above our 0.15 score threshold), so detections
-  between 0.15 and 0.25 are dropped in the classic layout. Revisit with the tuning in M1.
+  between 0.15 and 0.25 are dropped in the classic layout. Revisit with the tuning in M1b.
 - **Input source.** `prepareBitmapForModel` needs a `Bitmap` of exact width (no row stride padding); the adapter provides it.
 - **`readFloat()` allocates (found in M1a).** LiteRT Kotlin `TensorBuffer.readFloat()` returns a new `FloatArray` on
   every call (JNI `NewFloatArray` in `litert_tensor_buffer_jni.cc`; `TensorBuffer.kt` has no read-into overload).

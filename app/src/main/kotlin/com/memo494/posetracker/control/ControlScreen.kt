@@ -192,8 +192,14 @@ private fun ImportResultText(result: ImportSummary) {
         }
 
         is ImportSummary.Failed -> {
+            val text =
+                if (result.kind == ImportFailure.IO) {
+                    stringResource(R.string.model_result_failed, result.message.orEmpty())
+                } else {
+                    stringResource(ControlModelMapper.failureRes(result.kind))
+                }
             Text(
-                text = stringResource(ControlModelMapper.failureRes(result.kind), result.message.orEmpty()),
+                text = text,
                 color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodyMedium,
             )

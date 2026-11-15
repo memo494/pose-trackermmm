@@ -80,8 +80,7 @@ class ModelChoiceTest {
         fileExists: Boolean,
         guard: ImportGuardState,
         intact: Boolean,
-    ): ModelChoice =
-        ModelChoice.resolve(StoredModelState(if (hasMeta) meta else null, fileExists, guard)) { intact }
+    ): ModelChoice = ModelChoice.resolve(StoredModelState(if (hasMeta) meta else null, fileExists, guard)) { intact }
 
     @Test
     fun probeTrip_withAStoredModelThatStillMatches_keepsTheStoredModel() {

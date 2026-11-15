@@ -155,7 +155,10 @@ class ModelImporter(
     ): ImportOutcome {
         val copy =
             when (val copied = copyToTemp(source, temp)) {
-                is CopyResult.TooLarge -> return tooLarge("more than ${config.importMaxBytes} bytes")
+                is CopyResult.TooLarge -> {
+                    return tooLarge("more than ${config.importMaxBytes} bytes")
+                }
+
                 is CopyResult.NotTflite -> {
                     return ImportOutcome.Rejected(
                         RejectionKind.Sniffed(SniffRejection.NOT_TFLITE),
@@ -163,7 +166,9 @@ class ModelImporter(
                     )
                 }
 
-                is CopyResult.Copied -> copied
+                is CopyResult.Copied -> {
+                    copied
+                }
             }
         val sniff = ModelFileSniffer.looksLikeTflite(copy.header, copy.bytes, config)
         if (sniff is SniffResult.Rejected) {

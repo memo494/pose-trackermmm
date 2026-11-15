@@ -23,6 +23,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.memo494.posetracker.R
+import com.memo494.posetracker.core.TrackerConfig
 
 private val SCREEN_PADDING = 24.dp
 private val ITEM_SPACING = 16.dp
@@ -175,7 +176,7 @@ private fun ModelBlock(
 private fun activeModelLine(state: ControlState): String =
     when (val model = state.activeModel) {
         ActiveModel.BuiltIn -> stringResource(R.string.model_active_built_in, state.builtInInputSize)
-        is ActiveModel.Imported -> stringResource(R.string.model_active_imported, model.displayName, model.inputSize)
+        is ActiveModel.Imported -> stringResource(R.string.model_active_imported, model.displayName, model.inputText)
     }
 
 @Composable
@@ -186,7 +187,15 @@ private fun ImportResultText(result: ImportSummary) {
         }
 
         is ImportSummary.Rejected -> {
-            val sentence = stringResource(ControlModelMapper.messageRes(result.reason))
+            val sentence =
+                if (result.reason == ModelRejectionReason.INPUT_ASPECT) {
+                    stringResource(
+                        ControlModelMapper.messageRes(result.reason),
+                        ControlModelMapper.aspectLimitText(TrackerConfig().importMaxInputAspect),
+                    )
+                } else {
+                    stringResource(ControlModelMapper.messageRes(result.reason))
+                }
             Text(sentence, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
             DetailsLine(result.details)
         }
@@ -222,7 +231,7 @@ private fun ControlScreenPreview() {
             state =
                 ControlState(
                     notice = ControlNotice.OVERLAY_PERMISSION_NEEDED,
-                    activeModel = ActiveModel.Imported("yolo26n-pose_640.tflite", 640),
+                    activeModel = ActiveModel.Imported("yolo26n-pose_640.tflite", "640"),
                     importResult = ImportSummary.Rejected(ModelRejectionReason.INPUT_NHWC, "input [1,640,640,3] float32"),
                 ),
             buildLabel = "v0.1.1 · local",

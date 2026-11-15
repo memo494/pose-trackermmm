@@ -44,14 +44,16 @@ enum class ModelFallback {
  * @property message the one-line failure text for [ModelFallback.LOAD_FAILED] and
  *   [ModelFallback.STATE_UNREADABLE] (class name and message, at most `ModelProbe.MAX_MESSAGE_CHARS`
  *   characters); `null` otherwise.
- * @property inputSize side of the running model's square input, in model pixels (Mdl); 0 = no model is running.
+ * @property inputWidth width of the running model's input, in model pixels (Mdl); 0 = no model is running.
+ * @property inputHeight height of the running model's input, in model pixels (Mdl); 0 = no model is running.
  */
 data class ModelStatus(
     val source: ModelSource,
     val meta: ImportedModelMeta?,
     val fallback: ModelFallback?,
     val message: String?,
-    val inputSize: Int,
+    val inputWidth: Int,
+    val inputHeight: Int,
 )
 
 /**

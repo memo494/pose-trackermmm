@@ -2,10 +2,13 @@ package com.memo494.posetracker.diagnostics
 
 import com.google.common.truth.Truth.assertThat
 import com.memo494.posetracker.core.modelimport.ImportedModelMeta
+import com.memo494.posetracker.core.stats.Percentiles
+import com.memo494.posetracker.core.stats.TimingSummary
 import com.memo494.posetracker.modelimport.ModelFallback
 import com.memo494.posetracker.modelimport.ModelSource
 import com.memo494.posetracker.modelimport.ModelStatus
 import org.junit.Test
+import java.util.Locale
 
 class DiagnosticsReportTest {
     private val appInfo = linkedMapOf("versionName" to "0.1.7", "gitSha" to "abc1234")
@@ -221,15 +224,189 @@ class DiagnosticsReportTest {
         assertThat(lines).containsAtLeastElementsIn(expected)
     }
 
+    // ---- timing and thermal (M1a T5) ----
+
+    private val timedStats =
+        stats.copy(
+            timing =
+                TimingSummary(
+                    samples = 480,
+                    copyMs = Percentiles(1.04f, 2.26f),
+                    preMs = Percentiles(1.5f, 2.0f),
+                    inferMs = Percentiles(7.5f, 12.34f),
+                    postMs = Percentiles(0.5f, 0.74f),
+                    frameMs = Percentiles(13.04f, 20.96f),
+                    resultAgeMs = Percentiles(17.0f, 31.52f),
+                ),
+            thermalStatus = "MODERATE",
+            thermalHeadroom = 0.87f,
+        )
+
+    private val timingKeys =
+        listOf(
+            "timingSamples",
+            "copyMsP50",
+            "copyMsP95",
+            "preMsP50",
+            "preMsP95",
+            "inferMsP50",
+            "inferMsP95",
+            "postMsP50",
+            "postMsP95",
+            "frameMsP50",
+            "frameMsP95",
+            "resultAgeMsP50",
+            "resultAgeMsP95",
+            "thermalStatus",
+            "thermalHeadroom",
+        )
+
+    private fun summaryLines(stats: CaptureStats?): List<String> = build(stats = stats).text("summary.txt").trimEnd('\n').split("\n")
+
+    @Test
+    fun summary_timingLines_comeLastInTheDocumentedOrderWithOneDecimal() {
+        val lines = summaryLines(timedStats)
+
+        assertThat(lines.takeLast(timingKeys.size))
+            .containsExactly(
+                "timingSamples=480",
+                "copyMsP50=1.0",
+                "copyMsP95=2.3",
+                "preMsP50=1.5",
+                "preMsP95=2.0",
+                "inferMsP50=7.5",
+                "inferMsP95=12.3",
+                "postMsP50=0.5",
+                "postMsP95=0.7",
+                "frameMsP50=13.0",
+                "frameMsP95=21.0",
+                "resultAgeMsP50=17.0",
+                "resultAgeMsP95=31.5",
+                "thermalStatus=MODERATE",
+                "thermalHeadroom=0.87",
+            ).inOrder()
+    }
+
+    @Test
+    fun summary_timingLines_followTheExistingCaptureLinesAndTheModelBlock() {
+        val lines = summaryLines(timedStats)
+
+        assertThat(lines.indexOf("timingSamples=480")).isGreaterThan(lines.indexOf("modelSource=builtin"))
+        assertThat(lines.indexOf("timingSamples=480")).isGreaterThan(lines.indexOf("failures=4"))
+    }
+
+    @Test
+    fun summary_withNoTimingSampleAndNoThermalReading_saysNotAvailable() {
+        val lines = summaryLines(stats)
+
+        assertThat(lines.takeLast(timingKeys.size))
+            .containsExactly(
+                "timingSamples=0",
+                "copyMsP50=n/a",
+                "copyMsP95=n/a",
+                "preMsP50=n/a",
+                "preMsP95=n/a",
+                "inferMsP50=n/a",
+                "inferMsP95=n/a",
+                "postMsP50=n/a",
+                "postMsP95=n/a",
+                "frameMsP50=n/a",
+                "frameMsP95=n/a",
+                "resultAgeMsP50=n/a",
+                "resultAgeMsP95=n/a",
+                "thermalStatus=n/a",
+                "thermalHeadroom=n/a",
+            ).inOrder()
+    }
+
+    @Test
+    fun summary_aTimingThatIsUnknown_isNotAvailableWhileTheOthersKeepTheirNumbers() {
+        val partly =
+            timedStats.copy(
+                timing =
+                    timedStats.timing.copy(
+                        preMs = Percentiles.NONE,
+                        postMs = Percentiles.NONE,
+                        resultAgeMs = Percentiles(Float.NaN, 3.0f),
+                    ),
+            )
+
+        val lines = summaryLines(partly)
+
+        assertThat(lines).containsAtLeast("preMsP50=n/a", "preMsP95=n/a", "postMsP50=n/a", "postMsP95=n/a")
+        assertThat(lines).containsAtLeast("resultAgeMsP50=n/a", "resultAgeMsP95=3.0")
+        assertThat(lines).containsAtLeast("copyMsP50=1.0", "inferMsP95=12.3", "timingSamples=480")
+    }
+
+    @Test
+    fun summary_thermalHeadroom_printsTwoDecimalsSoNearOneIsNotShownAsOne() {
+        assertThat(summaryLines(timedStats.copy(thermalHeadroom = 0.95f))).contains("thermalHeadroom=0.95")
+        assertThat(summaryLines(timedStats.copy(thermalHeadroom = 1.0f))).contains("thermalHeadroom=1.00")
+        assertThat(summaryLines(timedStats.copy(thermalHeadroom = 0.0f))).contains("thermalHeadroom=0.00")
+    }
+
+    @Test
+    fun summary_thermalStatusKnownButHeadroomUnknown_printsOnlyWhatIsKnown() {
+        val lines = summaryLines(timedStats.copy(thermalStatus = "SEVERE", thermalHeadroom = Float.NaN))
+
+        assertThat(lines).containsAtLeast("thermalStatus=SEVERE", "thermalHeadroom=n/a")
+    }
+
+    @Test
+    fun summary_infiniteValues_areNotAvailableNotNumbers() {
+        val lines =
+            summaryLines(
+                timedStats.copy(
+                    timing = timedStats.timing.copy(copyMs = Percentiles(Float.POSITIVE_INFINITY, 1.0f)),
+                    thermalHeadroom = Float.POSITIVE_INFINITY,
+                ),
+            )
+
+        assertThat(lines).containsAtLeast("copyMsP50=n/a", "copyMsP95=1.0", "thermalHeadroom=n/a")
+    }
+
+    @Test
+    fun summary_numbersUseADotWhateverTheDefaultLocale() {
+        val saved = Locale.getDefault()
+        try {
+            Locale.setDefault(Locale.GERMANY)
+
+            val lines = summaryLines(timedStats)
+
+            assertThat(lines).containsAtLeast("inferMsP95=12.3", "thermalHeadroom=0.87")
+        } finally {
+            Locale.setDefault(saved)
+        }
+    }
+
+    @Test
+    fun summary_withoutStats_hasNoTimingLines() {
+        val summary = build(stats = null).text("summary.txt")
+
+        assertThat(summary).doesNotContain("timingSamples")
+        assertThat(summary).doesNotContain("thermalStatus")
+    }
+
     // ---- the model block ----
 
-    private val importedMeta = ImportedModelMeta("my-model.tflite", "0123456789abcdef".repeat(4), 12_345_678L, 640, 300)
+    private val importedMeta = ImportedModelMeta("my-model.tflite", "0123456789abcdef".repeat(4), 12_345_678L, 640, 640, 300)
+
+    private fun builtInStatus(
+        width: Int,
+        height: Int,
+    ) = ModelStatus(ModelSource.BUILT_IN, meta = null, fallback = null, message = null, inputWidth = width, inputHeight = height)
+
+    private fun importedStatus(
+        meta: ImportedModelMeta,
+        width: Int,
+        height: Int,
+    ) = ModelStatus(ModelSource.IMPORTED, meta, fallback = null, message = null, inputWidth = width, inputHeight = height)
 
     private fun modelLines(model: ModelStatus?): List<String> = build(stats = stats.copy(model = model)).text("summary.txt").split("\n")
 
     @Test
     fun summary_builtInModel_isDescribedWithoutAFile() {
-        val lines = modelLines(ModelStatus(ModelSource.BUILT_IN, meta = null, fallback = null, message = null, inputSize = 416))
+        val lines = modelLines(builtInStatus(416, 416))
 
         assertThat(lines)
             .containsAtLeast(
@@ -246,7 +423,7 @@ class DiagnosticsReportTest {
 
     @Test
     fun summary_importedModel_showsNameShortHashSizeAndRows() {
-        val lines = modelLines(ModelStatus(ModelSource.IMPORTED, importedMeta, fallback = null, message = null, inputSize = 640))
+        val lines = modelLines(importedStatus(importedMeta, 640, 640))
 
         assertThat(lines)
             .containsAtLeast(
@@ -261,6 +438,22 @@ class DiagnosticsReportTest {
     }
 
     @Test
+    fun summary_rectangularImportedModel_printsWidthXHeightUnderTheSameKey() {
+        val meta = importedMeta.copy(inputWidth = 832, inputHeight = 384)
+        val lines = modelLines(importedStatus(meta, 832, 384))
+
+        assertThat(lines).contains("modelInputSize=832x384")
+        assertThat(lines.filter { it.startsWith("modelInputSize") }).hasSize(1)
+    }
+
+    @Test
+    fun summary_modelWithoutAnInput_printsZero() {
+        val lines = modelLines(ModelStatus(ModelSource.BUILT_IN, null, ModelFallback.LOAD_FAILED, "x", inputWidth = 0, inputHeight = 0))
+
+        assertThat(lines).contains("modelInputSize=0")
+    }
+
+    @Test
     fun summary_fallbackAfterAFailedLoad_namesTheReasonTheMessageAndTheRefusedFile() {
         val status =
             ModelStatus(
@@ -268,7 +461,8 @@ class DiagnosticsReportTest {
                 importedMeta,
                 ModelFallback.LOAD_FAILED,
                 "IllegalStateException: input is not NCHW",
-                inputSize = 416,
+                inputWidth = 416,
+                inputHeight = 416,
             )
 
         val lines = modelLines(status)
@@ -286,7 +480,7 @@ class DiagnosticsReportTest {
 
     @Test
     fun summary_fallbackMessageStaysOnOneLine() {
-        val status = ModelStatus(ModelSource.BUILT_IN, null, ModelFallback.LOAD_FAILED, "a\nb", inputSize = 416)
+        val status = ModelStatus(ModelSource.BUILT_IN, null, ModelFallback.LOAD_FAILED, "a\nb", inputWidth = 416, inputHeight = 416)
 
         assertThat(modelLines(status)).contains("modelFallbackMessage=a b")
     }
@@ -294,7 +488,7 @@ class DiagnosticsReportTest {
     @Test
     fun summary_everyFallbackReasonIsPrintedByName() {
         for (reason in ModelFallback.entries) {
-            val status = ModelStatus(ModelSource.BUILT_IN, null, reason, null, inputSize = 416)
+            val status = ModelStatus(ModelSource.BUILT_IN, null, reason, null, inputWidth = 416, inputHeight = 416)
 
             assertThat(modelLines(status)).contains("modelFallback=${reason.name}")
         }

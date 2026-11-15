@@ -12,11 +12,25 @@ class ImportedModelMetaTest {
             displayName = "yolo26n-pose_640.tflite",
             sha256 = sha,
             bytes = 7_654_321L,
-            inputSize = 640,
+            inputWidth = 640,
+            inputHeight = 640,
             outputRows = 300,
         )
 
+    private val rect = meta.copy(inputWidth = 832, inputHeight = 384)
+
     private val encoded =
+        listOf(
+            "posetracker-imported-model v2",
+            "name=yolo26n-pose_640.tflite",
+            "sha256=$sha",
+            "bytes=7654321",
+            "inputWidth=640",
+            "inputHeight=640",
+            "outputRows=300",
+        )
+
+    private val encodedV1 =
         listOf(
             "posetracker-imported-model v1",
             "name=yolo26n-pose_640.tflite",
@@ -28,6 +42,12 @@ class ImportedModelMetaTest {
 
     private fun text(vararg replace: Pair<Int, String>): String {
         val lines = encoded.toMutableList()
+        for ((index, line) in replace) lines[index] = line
+        return lines.joinToString("\n")
+    }
+
+    private fun textV1(vararg replace: Pair<Int, String>): String {
+        val lines = encodedV1.toMutableList()
         for ((index, line) in replace) lines[index] = line
         return lines.joinToString("\n")
     }
@@ -48,11 +68,15 @@ class ImportedModelMetaTest {
     fun decode_roundTripsOtherValidMetas() {
         val others =
             listOf(
-                meta.copy(displayName = "a", bytes = 1L, inputSize = 32, outputRows = 1),
+                meta.copy(displayName = "a", bytes = 1L, inputWidth = 32, inputHeight = 32, outputRows = 1),
+                rect,
+                meta.copy(inputWidth = 384, inputHeight = 832),
+                meta.copy(inputWidth = 640, inputHeight = 288),
                 meta.copy(displayName = ImportedModelMeta.sanitiseName("My Model v2 (copy).tflite")),
                 meta.copy(
                     bytes = TrackerConfig.MAX_IMPORT_BYTES_LIMIT,
-                    inputSize = TrackerConfig.MAX_IMPORT_INPUT_SIZE_LIMIT,
+                    inputWidth = TrackerConfig.MAX_IMPORT_INPUT_SIZE_LIMIT,
+                    inputHeight = TrackerConfig.MAX_IMPORT_INPUT_SIZE_LIMIT,
                 ),
                 meta.copy(outputRows = TrackerConfig.IMPORT_MAX_OUTPUT_ROWS),
             )
@@ -76,15 +100,16 @@ class ImportedModelMetaTest {
 
     @Test
     fun decode_wrongOrMissingVersionLine_isNull() {
-        assertThat(ImportedModelMeta.decode(text(0 to "posetracker-imported-model v2"))).isNull()
-        assertThat(ImportedModelMeta.decode(text(0 to "posetracker-imported-model v1 "))).isNull()
-        assertThat(ImportedModelMeta.decode(text(0 to "POSETRACKER-IMPORTED-MODEL V1"))).isNull()
+        assertThat(ImportedModelMeta.decode(text(0 to "posetracker-imported-model v3"))).isNull()
+        assertThat(ImportedModelMeta.decode(text(0 to "posetracker-imported-model v1"))).isNull()
+        assertThat(ImportedModelMeta.decode(text(0 to "posetracker-imported-model v2 "))).isNull()
+        assertThat(ImportedModelMeta.decode(text(0 to "POSETRACKER-IMPORTED-MODEL V2"))).isNull()
         assertThat(ImportedModelMeta.decode(encoded.drop(1).joinToString("\n"))).isNull()
     }
 
     @Test
     fun decode_missingField_isNull() {
-        for (index in 1..5) {
+        for (index in 1..6) {
             val lines = encoded.filterIndexed { i, _ -> i != index }
 
             assertThat(ImportedModelMeta.decode(lines.joinToString("\n"))).isNull()
@@ -102,10 +127,13 @@ class ImportedModelMetaTest {
     fun decode_fieldsInAnotherOrderOrRenamed_isNull() {
         val swapped = text(1 to encoded[2], 2 to encoded[1])
         assertThat(ImportedModelMeta.decode(swapped)).isNull()
-        assertThat(ImportedModelMeta.decode(text(4 to "inputsize=640"))).isNull()
-        assertThat(ImportedModelMeta.decode(text(4 to "inputSize =640"))).isNull()
-        assertThat(ImportedModelMeta.decode(text(4 to "inputSize= 640"))).isNull()
-        assertThat(ImportedModelMeta.decode(text(4 to "inputSize:640"))).isNull()
+        assertThat(ImportedModelMeta.decode(text(4 to "inputwidth=640"))).isNull()
+        assertThat(ImportedModelMeta.decode(text(4 to "inputWidth =640"))).isNull()
+        assertThat(ImportedModelMeta.decode(text(4 to "inputWidth= 640"))).isNull()
+        assertThat(ImportedModelMeta.decode(text(4 to "inputWidth:640"))).isNull()
+        assertThat(ImportedModelMeta.decode(text(5 to "inputheight=640"))).isNull()
+        assertThat(ImportedModelMeta.decode(text(5 to "inputHeight= 640"))).isNull()
+        assertThat(ImportedModelMeta.decode(text(4 to encoded[5], 5 to encoded[4]))).isNull()
     }
 
     @Test
@@ -151,7 +179,9 @@ class ImportedModelMetaTest {
                         "99999999999999999999",
                         "${TrackerConfig.MAX_IMPORT_BYTES_LIMIT + 1L}",
                     ),
-                "inputSize=" to
+                "inputWidth=" to
+                    listOf("", "0", "-640", "+640", "0640", "640.0", "x", "31", "641", "4128", "2147483648"),
+                "inputHeight=" to
                     listOf("", "0", "-640", "+640", "0640", "640.0", "x", "31", "641", "4128", "2147483648"),
                 "outputRows=" to
                     listOf("", "0", "-1", "+300", "0300", "3.0", "x", "${TrackerConfig.IMPORT_MAX_OUTPUT_ROWS + 1}"),
@@ -190,7 +220,8 @@ class ImportedModelMetaTest {
 
     @Test
     fun decode_nameWithEmbeddedNewline_isNull() {
-        val injected = "posetracker-imported-model v1\nname=a\nsha256=$sha\nbytes=1\ninputSize=640\noutputRows=300\nname=b"
+        val injected =
+            "posetracker-imported-model v2\nname=a\nsha256=$sha\nbytes=1\ninputWidth=640\ninputHeight=640\noutputRows=300\nname=b"
 
         assertThat(ImportedModelMeta.decode(injected)).isNull()
     }
@@ -200,11 +231,138 @@ class ImportedModelMetaTest {
         val atMax =
             text(
                 3 to "bytes=${TrackerConfig.MAX_IMPORT_BYTES_LIMIT}",
-                4 to "inputSize=${TrackerConfig.MAX_IMPORT_INPUT_SIZE_LIMIT}",
-                5 to "outputRows=${TrackerConfig.IMPORT_MAX_OUTPUT_ROWS}",
+                4 to "inputWidth=${TrackerConfig.MAX_IMPORT_INPUT_SIZE_LIMIT}",
+                5 to "inputHeight=${TrackerConfig.MAX_IMPORT_INPUT_SIZE_LIMIT}",
+                6 to "outputRows=${TrackerConfig.IMPORT_MAX_OUTPUT_ROWS}",
             )
 
         assertThat(ImportedModelMeta.decode(atMax)).isNotNull()
+    }
+
+    @Test
+    fun encode_ofARectangularMeta_writesWidthThenHeight() {
+        val lines = rect.encode().split("\n")
+
+        assertThat(lines[0]).isEqualTo("posetracker-imported-model v2")
+        assertThat(lines[4]).isEqualTo("inputWidth=832")
+        assertThat(lines[5]).isEqualTo("inputHeight=384")
+    }
+
+    @Test
+    fun decode_ofARectangularText_keepsWidthAndHeightApart() {
+        val decoded = ImportedModelMeta.decode(text(4 to "inputWidth=832", 5 to "inputHeight=384"))
+
+        assertThat(decoded).isEqualTo(rect)
+        assertThat(decoded!!.inputWidth).isEqualTo(832)
+        assertThat(decoded.inputHeight).isEqualTo(384)
+    }
+
+    @Test
+    fun encodeThenDecode_ofARectangularMeta_keepsWidthAndHeightApart() {
+        val decoded = ImportedModelMeta.decode(rect.encode())
+
+        assertThat(decoded).isEqualTo(rect)
+        assertThat(decoded).isNotEqualTo(rect.copy(inputWidth = 384, inputHeight = 832))
+        assertThat(decoded!!.inputWidth).isEqualTo(832)
+        assertThat(decoded.inputHeight).isEqualTo(384)
+    }
+
+    @Test
+    fun decode_v1Text_givesWidthEqualToHeight() {
+        val decoded = ImportedModelMeta.decode(encodedV1.joinToString("\n"))
+
+        assertThat(decoded).isEqualTo(meta)
+        assertThat(decoded!!.inputWidth).isEqualTo(640)
+        assertThat(decoded.inputHeight).isEqualTo(640)
+    }
+
+    @Test
+    fun decode_v1Text_isAsStrictAsBefore() {
+        val texts =
+            listOf(
+                encodedV1.dropLast(1).joinToString("\n"),
+                encodedV1.joinToString("\n") + "\n",
+                encodedV1.joinToString("\n") + "\nextra=1",
+                encodedV1.joinToString("\r\n"),
+                textV1(4 to "inputSize=641"),
+                textV1(4 to "inputSize=31"),
+                textV1(4 to "inputSize=4128"),
+                textV1(4 to "inputSize=0640"),
+                textV1(4 to "inputWidth=640"),
+                textV1(5 to "outputRows=301"),
+                textV1(2 to "sha256=${sha.uppercase()}"),
+                textV1(1 to "name=../x"),
+            )
+
+        for (text in texts) {
+            assertThat(ImportedModelMeta.decode(text)).isNull()
+        }
+    }
+
+    @Test
+    fun decode_v2HeaderWithV1Body_isNull() {
+        assertThat(ImportedModelMeta.decode(textV1(0 to encoded[0]))).isNull()
+    }
+
+    @Test
+    fun decode_v1HeaderWithV2Body_isNull() {
+        assertThat(ImportedModelMeta.decode(text(0 to encodedV1[0]))).isNull()
+    }
+
+    @Test
+    fun decode_v2TextWithAnyOldInputSizeLine_isNull() {
+        val old = listOf(encoded[0], encoded[1], encoded[2], encoded[3], "inputSize=640", encoded[6])
+
+        assertThat(ImportedModelMeta.decode(old.joinToString("\n"))).isNull()
+    }
+
+    @Test
+    fun encode_neverWritesV1() {
+        assertThat(meta.encode().substringBefore("\n")).isEqualTo("posetracker-imported-model v2")
+    }
+
+    @Test
+    fun decodeThenEncode_ofV1Text_givesV2TextWithWidthEqualToHeight() {
+        val rewritten = ImportedModelMeta.decode(encodedV1.joinToString("\n"))!!.encode()
+
+        assertThat(rewritten).isEqualTo(encoded.joinToString("\n"))
+        assertThat(rewritten.split("\n")).doesNotContain("inputSize=640")
+    }
+
+    // ---- aspect limit of the stored form ----
+
+    @Test
+    fun decode_v2TextOverTheAspectLimit_isNull() {
+        assertThat(ImportedModelMeta.decode(text(4 to "inputWidth=1280", 5 to "inputHeight=160"))).isNull()
+        assertThat(ImportedModelMeta.decode(text(4 to "inputWidth=160", 5 to "inputHeight=1280"))).isNull()
+        assertThat(ImportedModelMeta.decode(meta.copy(inputWidth = 1280, inputHeight = 160).encode())).isNull()
+    }
+
+    @Test
+    fun decode_v2TextExactlyAtTheAspectLimit_decodes() {
+        val wide = meta.copy(inputWidth = 640, inputHeight = 160)
+        val tall = meta.copy(inputWidth = 160, inputHeight = 640)
+
+        assertThat(ImportedModelMeta.decode(wide.encode())).isEqualTo(wide)
+        assertThat(ImportedModelMeta.decode(tall.encode())).isEqualTo(tall)
+    }
+
+    @Test
+    fun decode_takesTheAspectLimitFromTheGivenConfig() {
+        val wide = meta.copy(inputWidth = 1280, inputHeight = 160)
+        val loose = TrackerConfig(importMaxInputAspect = 8.0f)
+        val strict = TrackerConfig(importMaxInputAspect = 1.0f)
+
+        assertThat(ImportedModelMeta.decode(wide.encode(), loose)).isEqualTo(wide)
+        assertThat(ImportedModelMeta.decode(rect.encode(), strict)).isNull()
+        assertThat(ImportedModelMeta.decode(meta.encode(), strict)).isEqualTo(meta)
+    }
+
+    @Test
+    fun decode_v1TextIsSquare_soTheAspectLimitNeverRefusesIt() {
+        val strict = TrackerConfig(importMaxInputAspect = 1.0f)
+
+        assertThat(ImportedModelMeta.decode(encodedV1.joinToString("\n"), strict)).isEqualTo(meta)
     }
 
     // ---- sanitiseName ----

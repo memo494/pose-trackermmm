@@ -1,5 +1,6 @@
 package com.memo494.posetracker.modelimport
 
+import com.memo494.posetracker.core.model.ModelInputText
 import com.memo494.posetracker.core.modelimport.ImportGuard
 import com.memo494.posetracker.core.modelimport.ImportGuardState
 import com.memo494.posetracker.core.modelimport.ImportStage
@@ -28,8 +29,14 @@ data class LoadedModel(
     val importedModelNotUsed: Boolean
         get() = fallback != null
 
-    /** The status for [ModelStatusHolder]; the input size is the running detector's, 0 without one. */
-    fun status(): ModelStatus = ModelStatus(source, meta, fallback, message, detector?.inputSize ?: 0)
+    /** The status for [ModelStatusHolder]; the input width and height are the running detector's, 0 without one. */
+    fun status(): ModelStatus = ModelStatus(source, meta, fallback, message, detector?.inputWidth ?: 0, detector?.inputHeight ?: 0)
+
+    /** The one log line of the model choice; the input text is [ModelInputText.text] (`0` without a detector). */
+    fun logLine(): String {
+        val input = ModelInputText.text(detector?.inputWidth ?: 0, detector?.inputHeight ?: 0)
+        return "model: $source, input $input, fallback ${fallback ?: "none"}"
+    }
 }
 
 /**

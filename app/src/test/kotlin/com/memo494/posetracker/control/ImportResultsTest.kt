@@ -8,7 +8,7 @@ class ImportResultsTest {
     fun publish_raisesTheSequenceAndKeepsTheNewestSummary() {
         val before = ImportResults.latest.value.sequence
         val first = ImportSummary.Failed(ImportFailure.BUSY, null)
-        val second = ImportSummary.Accepted("a.tflite", 640)
+        val second = ImportSummary.Accepted("a.tflite", "640")
 
         ImportResults.publish(first)
         val afterFirst = ImportResults.latest.value
@@ -24,11 +24,11 @@ class ImportResultsTest {
     @Test
     fun newCollector_seesTheLastResultItMissed() {
         val seen = ImportResults.latest.value.sequence
-        ImportResults.publish(ImportSummary.Accepted("late.tflite", 416))
+        ImportResults.publish(ImportSummary.Accepted("late.tflite", "416"))
 
         val latest = ImportResults.latest.value
 
         assertThat(latest.sequence).isGreaterThan(seen)
-        assertThat(latest.summary).isEqualTo(ImportSummary.Accepted("late.tflite", 416))
+        assertThat(latest.summary).isEqualTo(ImportSummary.Accepted("late.tflite", "416"))
     }
 }

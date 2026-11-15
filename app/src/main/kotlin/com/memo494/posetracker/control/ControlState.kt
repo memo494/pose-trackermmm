@@ -43,10 +43,13 @@ internal sealed interface ActiveModel {
     /** The model bundled with the app (its input size is `TrackerConfig.modelInputSize`). */
     data object BuiltIn : ActiveModel
 
-    /** The imported model [displayName] (a sanitised file name) with a square input of [inputSize] model pixels. */
+    /**
+     * The imported model [displayName] (a sanitised file name) with the input size [inputText] in model pixels
+     * (`ModelInputText.text`: `640` when square, `832x384` otherwise).
+     */
     data class Imported(
         val displayName: String,
-        val inputSize: Int,
+        val inputText: String,
     ) : ActiveModel
 }
 
@@ -71,7 +74,7 @@ internal enum class ModelRejectionReason {
     INPUT_TYPE,
     INPUT_NOT_NCHW,
     INPUT_NHWC,
-    INPUT_NOT_SQUARE,
+    INPUT_ASPECT,
     INPUT_SIZE_NOT_MULTIPLE,
     INPUT_SIZE_OUT_OF_RANGE,
     OUTPUT_COUNT,
@@ -95,10 +98,10 @@ internal enum class ImportFailure {
 
 /** What an import came to, as small pure data (the importer's own outcome types stay out of the state). */
 internal sealed interface ImportSummary {
-    /** The model [displayName] with input size [inputSize] is now the imported model. */
+    /** The model [displayName] with input size [inputText] (see [ActiveModel.Imported]) is now the imported model. */
     data class Accepted(
         val displayName: String,
-        val inputSize: Int,
+        val inputText: String,
     ) : ImportSummary
 
     /** The file was refused for [reason]; [details] names the size, the runtime's message or the shapes found. */
@@ -396,7 +399,7 @@ internal object ControlReducer {
             when (summary) {
                 is ImportSummary.Accepted -> {
                     finished.copy(
-                        activeModel = ActiveModel.Imported(summary.displayName, summary.inputSize),
+                        activeModel = ActiveModel.Imported(summary.displayName, summary.inputText),
                         modelNotice = null,
                         modelFileStored = true,
                     )

@@ -23,8 +23,11 @@ class LiteRtPoseDetector private constructor(
     private val ownerThread: Thread = Thread.currentThread()
     private var closed = false
 
-    override val inputSize: Int
-        get() = engine.inputSize
+    override val inputWidth: Int
+        get() = engine.inputWidth
+
+    override val inputHeight: Int
+        get() = engine.inputHeight
 
     override val accelerator: Accelerator
         get() = engine.accelerator
@@ -40,6 +43,12 @@ class LiteRtPoseDetector private constructor(
 
     override val lastNanRawRows: Int
         get() = engine.lastNanRawRows
+
+    override val lastPreMs: Float
+        get() = engine.lastPreMs
+
+    override val lastPostMs: Float
+        get() = engine.lastPostMs
 
     override fun detect(frame: CaptureFrame): DetectionFrame {
         checkOwnerThread("detect")
@@ -93,20 +102,26 @@ class LiteRtPoseDetector private constructor(
          * from the CPU attempt propagates. The reported [accelerator] is what the engine says it runs on, not
          * what was asked for.
          *
-         * @param expectedInputSize the model input side the caller configured, in model pixels.
-         * @throws IllegalStateException when the engine's input size differs from [expectedInputSize]; the
-         *   engine is closed first (fail closed: a model of another size would break the Mdl-to-Img mapping).
+         * @param expectedInputWidth the model input width the caller expects, in model pixels (Mdl space).
+         * @param expectedInputHeight the model input height the caller expects, in model pixels (Mdl space).
+         * @throws IllegalStateException when the engine's input width or height differs from the expected one;
+         *   the engine is closed first (fail closed: a model of another size would break the Mdl-to-Img mapping).
          */
         internal fun create(
             factory: PoseEngineFactory,
             scoreThreshold: Float,
-            expectedInputSize: Int,
+            expectedInputWidth: Int,
+            expectedInputHeight: Int,
         ): LiteRtPoseDetector {
             val engine = createEngine(factory)
-            if (engine.inputSize != expectedInputSize) {
-                val actual = engine.inputSize
+            if (engine.inputWidth != expectedInputWidth || engine.inputHeight != expectedInputHeight) {
+                val actualWidth = engine.inputWidth
+                val actualHeight = engine.inputHeight
                 engine.close()
-                throw IllegalStateException("model input size is $actual but $expectedInputSize was expected")
+                throw IllegalStateException(
+                    "model input size mismatch: expected ${expectedInputWidth}x$expectedInputHeight " +
+                        "but the model has ${actualWidth}x$actualHeight",
+                )
             }
             return LiteRtPoseDetector(engine, scoreThreshold)
         }

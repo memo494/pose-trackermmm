@@ -15,8 +15,11 @@ internal interface PoseEngine : Closeable {
     /** The backend that actually runs the model. */
     val accelerator: Accelerator
 
-    /** Side of the square model input, in model pixels (Mdl space), read from the model. */
-    val inputSize: Int
+    /** Width of the model input, in model pixels (Mdl space), read from the model. */
+    val inputWidth: Int
+
+    /** Height of the model input, in model pixels (Mdl space), read from the model. */
+    val inputHeight: Int
 
     /** Model run plus output readback of the last [detect], in milliseconds; 0 before the first call. */
     val lastInferenceMs: Float
@@ -32,6 +35,14 @@ internal interface PoseEngine : Closeable {
     /** Output rows of the last [detect] with a NaN score; [PoseDetector.NOT_MEASURED] if unknown. */
     val lastNanRawRows: Int
         get() = PoseDetector.NOT_MEASURED
+
+    /** Pre-processing (image to model input) of the last [detect], in ms; [PoseDetector.NOT_MEASURED] before the first call. */
+    val lastPreMs: Float
+        get() = PoseDetector.NOT_MEASURED.toFloat()
+
+    /** Post-processing (model output to detections) of the last [detect], in ms; [PoseDetector.NOT_MEASURED] before the first call. */
+    val lastPostMs: Float
+        get() = PoseDetector.NOT_MEASURED.toFloat()
 
     /**
      * Runs the model on [frame] and returns every person it found, in Img space, in the order the model

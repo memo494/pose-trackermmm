@@ -14,6 +14,7 @@ import com.memo494.posetracker.modelimport.ModelStatus
 import com.memo494.posetracker.modelimport.RejectionKind
 import com.memo494.posetracker.modelimport.StoredModelState
 import org.junit.Test
+import java.util.Locale
 
 class ControlModelMapperTest {
     private val meta =
@@ -21,7 +22,8 @@ class ControlModelMapperTest {
             displayName = "yolo26n-pose_640.tflite",
             sha256 = "a".repeat(64),
             bytes = 1_000L,
-            inputSize = 640,
+            inputWidth = 640,
+            inputHeight = 640,
             outputRows = 300,
         )
 
@@ -36,7 +38,7 @@ class ControlModelMapperTest {
         fallback: ModelFallback?,
         meta: ImportedModelMeta? = null,
         message: String? = null,
-    ) = ModelStatus(ModelSource.BUILT_IN, meta, fallback, message, 416)
+    ) = ModelStatus(ModelSource.BUILT_IN, meta, fallback, message, 416, 416)
 
     // Outcomes to pure summaries.
 
@@ -73,6 +75,26 @@ class ControlModelMapperTest {
     }
 
     @Test
+    fun aspectLimitText_wholeNumberHasNoDecimal() {
+        assertThat(ControlModelMapper.aspectLimitText(4.0f)).isEqualTo("4")
+        assertThat(ControlModelMapper.aspectLimitText(1.0f)).isEqualTo("1")
+        assertThat(ControlModelMapper.aspectLimitText(16.0f)).isEqualTo("16")
+    }
+
+    @Test
+    fun aspectLimitText_otherNumberHasOneDecimalAndADot() {
+        val saved = Locale.getDefault()
+        try {
+            Locale.setDefault(Locale.GERMANY)
+
+            assertThat(ControlModelMapper.aspectLimitText(2.5f)).isEqualTo("2.5")
+            assertThat(ControlModelMapper.aspectLimitText(1.5f)).isEqualTo("1.5")
+        } finally {
+            Locale.setDefault(saved)
+        }
+    }
+
+    @Test
     fun everyNoticeKind_hasItsOwnMessage() {
         val ids = ModelNoticeKind.entries.map { ControlModelMapper.noticeRes(it) }
 
@@ -84,7 +106,25 @@ class ControlModelMapperTest {
     fun summary_accepted_keepsTheNameAndTheInputSize() {
         val summary = ControlModelMapper.summary(ImportOutcome.Accepted(meta))
 
-        assertThat(summary).isEqualTo(ImportSummary.Accepted("yolo26n-pose_640.tflite", 640))
+        assertThat(summary).isEqualTo(ImportSummary.Accepted("yolo26n-pose_640.tflite", "640"))
+    }
+
+    @Test
+    fun summary_accepted_ofARectangularModel_hasTheWidthXHeightText() {
+        val rectangular = meta.copy(displayName = "yolo26n-pose_832x384.tflite", inputWidth = 832, inputHeight = 384)
+
+        val summary = ControlModelMapper.summary(ImportOutcome.Accepted(rectangular))
+
+        assertThat(summary).isEqualTo(ImportSummary.Accepted("yolo26n-pose_832x384.tflite", "832x384"))
+    }
+
+    @Test
+    fun loaded_importedRectangularModel_isActiveWithTheWidthXHeightText() {
+        val rectangular = meta.copy(inputWidth = 832, inputHeight = 384)
+
+        val event = ControlModelMapper.stateLoaded(stored(rectangular, fileExists = true), null)
+
+        assertThat(event.active).isEqualTo(ActiveModel.Imported("yolo26n-pose_640.tflite", "832x384"))
     }
 
     @Test
@@ -145,7 +185,7 @@ class ControlModelMapperTest {
     fun loaded_importedModelPresent_isImportedWithoutNotice() {
         val event = ControlModelMapper.stateLoaded(stored(meta, fileExists = true), null)
 
-        val expected = ControlEvent.ModelStateLoaded(ActiveModel.Imported("yolo26n-pose_640.tflite", 640), null, fileStored = true)
+        val expected = ControlEvent.ModelStateLoaded(ActiveModel.Imported("yolo26n-pose_640.tflite", "640"), null, fileStored = true)
         assertThat(event).isEqualTo(expected)
     }
 
@@ -166,7 +206,7 @@ class ControlModelMapperTest {
 
         val event = ControlModelMapper.stateLoaded(tripped, null) { true }
 
-        val active = ActiveModel.Imported("yolo26n-pose_640.tflite", 640)
+        val active = ActiveModel.Imported("yolo26n-pose_640.tflite", "640")
         val notice = ModelNotice(ModelNoticeKind.PROBE_TRIP_MODEL_KEPT)
         assertThat(event).isEqualTo(ControlEvent.ModelStateLoaded(active, notice, fileStored = true))
     }
@@ -215,7 +255,7 @@ class ControlModelMapperTest {
         val event = ControlModelMapper.stateLoaded(stored(meta, fileExists = true), last)
 
         val notice = ModelNotice(ModelNoticeKind.LOAD_FAILED, "IllegalStateException: bad flatbuffer")
-        val imported = ActiveModel.Imported("yolo26n-pose_640.tflite", 640)
+        val imported = ActiveModel.Imported("yolo26n-pose_640.tflite", "640")
         assertThat(event).isEqualTo(ControlEvent.ModelStateLoaded(imported, notice, fileStored = true))
     }
 

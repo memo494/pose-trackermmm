@@ -2,6 +2,7 @@ package com.memo494.posetracker.control
 
 import androidx.annotation.StringRes
 import com.memo494.posetracker.R
+import com.memo494.posetracker.core.model.ModelInputText
 import com.memo494.posetracker.core.modelimport.ImportGuardState
 import com.memo494.posetracker.core.modelimport.ImportRejection
 import com.memo494.posetracker.core.modelimport.ImportStage
@@ -15,6 +16,7 @@ import com.memo494.posetracker.modelimport.ModelFallback
 import com.memo494.posetracker.modelimport.ModelStatus
 import com.memo494.posetracker.modelimport.RejectionKind
 import com.memo494.posetracker.modelimport.StoredModelState
+import java.util.Locale
 
 /**
  * Pure bridges between the model-import types and the control screen: outcomes and stored state become the small
@@ -25,10 +27,13 @@ internal object ControlModelMapper {
     /** The importer's [outcome] as pure data for the reducer. */
     fun summary(outcome: ImportOutcome): ImportSummary =
         when (outcome) {
-            is ImportOutcome.Accepted -> ImportSummary.Accepted(outcome.meta.displayName, outcome.meta.inputSize)
+            is ImportOutcome.Accepted -> ImportSummary.Accepted(outcome.meta.displayName, inputText(outcome.meta))
             is ImportOutcome.Rejected -> ImportSummary.Rejected(reason(outcome.kind), outcome.details)
             is ImportOutcome.Failed -> ImportSummary.Failed(failure(outcome.kind), outcome.message)
         }
+
+    /** The input size of [meta] as the screens, the HUD and the diagnostics print it (`640` or `832x384`). */
+    private fun inputText(meta: ImportedModelMeta): String = ModelInputText.text(meta.inputWidth, meta.inputHeight)
 
     /** The one [ImportFailure] of a failure kind. */
     fun failure(kind: FailureKind): ImportFailure =
@@ -60,7 +65,7 @@ internal object ControlModelMapper {
             ImportRejection.INPUT_TYPE -> ModelRejectionReason.INPUT_TYPE
             ImportRejection.INPUT_NOT_NCHW -> ModelRejectionReason.INPUT_NOT_NCHW
             ImportRejection.INPUT_NHWC -> ModelRejectionReason.INPUT_NHWC
-            ImportRejection.INPUT_NOT_SQUARE -> ModelRejectionReason.INPUT_NOT_SQUARE
+            ImportRejection.INPUT_ASPECT -> ModelRejectionReason.INPUT_ASPECT
             ImportRejection.INPUT_SIZE_NOT_MULTIPLE -> ModelRejectionReason.INPUT_SIZE_NOT_MULTIPLE
             ImportRejection.INPUT_SIZE_OUT_OF_RANGE -> ModelRejectionReason.INPUT_SIZE_OUT_OF_RANGE
             ImportRejection.OUTPUT_COUNT -> ModelRejectionReason.OUTPUT_COUNT
@@ -88,7 +93,7 @@ internal object ControlModelMapper {
     ): ControlEvent.ModelStateLoaded =
         when (val choice = ModelChoice.resolve(stored, storedFileMatches)) {
             is ModelChoice.Imported -> {
-                val active = ActiveModel.Imported(choice.meta.displayName, choice.meta.inputSize)
+                val active = ActiveModel.Imported(choice.meta.displayName, inputText(choice.meta))
                 val sameModel = status != null && status.meta == choice.meta
                 val failed = if (sameModel) status?.fallback else null
                 val notice =
@@ -136,7 +141,7 @@ internal object ControlModelMapper {
             ModelRejectionReason.INPUT_TYPE -> R.string.model_reject_input_type
             ModelRejectionReason.INPUT_NOT_NCHW -> R.string.model_reject_input_not_nchw
             ModelRejectionReason.INPUT_NHWC -> R.string.model_reject_input_nhwc
-            ModelRejectionReason.INPUT_NOT_SQUARE -> R.string.model_reject_input_not_square
+            ModelRejectionReason.INPUT_ASPECT -> R.string.model_reject_input_aspect
             ModelRejectionReason.INPUT_SIZE_NOT_MULTIPLE -> R.string.model_reject_input_size_not_multiple
             ModelRejectionReason.INPUT_SIZE_OUT_OF_RANGE -> R.string.model_reject_input_size_out_of_range
             ModelRejectionReason.OUTPUT_COUNT -> R.string.model_reject_output_count
@@ -145,6 +150,13 @@ internal object ControlModelMapper {
             ModelRejectionReason.OUTPUT_ROWS -> R.string.model_reject_output_rows
             ModelRejectionReason.OUTPUT_SHAPE -> R.string.model_reject_output_shape
         }
+
+    /**
+     * The aspect limit [limit] (`TrackerConfig.importMaxInputAspect`) as the sentence of
+     * `model_reject_input_aspect` prints it: no `.0` for a whole number (`4`), otherwise one decimal with a dot.
+     */
+    fun aspectLimitText(limit: Float): String =
+        if (limit % 1f == 0f) limit.toInt().toString() else String.format(Locale.ROOT, "%.1f", limit)
 
     /** The sentence of a failed import; the one for [ImportFailure.IO] takes the technical message as its argument. */
     @StringRes

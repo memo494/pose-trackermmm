@@ -2,6 +2,8 @@ package com.memo494.posetracker.diagnostics
 
 import com.memo494.posetracker.capture.FramePipeline
 import com.memo494.posetracker.core.TrackerConfig
+import com.memo494.posetracker.core.stats.ThermalSampler
+import com.memo494.posetracker.core.stats.ThermalStatusText
 import com.memo494.posetracker.modelimport.ModelStatusHolder
 import com.memo494.posetracker.overlay.OverlayState
 
@@ -17,10 +19,15 @@ internal object CaptureStatsHolder {
     @Volatile
     var debugMarks: Boolean = TrackerConfig.DEFAULT_DEBUG_MARKS
 
-    /** Capture thread, once per HUD tick: stores a snapshot of [state] and the [pipeline] counters. */
+    /**
+     * Capture thread, once per HUD tick: stores a snapshot of [state], the [pipeline] counters and its timing
+     * percentiles (computed here, on the capture thread, so the diagnostics thread only reads the snapshot) and
+     * the last reading of [thermal] (`null` = no thermal source: not available).
+     */
     fun publish(
         state: OverlayState,
         pipeline: FramePipeline,
+        thermal: ThermalSampler?,
     ) {
         latest =
             CaptureStats(
@@ -48,6 +55,9 @@ internal object CaptureStatsHolder {
                 headXImg = pipeline.lastHeadXImg,
                 headYImg = pipeline.lastHeadYImg,
                 model = ModelStatusHolder.latest(),
+                timing = pipeline.timingSummary(),
+                thermalStatus = thermal?.status ?: ThermalStatusText.NOT_AVAILABLE,
+                thermalHeadroom = thermal?.headroom ?: Float.NaN,
             )
     }
 }

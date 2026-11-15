@@ -41,7 +41,7 @@ class ImportedModelStoreTest {
         name: String,
         digit: Char,
         bytes: Int,
-    ) = ImportedModelMeta(name, digit.toString().repeat(64), bytes.toLong(), 640, 300)
+    ) = ImportedModelMeta(name, digit.toString().repeat(64), bytes.toLong(), 640, 640, 300)
 
     private fun newStore(appStartApplied: AtomicBoolean = AtomicBoolean(false)) =
         ImportedModelStore(directory, prefs, appStartApplied, thread::check, { importRunning }) { from, to ->
@@ -205,6 +205,31 @@ class ImportedModelStoreTest {
     }
 
     @Test
+    fun storedVersion1Meta_stillLoadsAsASquareModelAndIsUsed() {
+        val store = newStore()
+        storeOldModel(store)
+        // What the first release wrote: header v1 and one inputSize= line, no width or height.
+        File(directory, "meta.txt").writeText(
+            listOf(
+                "posetracker-imported-model v1",
+                "name=old.tflite",
+                "sha256=" + "a".repeat(64),
+                "bytes=${oldBytes.size}",
+                "inputSize=640",
+                "outputRows=300",
+            ).joinToString("\n"),
+        )
+
+        val state = store.state()
+
+        assertThat(state.meta).isEqualTo(oldMeta)
+        assertThat(state.meta?.inputWidth).isEqualTo(640)
+        assertThat(state.meta?.inputHeight).isEqualTo(640)
+        assertThat(state.fileExists).isTrue()
+        assertThat(ModelChoice.resolve(state)).isEqualTo(ModelChoice.Imported(oldMeta))
+    }
+
+    @Test
     fun missingModelFile_keepsTheMetaButReportsNoFile() {
         val store = newStore()
         storeOldModel(store)
@@ -272,7 +297,7 @@ class ImportedModelStoreTest {
 
     private fun storedMatchingMeta(store: ImportedModelStore): ImportedModelMeta {
         val sha = Sha256.hex(newBytes.inputStream())
-        val real = ImportedModelMeta("new.tflite", sha, newBytes.size.toLong(), 640, 300)
+        val real = ImportedModelMeta("new.tflite", sha, newBytes.size.toLong(), 640, 640, 300)
         assertThat(store.accept(stage(store, newBytes), real)).isTrue()
         return real
     }

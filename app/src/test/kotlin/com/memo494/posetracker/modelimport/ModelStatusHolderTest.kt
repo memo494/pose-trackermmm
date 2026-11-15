@@ -6,9 +6,8 @@ import org.junit.Before
 import org.junit.Test
 
 class ModelStatusHolderTest {
-    private val builtIn = ModelStatus(ModelSource.BUILT_IN, meta = null, fallback = null, message = null, inputSize = 416)
-    private val fellBack =
-        ModelStatus(ModelSource.BUILT_IN, meta = null, fallback = ModelFallback.FILE_MISSING, message = null, inputSize = 416)
+    private val builtIn = ModelStatus(ModelSource.BUILT_IN, null, null, null, inputWidth = 416, inputHeight = 416)
+    private val fellBack = ModelStatus(ModelSource.BUILT_IN, null, ModelFallback.FILE_MISSING, null, inputWidth = 416, inputHeight = 416)
 
     @Before
     fun setUp() = ModelStatusHolder.clear()

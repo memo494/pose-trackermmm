@@ -1,5 +1,7 @@
 package com.memo494.posetracker.diagnostics
 
+import com.memo494.posetracker.core.stats.ThermalStatusText
+import com.memo494.posetracker.core.stats.TimingSummary
 import com.memo494.posetracker.modelimport.ModelStatus
 import com.memo494.posetracker.overlay.OverlayState
 
@@ -33,6 +35,9 @@ import com.memo494.posetracker.overlay.OverlayState
  * @property headXImg head point of the first person of the newest frame with people, Img pixels; NaN = none yet.
  * @property headYImg see [headXImg].
  * @property model the model of the session (source, file, fallback, input size); `null` = not known.
+ * @property timing percentiles of the per-frame timings over the newest frames; [TimingSummary.EMPTY] = none yet.
+ * @property thermalStatus name of the device's thermal status (`NONE` to `SHUTDOWN`); `n/a` = not known.
+ * @property thermalHeadroom the device's thermal headroom, unitless (1.0 = throttling); NaN = not known.
  */
 internal data class CaptureStats(
     val accelerator: String?,
@@ -59,4 +64,7 @@ internal data class CaptureStats(
     val headXImg: Float = Float.NaN,
     val headYImg: Float = Float.NaN,
     val model: ModelStatus? = null,
+    val timing: TimingSummary = TimingSummary.EMPTY,
+    val thermalStatus: String = ThermalStatusText.NOT_AVAILABLE,
+    val thermalHeadroom: Float = Float.NaN,
 )

@@ -381,7 +381,7 @@ class ControlReducerTest {
 
     // The model block: import, reset and the stored model state.
 
-    private val imported = ActiveModel.Imported("yolo26n-pose_640.tflite", 640)
+    private val imported = ActiveModel.Imported("yolo26n-pose_640.tflite", "640")
     private val tripped = ModelNotice(ModelNoticeKind.GUARD_TRIPPED_LOAD)
     private val rejected = ImportSummary.Rejected(ModelRejectionReason.INPUT_NHWC, "input [1,640,640,3] float32")
 
@@ -460,7 +460,7 @@ class ControlReducerTest {
     @Test
     fun importFinished_accepted_switchesTheActiveModelAndClearsTheOldNotice() {
         val state = ready.copy(importing = true, modelNotice = tripped)
-        val summary = ImportSummary.Accepted("yolo26n-pose_640.tflite", 640)
+        val summary = ImportSummary.Accepted("yolo26n-pose_640.tflite", "640")
 
         val step = reduce(state, ControlEvent.ImportFinished(summary))
 
@@ -571,7 +571,7 @@ class ControlReducerTest {
 
     @Test
     fun importFinished_accepted_marksAFileAsStored() {
-        val step = reduce(ready.copy(importing = true), ControlEvent.ImportFinished(ImportSummary.Accepted("a.tflite", 640)))
+        val step = reduce(ready.copy(importing = true), ControlEvent.ImportFinished(ImportSummary.Accepted("a.tflite", "640")))
 
         assertThat(step.state.modelFileStored).isTrue()
     }
@@ -599,10 +599,10 @@ class ControlReducerTest {
     fun importFinished_arrivingAtARecreatedScreen_clearsImportingAndReloadsTheModel() {
         val state = ready.copy(importing = true)
 
-        val step = reduce(state, ControlEvent.ImportFinished(ImportSummary.Accepted("a.tflite", 640)))
+        val step = reduce(state, ControlEvent.ImportFinished(ImportSummary.Accepted("a.tflite", "640")))
 
         assertThat(step.state.importing).isFalse()
-        assertThat(step.state.importResult).isEqualTo(ImportSummary.Accepted("a.tflite", 640))
+        assertThat(step.state.importResult).isEqualTo(ImportSummary.Accepted("a.tflite", "640"))
         assertThat(step.effect).isEqualTo(ControlEffect.LOAD_MODEL_STATE)
     }
 
@@ -650,7 +650,7 @@ class ControlReducerTest {
                 ControlEvent.ImportClicked,
                 ControlEvent.ImportPicked(null),
                 ControlEvent.ImportPicked("content://docs/model"),
-                ControlEvent.ImportFinished(ImportSummary.Accepted("a.tflite", 416)),
+                ControlEvent.ImportFinished(ImportSummary.Accepted("a.tflite", "416")),
                 ControlEvent.ImportFinished(rejected),
                 ControlEvent.ImportFinished(ImportSummary.Failed(ImportFailure.IO, "x")),
                 ControlEvent.UseBuiltInClicked,
@@ -705,8 +705,8 @@ class ControlReducerTest {
 
         state = reduce(state, ControlEvent.ImportPicked("content://docs/b")).state
         assertThat(state.importResult).isNull()
-        state = reduce(state, ControlEvent.ImportFinished(ImportSummary.Accepted("b.tflite", 640))).state
-        assertThat(state.activeModel).isEqualTo(ActiveModel.Imported("b.tflite", 640))
+        state = reduce(state, ControlEvent.ImportFinished(ImportSummary.Accepted("b.tflite", "640"))).state
+        assertThat(state.activeModel).isEqualTo(ActiveModel.Imported("b.tflite", "640"))
 
         val reset = reduce(state, ControlEvent.UseBuiltInClicked)
         assertThat(reset.effect).isEqualTo(ControlEffect.CLEAR_IMPORTED)

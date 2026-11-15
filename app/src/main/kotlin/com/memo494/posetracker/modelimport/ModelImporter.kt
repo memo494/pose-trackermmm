@@ -208,7 +208,8 @@ class ModelImporter(
                         displayName = ImportedModelMeta.sanitiseName(rawDisplayName),
                         sha256 = copy.sha256,
                         bytes = copy.bytes,
-                        inputSize = check.inputSize,
+                        inputWidth = check.inputWidth,
+                        inputHeight = check.inputHeight,
                         outputRows = check.outputRows,
                     )
                 accept(temp, meta)
@@ -222,7 +223,7 @@ class ModelImporter(
     ): ImportOutcome {
         // A model the rules accept but the stored form cannot describe is not stored (fail closed; the rules and
         // the stored form share their limits, so this is a guard against them drifting apart).
-        if (ImportedModelMeta.decode(meta.encode()) != meta) {
+        if (ImportedModelMeta.decode(meta.encode(), config) != meta) {
             return ImportOutcome.Failed(FailureKind.IO, "The model description cannot be stored")
         }
         // The store also lifts a trip (the new file replaces the one that tripped the guard), under the same lock.

@@ -42,10 +42,18 @@ package com.memo494.posetracker.core
  *   cannot be a pose model).
  * @property importMaxBytes largest accepted size of an imported model file, in bytes (the copy into
  *   app storage is cut off at this size).
- * @property importMinInputSize smallest accepted side of an imported model's square input, in pixels
+ * @property importMinInputSize smallest accepted width or height of an imported model's input, in pixels
  *   (Mdl space); a multiple of [IMPORT_INPUT_SIZE_STEP].
- * @property importMaxInputSize largest accepted side of an imported model's square input, in pixels
+ * @property importMaxInputSize largest accepted width or height of an imported model's input, in pixels
  *   (Mdl space); a multiple of [IMPORT_INPUT_SIZE_STEP].
+ * @property importMaxInputAspect largest accepted ratio of the long side to the short side of an imported
+ *   model's input, unitless in [[MIN_IMPORT_MAX_INPUT_ASPECT_LIMIT], [MAX_IMPORT_MAX_INPUT_ASPECT_LIMIT]];
+ *   1.0 accepts only square inputs, 4.0 (default) accepts 768x192 and refuses 832x192.
+ * @property timingWindowFrames number of the newest processed frames each timing statistic (copy, pre, inference,
+ *   post, frame, result age) is computed over, in frames, in [[MIN_TIMING_WINDOW_FRAMES], [MAX_TIMING_WINDOW_FRAMES]].
+ * @property thermalSampleIntervalMs shortest time between two reads of the device's thermal status and headroom,
+ *   in milliseconds, in [[MIN_THERMAL_SAMPLE_INTERVAL_MS], [MAX_THERMAL_SAMPLE_INTERVAL_MS]]; the platform
+ *   answers `NaN` to a headroom request that comes too often.
  */
 data class TrackerConfig(
     val scoreThreshold: Float = DEFAULT_SCORE_THRESHOLD,
@@ -67,6 +75,9 @@ data class TrackerConfig(
     val importMaxBytes: Long = DEFAULT_IMPORT_MAX_BYTES,
     val importMinInputSize: Int = DEFAULT_IMPORT_MIN_INPUT_SIZE,
     val importMaxInputSize: Int = DEFAULT_IMPORT_MAX_INPUT_SIZE,
+    val importMaxInputAspect: Float = DEFAULT_IMPORT_MAX_INPUT_ASPECT,
+    val timingWindowFrames: Int = DEFAULT_TIMING_WINDOW_FRAMES,
+    val thermalSampleIntervalMs: Long = DEFAULT_THERMAL_SAMPLE_INTERVAL_MS,
 ) {
     init {
         require(scoreThreshold in MIN_SCORE_THRESHOLD..MAX_SCORE_THRESHOLD) {
@@ -136,11 +147,26 @@ data class TrackerConfig(
             "importMinInputSize $importMinInputSize and importMaxInputSize $importMaxInputSize " +
                 "must be multiples of $IMPORT_INPUT_SIZE_STEP"
         }
+        require(importMaxInputAspect in MIN_IMPORT_MAX_INPUT_ASPECT_LIMIT..MAX_IMPORT_MAX_INPUT_ASPECT_LIMIT) {
+            "importMaxInputAspect $importMaxInputAspect outside " +
+                "[$MIN_IMPORT_MAX_INPUT_ASPECT_LIMIT, $MAX_IMPORT_MAX_INPUT_ASPECT_LIMIT]"
+        }
+        require(timingWindowFrames in MIN_TIMING_WINDOW_FRAMES..MAX_TIMING_WINDOW_FRAMES) {
+            "timingWindowFrames $timingWindowFrames outside [$MIN_TIMING_WINDOW_FRAMES, $MAX_TIMING_WINDOW_FRAMES]"
+        }
+        require(thermalSampleIntervalMs in MIN_THERMAL_SAMPLE_INTERVAL_MS..MAX_THERMAL_SAMPLE_INTERVAL_MS) {
+            "thermalSampleIntervalMs $thermalSampleIntervalMs outside " +
+                "[$MIN_THERMAL_SAMPLE_INTERVAL_MS, $MAX_THERMAL_SAMPLE_INTERVAL_MS]"
+        }
     }
 
     /** Minimum time between two HUD text updates, in nanoseconds (duration, not a timestamp). */
     val hudIntervalNs: Long
         get() = (NANOS_PER_SECOND / hudRateHz).toLong()
+
+    /** Shortest time between two thermal reads, in nanoseconds (duration, not a timestamp). */
+    val thermalSampleIntervalNs: Long
+        get() = thermalSampleIntervalMs * NANOS_PER_MILLI
 
     /**
      * Capture rate, in frames per second, below which the HUD shows 0 fps and does not refresh its numbers.
@@ -301,6 +327,36 @@ data class TrackerConfig(
         /** Nanoseconds per second. */
         const val NANOS_PER_SECOND = 1_000_000_000f
 
+        /** Nanoseconds per millisecond. */
+        const val NANOS_PER_MILLI = 1_000_000L
+
+        /** Default [timingWindowFrames]: about 17 s of a 30 fps capture. */
+        const val DEFAULT_TIMING_WINDOW_FRAMES = 512
+
+        /** Lowest accepted [timingWindowFrames], in frames. */
+        const val MIN_TIMING_WINDOW_FRAMES = 16
+
+        /** Highest accepted [timingWindowFrames], in frames. */
+        const val MAX_TIMING_WINDOW_FRAMES = 4096
+
+        /** Median, as a fraction in [0, 1], for the timing statistics in the diagnostics. */
+        const val TIMING_MEDIAN_FRACTION = 0.5
+
+        /** 95th percentile, as a fraction in [0, 1], for the timing statistics in the diagnostics. */
+        const val TIMING_P95_FRACTION = 0.95
+
+        /** Default [thermalSampleIntervalMs], in milliseconds. */
+        const val DEFAULT_THERMAL_SAMPLE_INTERVAL_MS = 2000L
+
+        /** Lowest accepted [thermalSampleIntervalMs], in milliseconds (the platform limits headroom reads to about 1 per second). */
+        const val MIN_THERMAL_SAMPLE_INTERVAL_MS = 1000L
+
+        /** Highest accepted [thermalSampleIntervalMs]: 1 minute, in milliseconds. */
+        const val MAX_THERMAL_SAMPLE_INTERVAL_MS = 60_000L
+
+        /** How far ahead, in seconds, the thermal headroom is forecast; 0 = the current headroom. */
+        const val THERMAL_HEADROOM_FORECAST_SECONDS = 0
+
         /** Bytes per pixel of `PixelFormat.RGBA_8888`, the capture format. */
         const val RGBA_BYTES_PER_PIXEL = 4
 
@@ -379,7 +435,16 @@ data class TrackerConfig(
         /** Highest accepted [importMinInputSize] / [importMaxInputSize], in pixels (Mdl; also the sanity cap of stored metadata). */
         const val MAX_IMPORT_INPUT_SIZE_LIMIT = 4096
 
-        /** An imported model's input side must be a multiple of this, in pixels (the largest YOLO stride). */
+        /** Default [importMaxInputAspect]: long side at most 4 times the short side. */
+        const val DEFAULT_IMPORT_MAX_INPUT_ASPECT = 4.0f
+
+        /** Lowest accepted [importMaxInputAspect]: 1.0, square inputs only. */
+        const val MIN_IMPORT_MAX_INPUT_ASPECT_LIMIT = 1.0f
+
+        /** Highest accepted [importMaxInputAspect]. */
+        const val MAX_IMPORT_MAX_INPUT_ASPECT_LIMIT = 16.0f
+
+        /** An imported model's input width and height must each be a multiple of this, in pixels (the largest YOLO stride). */
         const val IMPORT_INPUT_SIZE_STEP = 32
 
         /**

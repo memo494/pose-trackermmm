@@ -245,15 +245,17 @@ class OverlayStateHolderTest {
         holder.publish(state())
         nowNs += intervalNs
 
-        holder.publish(state().copy(modelInputSize = 640, modelImported = true))
+        holder.publish(state().copy(modelInputWidth = 832, modelInputHeight = 384, modelImported = true))
 
-        assertThat(holder.hud().modelInputSize).isEqualTo(640)
+        assertThat(holder.hud().modelInputWidth).isEqualTo(832)
+        assertThat(holder.hud().modelInputHeight).isEqualTo(384)
         assertThat(holder.hud().modelImported).isTrue()
     }
 
     @Test
     fun theEmptyState_knowsNoModel() {
-        assertThat(OverlayState.EMPTY.modelInputSize).isEqualTo(0)
+        assertThat(OverlayState.EMPTY.modelInputWidth).isEqualTo(0)
+        assertThat(OverlayState.EMPTY.modelInputHeight).isEqualTo(0)
         assertThat(OverlayState.EMPTY.modelImported).isFalse()
     }
 }

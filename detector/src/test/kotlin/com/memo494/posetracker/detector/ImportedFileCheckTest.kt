@@ -22,7 +22,8 @@ class ImportedFileCheckTest {
             displayName = "model.tflite",
             sha256 = file.inputStream().use { Sha256.hex(it) },
             bytes = file.length(),
-            inputSize = 640,
+            inputWidth = 640,
+            inputHeight = 640,
             outputRows = 300,
         )
 

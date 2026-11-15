@@ -11,8 +11,11 @@ import java.io.Closeable
  * model is created on that thread and must be run and closed there; never use a detector on the main thread.
  */
 interface PoseDetector : Closeable {
-    /** Side of the square model input, in model pixels (Mdl space); read from the model, never assumed. */
-    val inputSize: Int
+    /** Width of the model input, in model pixels (Mdl space); read from the model, never assumed. */
+    val inputWidth: Int
+
+    /** Height of the model input, in model pixels (Mdl space); read from the model, never assumed. */
+    val inputHeight: Int
 
     /** The compute backend that actually runs the model, which can be [Accelerator.CPU] although GPU was asked for. */
     val accelerator: Accelerator
@@ -38,6 +41,20 @@ interface PoseDetector : Closeable {
     /** Diagnostics: model output rows of the last [detect] call with a NaN score (garbage output); [NOT_MEASURED] if unknown. */
     val lastNanRawRows: Int
         get() = NOT_MEASURED
+
+    /**
+     * Diagnostics: pre-processing (image to model input) of the last [detect] call, in milliseconds.
+     * [NOT_MEASURED] (negative) when the detector does not measure it or before the first call.
+     */
+    val lastPreMs: Float
+        get() = NOT_MEASURED.toFloat()
+
+    /**
+     * Diagnostics: post-processing (model output to detections) of the last [detect] call, in milliseconds.
+     * [NOT_MEASURED] (negative) when the detector does not measure it or before the first call.
+     */
+    val lastPostMs: Float
+        get() = NOT_MEASURED.toFloat()
 
     /**
      * Detects the people in [frame].

@@ -28,6 +28,9 @@ import com.memo494.posetracker.detector.Accelerator
  *   any threshold, unitless; negative = not measured.
  * @property rawRowsAboveThreshold model output rows of the newest frame whose raw score passed the score
  *   threshold, count; negative = not measured.
+ * @property modelInputWidth width of the running model's input, in model pixels (Mdl); 0 = no model.
+ * @property modelInputHeight height of the running model's input, in model pixels (Mdl); 0 = no model.
+ * @property modelImported whether the running model is the imported one, not the built-in one.
  */
 data class OverlayState(
     val frame: DetectionFrame? = null,
@@ -43,7 +46,8 @@ data class OverlayState(
     val displayHeightPx: Int = 0,
     val maxRawScore: Float = NOT_MEASURED_SCORE,
     val rawRowsAboveThreshold: Int = NOT_MEASURED_COUNT,
-    val modelInputSize: Int = 0,
+    val modelInputWidth: Int = 0,
+    val modelInputHeight: Int = 0,
     val modelImported: Boolean = false,
 ) {
     /** Whether [frame] may be drawn: content visible and no warning that hides the detections. */

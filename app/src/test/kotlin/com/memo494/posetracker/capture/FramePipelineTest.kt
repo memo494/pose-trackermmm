@@ -8,6 +8,8 @@ import com.memo494.posetracker.core.model.DetectionFrame
 import com.memo494.posetracker.core.model.PoseDetection
 import com.memo494.posetracker.core.model.TimestampSource
 import com.memo494.posetracker.core.overlay.OverlayWarning
+import com.memo494.posetracker.core.stats.Percentiles
+import com.memo494.posetracker.core.stats.TimingSummary
 import com.memo494.posetracker.detector.Accelerator
 import com.memo494.posetracker.detector.PoseDetector
 import com.memo494.posetracker.overlay.OverlayState
@@ -33,6 +35,7 @@ private class FakeFrameImage(
     override val rowStride: Int,
     private val pixelsError: Throwable?,
     private val closeError: Throwable?,
+    private val onPixelsRead: (() -> Unit)? = null,
 ) : FrameImage {
     override val pixelStride: Int = BYTES_PER_PIXEL
     val buffer: ByteBuffer = ByteBuffer.allocate(rowStride * heightImg)
@@ -45,6 +48,7 @@ private class FakeFrameImage(
     override val pixels: ByteBuffer
         get() {
             events.add("read")
+            onPixelsRead?.invoke()
             if (pixelsError != null) throw pixelsError
             return buffer
         }
@@ -59,13 +63,17 @@ private class FakeFrameImage(
 /** A detector that records what it saw and fails on demand. */
 private class ScriptedDetector(
     private val events: MutableList<String>,
+    override val inputWidth: Int = 320,
+    override val inputHeight: Int = 320,
 ) : PoseDetector {
-    override val inputSize: Int = 320
     override val accelerator: Accelerator = Accelerator.GPU
     override var lastInferenceMs: Float = 7.5f
     override var lastMaxRawScore: Float = PoseDetector.NOT_MEASURED.toFloat()
     override var lastRawRowsAboveThreshold: Int = PoseDetector.NOT_MEASURED
     override var lastNanRawRows: Int = PoseDetector.NOT_MEASURED
+    override var lastPreMs: Float = PoseDetector.NOT_MEASURED.toFloat()
+    override var lastPostMs: Float = PoseDetector.NOT_MEASURED.toFloat()
+    var onDetect: (() -> Unit)? = null
     var people: List<PoseDetection> = emptyList()
     var failure: Throwable? = null
     var calls = 0
@@ -78,6 +86,7 @@ private class ScriptedDetector(
     override fun detect(frame: CaptureFrame): DetectionFrame {
         events.add("detect")
         calls++
+        onDetect?.invoke()
         seenRgba = frame.rgba
         seenRgbaCopy = frame.rgba.copyOf()
         seenTimestampNs = frame.timestampNs
@@ -119,11 +128,12 @@ class FramePipelineTest {
         detector: PoseDetector? = this.detector,
         modelImported: Boolean = false,
         importedModelNotUsed: Boolean = false,
+        config: TrackerConfig = TrackerConfig(),
     ): FramePipeline {
         val pipeline =
             FramePipeline(
                 detector,
-                TrackerConfig(),
+                config,
                 clock,
                 { state ->
                     val error = publisherError
@@ -150,7 +160,8 @@ class FramePipelineTest {
         rowStride: Int = widthImg * BYTES_PER_PIXEL,
         pixelsError: Throwable? = null,
         closeError: Throwable? = null,
-    ): FakeFrameImage = FakeFrameImage(events, widthImg, heightImg, timestampNs, rowStride, pixelsError, closeError)
+        onPixelsRead: (() -> Unit)? = null,
+    ): FakeFrameImage = FakeFrameImage(events, widthImg, heightImg, timestampNs, rowStride, pixelsError, closeError, onPixelsRead)
 
     private fun acquireNs(): Long = NOW_NS - MS_NS
 
@@ -723,7 +734,8 @@ class FramePipelineTest {
 
         pipeline.onFrame(image(), acquireNs())
 
-        assertThat(states.last().modelInputSize).isEqualTo(detector.inputSize)
+        assertThat(states.last().modelInputWidth).isEqualTo(detector.inputWidth)
+        assertThat(states.last().modelInputHeight).isEqualTo(detector.inputHeight)
         assertThat(states.last().modelImported).isFalse()
         assertThat(states.last().warning).isNull()
     }
@@ -736,7 +748,8 @@ class FramePipelineTest {
         pipeline.setContentVisible(false)
 
         assertThat(states).hasSize(2)
-        assertThat(states.all { it.modelImported && it.modelInputSize == detector.inputSize }).isTrue()
+        assertThat(states.all { it.modelImported }).isTrue()
+        assertThat(states.all { it.modelInputWidth == detector.inputWidth && it.modelInputHeight == detector.inputHeight }).isTrue()
     }
 
     @Test
@@ -745,8 +758,21 @@ class FramePipelineTest {
 
         pipeline.setContentVisible(true)
 
-        assertThat(states.single().modelInputSize).isEqualTo(detector.inputSize)
+        assertThat(states.single().modelInputWidth).isEqualTo(detector.inputWidth)
+        assertThat(states.single().modelInputHeight).isEqualTo(detector.inputHeight)
         assertThat(states.single().modelImported).isTrue()
+    }
+
+    @Test
+    fun publishedStates_carryWidthAndHeightOfARectangularModelApart() {
+        val rectangular = ScriptedDetector(events, inputWidth = 832, inputHeight = 384)
+        val pipeline = pipeline(detector = rectangular, modelImported = true)
+
+        pipeline.onFrame(image(), acquireNs())
+        pipeline.setContentVisible(false)
+
+        assertThat(states).hasSize(2)
+        assertThat(states.all { it.modelInputWidth == 832 && it.modelInputHeight == 384 }).isTrue()
     }
 
     @Test
@@ -755,7 +781,8 @@ class FramePipelineTest {
 
         pipeline.onFrame(image(), acquireNs())
 
-        assertThat(states.last().modelInputSize).isEqualTo(0)
+        assertThat(states.last().modelInputWidth).isEqualTo(0)
+        assertThat(states.last().modelInputHeight).isEqualTo(0)
         assertThat(states.last().modelImported).isFalse()
     }
 
@@ -800,5 +827,141 @@ class FramePipelineTest {
         pipeline.onFrame(image(), acquireNs())
 
         assertThat(states.all { it.warning == null }).isTrue()
+    }
+
+    // M1a T5: timing statistics. The clock is moved by hooks: 2 ms while the pixels are read (the copy), 10 ms inside
+    // detect. Per frame: acquired 1 ms before NOW, image stamp 5 ms before NOW, published at NOW + 12 ms.
+
+    private fun timedFrame(pipeline: FramePipeline) {
+        clock.currentNs = NOW_NS
+        pipeline.onFrame(image(onPixelsRead = { clock.currentNs += 2 * MS_NS }), acquireNs())
+    }
+
+    private fun scriptTheTimings() {
+        detector.onDetect = { clock.currentNs += 10 * MS_NS }
+        detector.lastPreMs = 1.5f
+        detector.lastPostMs = 0.5f
+    }
+
+    @Test
+    fun timing_recordsOneSamplePerProcessedFrame() {
+        scriptTheTimings()
+        val pipeline = pipeline()
+
+        repeat(3) { timedFrame(pipeline) }
+
+        val timing = pipeline.timingSummary()
+        assertThat(timing.samples).isEqualTo(3)
+        assertThat(timing.copyMs.p50).isWithin(0.001f).of(2f)
+        assertThat(timing.copyMs.p95).isWithin(0.001f).of(2f)
+        assertThat(timing.preMs.p50).isWithin(0.001f).of(1.5f)
+        assertThat(timing.inferMs.p50).isWithin(0.001f).of(7.5f)
+        assertThat(timing.postMs.p50).isWithin(0.001f).of(0.5f)
+        assertThat(timing.frameMs.p50).isWithin(0.001f).of(13f)
+        assertThat(timing.frameMs.p95).isWithin(0.001f).of(13f)
+        assertThat(timing.resultAgeMs.p50).isWithin(0.001f).of(17f)
+        assertThat(timing.resultAgeMs.p95).isWithin(0.001f).of(17f)
+    }
+
+    @Test
+    fun timing_beforeAnyFrame_isEmpty() {
+        assertThat(pipeline().timingSummary()).isEqualTo(TimingSummary.EMPTY)
+    }
+
+    @Test
+    fun timing_framesThatAreDrainedOrDropped_addNothing() {
+        scriptTheTimings()
+        val pipeline = pipeline()
+        pipeline.onFrame(image(widthImg = WIDTH + 2), acquireNs())
+        pipeline.onFrame(image(rowStride = WIDTH * BYTES_PER_PIXEL - 1), acquireNs())
+        detector.failure = IllegalStateException("test")
+        pipeline.onFrame(image(), acquireNs())
+        detector.failure = null
+        pipeline.setDisplaySized(false)
+        pipeline.onFrame(image(), acquireNs())
+
+        assertThat(pipeline.timingSummary()).isEqualTo(TimingSummary.EMPTY)
+
+        pipeline.setDisplaySized(true)
+        timedFrame(pipeline)
+
+        assertThat(pipeline.timingSummary().samples).isEqualTo(1)
+    }
+
+    @Test
+    fun timing_aDetectorlessPipeline_hasNoSamples() {
+        val pipeline = pipeline(detector = null)
+
+        pipeline.onFrame(image(), acquireNs())
+
+        assertThat(pipeline.timingSummary()).isEqualTo(TimingSummary.EMPTY)
+    }
+
+    @Test
+    fun timing_withAnArrivalTimestamp_hasNoResultAge() {
+        scriptTheTimings()
+        val pipeline = pipeline()
+        clock.currentNs = NOW_NS
+
+        pipeline.onFrame(image(timestampNs = 0L, onPixelsRead = { clock.currentNs += 2 * MS_NS }), acquireNs())
+
+        val timing = pipeline.timingSummary()
+        assertThat(pipeline.arrivalFallbacks).isEqualTo(1L)
+        assertThat(timing.samples).isEqualTo(1)
+        assertThat(timing.resultAgeMs).isEqualTo(Percentiles.NONE)
+        assertThat(timing.frameMs.p50).isWithin(0.001f).of(13f)
+    }
+
+    @Test
+    fun timing_aDetectorThatDoesNotMeasurePreAndPost_leavesThemUnknown() {
+        detector.onDetect = { clock.currentNs += 10 * MS_NS }
+        val pipeline = pipeline()
+
+        timedFrame(pipeline)
+
+        val timing = pipeline.timingSummary()
+        assertThat(timing.preMs).isEqualTo(Percentiles.NONE)
+        assertThat(timing.postMs).isEqualTo(Percentiles.NONE)
+        assertThat(timing.inferMs.p50).isWithin(0.001f).of(7.5f)
+        assertThat(timing.samples).isEqualTo(1)
+    }
+
+    @Test
+    fun timing_windowLengthComesFromTheConfig() {
+        scriptTheTimings()
+        val pipeline = pipeline(config = TrackerConfig(timingWindowFrames = TrackerConfig.MIN_TIMING_WINDOW_FRAMES))
+
+        repeat(TrackerConfig.MIN_TIMING_WINDOW_FRAMES + 4) { timedFrame(pipeline) }
+
+        assertThat(pipeline.timingSummary().samples).isEqualTo(TrackerConfig.MIN_TIMING_WINDOW_FRAMES)
+    }
+
+    @Test
+    fun timing_differentFrames_giveMedianAndP95FromTheWindow() {
+        scriptTheTimings()
+        val pipeline = pipeline()
+        // detect takes 10 ms for 19 frames and 50 ms for one: the frame time p50 is 13 ms, p95 is still 13 ms
+        // (rank 19 of 20) and the maximum would be 53 ms.
+        repeat(19) { timedFrame(pipeline) }
+        detector.onDetect = { clock.currentNs += 50 * MS_NS }
+        timedFrame(pipeline)
+
+        val timing = pipeline.timingSummary()
+        assertThat(timing.samples).isEqualTo(20)
+        assertThat(timing.frameMs.p50).isWithin(0.001f).of(13f)
+        assertThat(timing.frameMs.p95).isWithin(0.001f).of(13f)
+    }
+
+    @Test
+    fun timing_aSlowFrameShowsInTheP95WhenItIsMoreThanFivePercent() {
+        scriptTheTimings()
+        val pipeline = pipeline()
+        repeat(18) { timedFrame(pipeline) }
+        detector.onDetect = { clock.currentNs += 50 * MS_NS }
+        repeat(2) { timedFrame(pipeline) }
+
+        // 20 samples, 2 of them slow (53 ms): rank ceil(0.95 * 20) = 19 is a slow one
+        assertThat(pipeline.timingSummary().frameMs.p95).isWithin(0.001f).of(53f)
+        assertThat(pipeline.timingSummary().frameMs.p50).isWithin(0.001f).of(13f)
     }
 }

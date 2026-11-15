@@ -12,12 +12,14 @@ import com.memo494.posetracker.core.model.DetectionFrame
  * recorded frames every result has the incoming size and no detections.
  *
  * @param frames the recorded frames, for example from `ReplayFixture.parse`; copied on construction.
- * @property inputSize the model input size to report, in model pixels.
+ * @property inputWidth the model input width to report, in model pixels (Mdl space).
+ * @property inputHeight the model input height to report, in model pixels (Mdl space).
  * @property accelerator the backend to report.
  */
 class FakePoseDetector(
     frames: List<DetectionFrame>,
-    override val inputSize: Int,
+    override val inputWidth: Int,
+    override val inputHeight: Int,
     override val accelerator: Accelerator,
 ) : PoseDetector {
     private val frames: List<DetectionFrame> = frames.toList()
@@ -26,6 +28,12 @@ class FakePoseDetector(
 
     /** Always 0: nothing is inferred. */
     override val lastInferenceMs: Float = 0f
+
+    /** Always [PoseDetector.NOT_MEASURED]: nothing is pre-processed. */
+    override val lastPreMs: Float = PoseDetector.NOT_MEASURED.toFloat()
+
+    /** Always [PoseDetector.NOT_MEASURED]: nothing is post-processed. */
+    override val lastPostMs: Float = PoseDetector.NOT_MEASURED.toFloat()
 
     override fun detect(frame: CaptureFrame): DetectionFrame {
         check(!closed) { "FakePoseDetector is closed" }

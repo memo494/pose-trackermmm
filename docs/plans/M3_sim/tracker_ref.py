@@ -256,7 +256,8 @@ class Tracker:
         s.tracks = survivors
         for i in keep:
             if i in usedD or dets[i]['s'] < c.birthScore: continue
-            d = dets[i]; t = Track(); t.id = s.nextId; s.nextId += 1; t.state = 'T'; t.hits = 1; t.lostMs = 0.0; t.lost = False
+            d = dets[i]; t = Track(); t.id = s.nextId; s.nextId += 1; t.hits = 1; t.lostMs = 0.0; t.lost = False
+            t.state = 'C' if c.confirmHits <= 1 else 'T'   # confirmHits 1 = shown from the first detection
             t.est = HeadEst(c); p = t.est.update(d); h = d['b'] - d['t']; vv = (c.initVelSigma * h) ** 2
             t.kx = K(); t.ky = K(); t.kh = K()
             t.kx.reset(p[0], p[2], vv); t.ky.reset(p[1], p[2], vv); t.kh.reset(h, (c.heightNoise * h) ** 2, vv)

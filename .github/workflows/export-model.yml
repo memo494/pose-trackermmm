@@ -6,13 +6,17 @@ on:
   workflow_dispatch:
     inputs:
       sizes:
-        description: "Download-only export, e.g. 640 (comma-separated). Empty = the normal 320/416 export + PR."
+        description: "Download-only export: S or WxH entries, comma-separated, no spaces (e.g. 640 or 832x384,960x448). Empty = the normal 320/416 export + PR."
         type: string
         default: ""
       publish_tag:
         description: "With sizes: release tag to upload the files to (created as a pre-release if missing). Must start with 'models' (for example 'models'); never 'latest'."
         type: string
         default: ""
+      sweep:
+        description: "Run the detection sweep on the model files of the release 'models' and publish sweep.md / sweep.json to the pre-release 'models-sweep'."
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -30,21 +34,21 @@ jobs:
           python-version: "3.12"
 
       - name: Install export deps
-        if: ${{ inputs.sizes == '' }}
+        if: ${{ inputs.sizes == '' && !inputs.sweep }}
         run: |
           python -m pip install --upgrade pip
           pip install -r tools/requirements.txt
 
       - name: Export yolo26n-pose (320, 416) + goldens
-        if: ${{ inputs.sizes == '' }}
+        if: ${{ inputs.sizes == '' && !inputs.sweep }}
         run: python tools/export_model.py
 
       - name: Freeze resolved deps
-        if: ${{ inputs.sizes == '' }}
+        if: ${{ inputs.sizes == '' && !inputs.sweep }}
         run: pip freeze > tools/requirements.lock
 
       - name: Open PR with the exported model
-        if: ${{ inputs.sizes == '' }}
+        if: ${{ inputs.sizes == '' && !inputs.sweep }}
         uses: peter-evans/create-pull-request@v6
         with:
           branch: model-export
@@ -63,11 +67,19 @@ jobs:
 
       # ---- Download-only export (sizes set): no PR, nothing under model/ (M0c D5) ----
       - name: Check inputs
-        if: ${{ inputs.sizes != '' || inputs.publish_tag != '' }}
+        if: ${{ inputs.sizes != '' || inputs.publish_tag != '' || inputs.sweep }}
         env:
           SIZES: ${{ inputs.sizes }}
           TAG: ${{ inputs.publish_tag }}
+          SWEEP: ${{ inputs.sweep }}
         run: |
+          if [ "$SWEEP" = "true" ] && { [ -n "$SIZES" ] || [ -n "$TAG" ]; }; then
+            echo "sweep cannot be combined with sizes or publish_tag: the sweep only reads the release 'models' and writes the release 'models-sweep'" >&2
+            exit 1
+          fi
+          if [ "$SWEEP" = "true" ]; then
+            exit 0
+          fi
           if [ -z "$SIZES" ]; then
             echo "publish_tag needs sizes" >&2
             exit 1
@@ -126,3 +138,52 @@ jobs:
               --target "$GITHUB_SHA"
           fi
           gh release upload "$TAG" dist-models/* --clobber
+
+      # ---- Detection sweep (sweep=true): reads the files of release 'models', exports nothing ----
+      - name: Install pinned toolchain for the sweep
+        if: ${{ inputs.sweep }}
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r tools/requirements.lock
+          # tools/requirements.lock pins numpy, opencv-python (provides cv2), ai-edge-litert and ultralytics
+          # (bus.jpg comes from its assets), so nothing extra is installed here.
+
+      - name: Download the published model files
+        if: ${{ inputs.sweep }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release download models -p '*.tflite' -D sweep-models
+
+      - name: Self-test the sweep helpers
+        if: ${{ inputs.sweep }}
+        run: python tools/model_sweep.py --self-test
+
+      - name: Run the detection sweep
+        if: ${{ inputs.sweep }}
+        run: python tools/model_sweep.py --models sweep-models --out sweep-out
+
+      - name: Sweep results in the job summary
+        if: ${{ inputs.sweep }}
+        run: cat sweep-out/sweep.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the sweep as a workflow artifact
+        if: ${{ inputs.sweep }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-sweep
+          path: sweep-out/
+          if-no-files-found: error
+
+      - name: Publish the sweep to the release models-sweep
+        if: ${{ inputs.sweep }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if ! gh release view models-sweep >/dev/null 2>&1; then
+            gh release create models-sweep --prerelease --latest=false --title "Model sweep" \
+              --notes "Detection sweep of the published models, built by export-model.yml (sweep)." \
+              --target "$GITHUB_SHA"
+          fi
+          gh release upload models-sweep sweep-out/sweep.md sweep-out/sweep.json --clobber

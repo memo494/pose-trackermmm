@@ -54,6 +54,21 @@ package com.memo494.posetracker.core
  * @property thermalSampleIntervalMs shortest time between two reads of the device's thermal status and headroom,
  *   in milliseconds, in [[MIN_THERMAL_SAMPLE_INTERVAL_MS], [MAX_THERMAL_SAMPLE_INTERVAL_MS]]; the platform
  *   answers `NaN` to a headroom request that comes too often.
+ * @property maxTracks most tracks the tracker holds at once, in tracks, in [[MIN_MAX_TRACKS], [MAX_MAX_TRACKS]];
+ *   the assignment matrix has this many rows. A detection that would start a track beyond it is not tracked.
+ * @property trackGateChi2 association gate: a detection is a candidate for a track only when the squared
+ *   Mahalanobis distance of its head point from the track's predicted head point (the two axes taken
+ *   independently, using the innovation variances) is at most this value; chi-square with 2 degrees of
+ *   freedom, unitless, in [[MIN_TRACK_GATE_CHI2], [MAX_TRACK_GATE_CHI2]]; 9.21 is the 99 % point.
+ * @property assocIouWeight weight of `1 - IoU` of the track box and the detection box in the association cost,
+ *   unitless in [[MIN_ASSOC_WEIGHT], [MAX_ASSOC_WEIGHT]].
+ * @property assocHeadWeight weight of the head distance term in the association cost, unitless in
+ *   [[MIN_ASSOC_WEIGHT], [MAX_ASSOC_WEIGHT]].
+ * @property assocHeadScaleRatio head distance, as a fraction of the track box height `h` (unitless), at which
+ *   the head distance term reaches 1 and stops growing, in [[MIN_ASSOC_HEAD_SCALE_RATIO],
+ *   [MAX_ASSOC_HEAD_SCALE_RATIO]]; 0.5 means half a person height.
+ * @property dedupeIou two detections of one frame whose boxes overlap with at least this IoU (unitless) are
+ *   one person: the lower score is dropped before association, in [[MIN_DEDUPE_IOU], [MAX_DEDUPE_IOU]].
  */
 data class TrackerConfig(
     val scoreThreshold: Float = DEFAULT_SCORE_THRESHOLD,
@@ -85,6 +100,12 @@ data class TrackerConfig(
     val headMeasurementNoiseRatio: Float = DEFAULT_HEAD_MEASUREMENT_NOISE_RATIO,
     val headFallbackNoiseRatio: Float = DEFAULT_HEAD_FALLBACK_NOISE_RATIO,
     val headMinMeanConfidence: Float = DEFAULT_HEAD_MIN_MEAN_CONFIDENCE,
+    val maxTracks: Int = DEFAULT_MAX_TRACKS,
+    val trackGateChi2: Float = DEFAULT_TRACK_GATE_CHI2,
+    val assocIouWeight: Float = DEFAULT_ASSOC_WEIGHT,
+    val assocHeadWeight: Float = DEFAULT_ASSOC_WEIGHT,
+    val assocHeadScaleRatio: Float = DEFAULT_ASSOC_HEAD_SCALE_RATIO,
+    val dedupeIou: Float = DEFAULT_DEDUPE_IOU,
 ) {
     init {
         require(scoreThreshold in MIN_SCORE_THRESHOLD..MAX_SCORE_THRESHOLD) {
@@ -191,6 +212,24 @@ data class TrackerConfig(
         require(headMinMeanConfidence in MIN_HEAD_MIN_MEAN_CONFIDENCE..MAX_HEAD_MIN_MEAN_CONFIDENCE) {
             "headMinMeanConfidence $headMinMeanConfidence outside " +
                 "[$MIN_HEAD_MIN_MEAN_CONFIDENCE, $MAX_HEAD_MIN_MEAN_CONFIDENCE]"
+        }
+        require(maxTracks in MIN_MAX_TRACKS..MAX_MAX_TRACKS) {
+            "maxTracks $maxTracks outside [$MIN_MAX_TRACKS, $MAX_MAX_TRACKS]"
+        }
+        require(trackGateChi2 in MIN_TRACK_GATE_CHI2..MAX_TRACK_GATE_CHI2) {
+            "trackGateChi2 $trackGateChi2 outside [$MIN_TRACK_GATE_CHI2, $MAX_TRACK_GATE_CHI2]"
+        }
+        require(assocIouWeight in MIN_ASSOC_WEIGHT..MAX_ASSOC_WEIGHT) {
+            "assocIouWeight $assocIouWeight outside [$MIN_ASSOC_WEIGHT, $MAX_ASSOC_WEIGHT]"
+        }
+        require(assocHeadWeight in MIN_ASSOC_WEIGHT..MAX_ASSOC_WEIGHT) {
+            "assocHeadWeight $assocHeadWeight outside [$MIN_ASSOC_WEIGHT, $MAX_ASSOC_WEIGHT]"
+        }
+        require(assocHeadScaleRatio in MIN_ASSOC_HEAD_SCALE_RATIO..MAX_ASSOC_HEAD_SCALE_RATIO) {
+            "assocHeadScaleRatio $assocHeadScaleRatio outside [$MIN_ASSOC_HEAD_SCALE_RATIO, $MAX_ASSOC_HEAD_SCALE_RATIO]"
+        }
+        require(dedupeIou in MIN_DEDUPE_IOU..MAX_DEDUPE_IOU) {
+            "dedupeIou $dedupeIou outside [$MIN_DEDUPE_IOU, $MAX_DEDUPE_IOU]"
         }
     }
 
@@ -444,6 +483,51 @@ data class TrackerConfig(
 
         /** Highest accepted [headMinMeanConfidence]. */
         const val MAX_HEAD_MIN_MEAN_CONFIDENCE = 0.5f
+
+        /** Default [maxTracks], in tracks. */
+        const val DEFAULT_MAX_TRACKS = 32
+
+        /** Lowest accepted [maxTracks], in tracks. */
+        const val MIN_MAX_TRACKS = 1
+
+        /** Highest accepted [maxTracks], in tracks. */
+        const val MAX_MAX_TRACKS = 128
+
+        /** Default [trackGateChi2]: the 99 % point of chi-square with 2 degrees of freedom, unitless. */
+        const val DEFAULT_TRACK_GATE_CHI2 = 9.21f
+
+        /** Lowest accepted [trackGateChi2]. */
+        const val MIN_TRACK_GATE_CHI2 = 1.0f
+
+        /** Highest accepted [trackGateChi2]. */
+        const val MAX_TRACK_GATE_CHI2 = 30.0f
+
+        /** Default [assocIouWeight] and [assocHeadWeight]: the two cost terms count equally, unitless. */
+        const val DEFAULT_ASSOC_WEIGHT = 0.5f
+
+        /** Lowest accepted [assocIouWeight] / [assocHeadWeight] (above 0 so neither term can be switched off). */
+        const val MIN_ASSOC_WEIGHT = 0.05f
+
+        /** Highest accepted [assocIouWeight] / [assocHeadWeight]. */
+        const val MAX_ASSOC_WEIGHT = 1.0f
+
+        /** Default [assocHeadScaleRatio]: unitless fraction of the track box height. */
+        const val DEFAULT_ASSOC_HEAD_SCALE_RATIO = 0.5f
+
+        /** Lowest accepted [assocHeadScaleRatio]. */
+        const val MIN_ASSOC_HEAD_SCALE_RATIO = 0.1f
+
+        /** Highest accepted [assocHeadScaleRatio]. */
+        const val MAX_ASSOC_HEAD_SCALE_RATIO = 2.0f
+
+        /** Default [dedupeIou]: unitless. */
+        const val DEFAULT_DEDUPE_IOU = 0.7f
+
+        /** Lowest accepted [dedupeIou]. */
+        const val MIN_DEDUPE_IOU = 0.3f
+
+        /** Highest accepted [dedupeIou]. */
+        const val MAX_DEDUPE_IOU = 0.95f
 
         /** How far ahead, in seconds, the thermal headroom is forecast; 0 = the current headroom. */
         const val THERMAL_HEADROOM_FORECAST_SECONDS = 0

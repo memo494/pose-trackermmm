@@ -190,7 +190,8 @@ class TrackerTest {
 
     @Test
     fun aLostTrack_isRemovedAfterTheMaxLostTime_atTheSameTimeAt20And60Fps() {
-        for (fps in listOf(20, 60)) {
+        val goneAfterMs = DoubleArray(2)
+        for ((n, fps) in listOf(20, 60).withIndex()) {
             val stepNs = NANOS_PER_S / fps
             val local = Tracker(config)
             var timeNs = START_NS
@@ -199,19 +200,19 @@ class TrackerTest {
                 timeNs += stepNs
             }
             val lastHitNs = timeNs - stepNs
-            var goneAfterMs = -1.0
+            goneAfterMs[n] = -1.0
             for (k in 0 until MAX_EMPTY_FRAMES) {
-                val list = local.update(frameAt(timeNs))
-                if (list.size == 0) {
-                    goneAfterMs = (timeNs - lastHitNs) / NANOS_PER_MS
+                if (local.update(frameAt(timeNs)).size == 0) {
+                    goneAfterMs[n] = (timeNs - lastHitNs) / NANOS_PER_MS
                     break
                 }
                 timeNs += stepNs
             }
-            val stepMs = stepNs / NANOS_PER_MS
-            assertThat(goneAfterMs).isGreaterThan(config.trackMaxLostMs.toDouble())
-            assertThat(goneAfterMs).isAtMost(config.trackMaxLostMs + stepMs + 0.001)
+            // The step of 1/60 s is cut to whole nanoseconds, so the sum may fall a few micro-seconds short of the limit.
+            assertThat(goneAfterMs[n]).isAtLeast(config.trackMaxLostMs - ROUNDING_MS)
+            assertThat(goneAfterMs[n]).isAtMost(config.trackMaxLostMs + stepNs / NANOS_PER_MS + ROUNDING_MS)
         }
+        assertThat(goneAfterMs[0] - goneAfterMs[1]).isWithin(STEP_MS + ROUNDING_MS).of(0.0)
     }
 
     @Test
@@ -396,6 +397,7 @@ class TrackerTest {
         const val NANOS_PER_MS = 1_000_000.0
         const val STEP_NS = 50_000_000L
         const val STEP_MS = 50f
+        const val ROUNDING_MS = 0.01
         const val GAP_NS = 5_000_000_000L
         const val IMAGE_WIDTH = 1356
         const val IMAGE_HEIGHT = 610

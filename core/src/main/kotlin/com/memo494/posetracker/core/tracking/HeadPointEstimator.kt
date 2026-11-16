@@ -30,7 +30,7 @@ import com.memo494.posetracker.core.model.PoseDetection
  * 5. When no keypoint can anchor the centre, the point is the box fallback ([HeadPoint.estimated]); a
  *    partial view learns nothing then, and the learned offsets are kept.
  *
- * A frame whose box height is not positive gives an invalid result and changes nothing.
+ * A frame whose box height is below [TrackerConfig.minBoxHeightImg] (or not finite) gives an invalid result and changes nothing.
  *
  * Allocation-free after construction (AGENTS rule 8): five-element arrays are made once; the caller owns the
  * [HeadPoint] passed to [update].
@@ -79,7 +79,7 @@ class HeadPointEstimator(
         out: HeadPoint,
     ) {
         val heightImg = boxHeightImg(detection)
-        if (!isUsableBox(detection, heightImg)) {
+        if (!isUsableBox(detection, heightImg, config)) {
             out.setInvalid()
             return
         }

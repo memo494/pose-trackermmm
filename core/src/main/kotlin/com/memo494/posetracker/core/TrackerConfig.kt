@@ -54,6 +54,9 @@ package com.memo494.posetracker.core
  * @property thermalSampleIntervalMs shortest time between two reads of the device's thermal status and headroom,
  *   in milliseconds, in [[MIN_THERMAL_SAMPLE_INTERVAL_MS], [MAX_THERMAL_SAMPLE_INTERVAL_MS]]; the platform
  *   answers `NaN` to a headroom request that comes too often.
+ * @property minBoxHeightImg lowest person box height, Img pixels, that gives a head point, in
+ *   [[MIN_MIN_BOX_HEIGHT_IMG], [MAX_MIN_BOX_HEIGHT_IMG]]; a lower box is unusable (no head point, ignored by the
+ *   tracker). Head offsets are learned in units of the box height, so a box far below a pixel would make them explode.
  * @property maxTracks most tracks the tracker holds at once, in tracks, in [[MIN_MAX_TRACKS], [MAX_MAX_TRACKS]];
  *   the assignment matrix has this many rows. A detection that would start a track beyond it is not tracked.
  * @property trackGateChi2 association gate: a detection is a candidate for a track only when the squared
@@ -136,6 +139,7 @@ data class TrackerConfig(
     val headMeasurementNoiseRatio: Float = DEFAULT_HEAD_MEASUREMENT_NOISE_RATIO,
     val headFallbackNoiseRatio: Float = DEFAULT_HEAD_FALLBACK_NOISE_RATIO,
     val headMinMeanConfidence: Float = DEFAULT_HEAD_MIN_MEAN_CONFIDENCE,
+    val minBoxHeightImg: Float = DEFAULT_MIN_BOX_HEIGHT_IMG,
     val maxTracks: Int = DEFAULT_MAX_TRACKS,
     val trackGateChi2: Float = DEFAULT_TRACK_GATE_CHI2,
     val assocIouWeight: Float = DEFAULT_ASSOC_WEIGHT,
@@ -263,6 +267,9 @@ data class TrackerConfig(
         require(headMinMeanConfidence in MIN_HEAD_MIN_MEAN_CONFIDENCE..MAX_HEAD_MIN_MEAN_CONFIDENCE) {
             "headMinMeanConfidence $headMinMeanConfidence outside " +
                 "[$MIN_HEAD_MIN_MEAN_CONFIDENCE, $MAX_HEAD_MIN_MEAN_CONFIDENCE]"
+        }
+        require(minBoxHeightImg in MIN_MIN_BOX_HEIGHT_IMG..MAX_MIN_BOX_HEIGHT_IMG) {
+            "minBoxHeightImg $minBoxHeightImg outside [$MIN_MIN_BOX_HEIGHT_IMG, $MAX_MIN_BOX_HEIGHT_IMG]"
         }
         require(maxTracks in MIN_MAX_TRACKS..MAX_MAX_TRACKS) {
             "maxTracks $maxTracks outside [$MIN_MAX_TRACKS, $MAX_MAX_TRACKS]"
@@ -585,6 +592,15 @@ data class TrackerConfig(
 
         /** Highest accepted [headMinMeanConfidence]. */
         const val MAX_HEAD_MIN_MEAN_CONFIDENCE = 0.5f
+
+        /** Default [minBoxHeightImg], Img pixels. */
+        const val DEFAULT_MIN_BOX_HEIGHT_IMG = 2.0f
+
+        /** Lowest accepted [minBoxHeightImg], Img pixels (a head offset in box heights stays far from overflow). */
+        const val MIN_MIN_BOX_HEIGHT_IMG = 0.5f
+
+        /** Highest accepted [minBoxHeightImg], Img pixels. */
+        const val MAX_MIN_BOX_HEIGHT_IMG = 20.0f
 
         /** Default [maxTracks], in tracks. */
         const val DEFAULT_MAX_TRACKS = 32

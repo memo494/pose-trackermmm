@@ -10,8 +10,8 @@ import com.memo494.posetracker.core.model.PoseDetection
  * The point is the plain mean of the head keypoints 0-4 whose score is at least
  * [TrackerConfig.headKeypointEnterScore] (a keypoint with a non-finite position or score is not used). When
  * none qualifies it is the box fallback `(box centre x, box top + headFallbackTopRatio * h)` with
- * [HeadPoint.estimated] set. `h` is the box height; when it is
- * not positive the result is invalid ([HeadPoint.valid] is `false`; fail closed, no division by zero).
+ * [HeadPoint.estimated] set. `h` is the box height; when it is below [TrackerConfig.minBoxHeightImg] (or not
+ * finite) the result is invalid ([HeadPoint.valid] is `false`; fail closed, no division by zero).
  */
 object HeadMeasurement {
     /**
@@ -25,7 +25,7 @@ object HeadMeasurement {
         out: HeadPoint,
     ) {
         val heightImg = boxHeightImg(detection)
-        if (!isUsableBox(detection, heightImg)) {
+        if (!isUsableBox(detection, heightImg, config)) {
             out.setInvalid()
             return
         }

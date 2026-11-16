@@ -5,6 +5,9 @@ import com.memo494.posetracker.core.TrackerConfig
 import com.memo494.posetracker.core.model.DetectionFrame
 import com.memo494.posetracker.core.model.PoseDetection
 import com.memo494.posetracker.core.model.TimestampSource
+import com.memo494.posetracker.core.tracking.FakeTrack
+import com.memo494.posetracker.core.tracking.FakeTrackList
+import com.memo494.posetracker.core.tracking.TrackSnapshot
 import org.junit.jupiter.api.Test
 
 class RedrawPolicyTest {
@@ -30,6 +33,28 @@ class RedrawPolicyTest {
             score = 0.9f,
             keypointsXyImg = xy,
             keypointScores = FloatArray(keypointCount) { keypointScore },
+        )
+    }
+
+    /** The default person with keypoint [index] moved [byImg] pixels along x; the box does not move. */
+    private fun personWithKeypointMoved(
+        index: Int,
+        byImg: Float,
+    ): PoseDetection {
+        val base = person()
+        val xy = FloatArray(base.keypointCount * 2)
+        for (k in 0 until base.keypointCount) {
+            xy[k * 2] = base.keypointXImg(k) + if (k == index) byImg else 0f
+            xy[k * 2 + 1] = base.keypointYImg(k)
+        }
+        return PoseDetection(
+            boxLeftImg = base.boxLeftImg,
+            boxTopImg = base.boxTopImg,
+            boxRightImg = base.boxRightImg,
+            boxBottomImg = base.boxBottomImg,
+            score = base.score,
+            keypointsXyImg = xy,
+            keypointScores = base.keypointScores,
         )
     }
 
@@ -262,5 +287,251 @@ class RedrawPolicyTest {
     @Test
     fun hudDue_withAClockThatWentBackwards_isNotDue() {
         assertThat(RedrawPolicy.hudDue(100L, 5_000_000_000L, 500_000_000L, hudChanged = true)).isFalse()
+    }
+
+    private fun tracks(vararg entries: FakeTrack): TrackSnapshot = TrackSnapshot.of(FakeTrackList(*entries))
+
+    private fun tracksChanged(
+        previous: TrackSnapshot,
+        current: TrackSnapshot,
+    ): Boolean = RedrawPolicy.tracksChanged(previous, current, deadband)
+
+    @Test
+    fun tracksChanged_identicalSnapshots_isFalse() {
+        assertThat(tracksChanged(tracks(FakeTrack(1), FakeTrack(2)), tracks(FakeTrack(1), FakeTrack(2)))).isFalse()
+        assertThat(tracksChanged(TrackSnapshot.EMPTY, TrackSnapshot.EMPTY)).isFalse()
+    }
+
+    @Test
+    fun tracksChanged_aDifferentCount_isTrue() {
+        assertThat(tracksChanged(TrackSnapshot.EMPTY, tracks(FakeTrack(1)))).isTrue()
+        assertThat(tracksChanged(tracks(FakeTrack(1)), TrackSnapshot.EMPTY)).isTrue()
+        assertThat(tracksChanged(tracks(FakeTrack(1)), tracks(FakeTrack(1), FakeTrack(2)))).isTrue()
+    }
+
+    @Test
+    fun tracksChanged_anIdSwapAtEqualPositions_isTrue() {
+        assertThat(tracksChanged(tracks(FakeTrack(1)), tracks(FakeTrack(2)))).isTrue()
+    }
+
+    @Test
+    fun tracksChanged_aTrackSwappedWithItsNeighbourAtEqualPositions_isTrue() {
+        assertThat(tracksChanged(tracks(FakeTrack(1), FakeTrack(2)), tracks(FakeTrack(2), FakeTrack(1)))).isTrue()
+    }
+
+    @Test
+    fun tracksChanged_eachCoordinateJustBelowTheDeadband_isFalse() {
+        val below = deadband - 0.01f
+        for (moved in everyMovedCopy(below)) {
+            assertThat(tracksChanged(tracks(FakeTrack(1)), tracks(moved))).isFalse()
+        }
+    }
+
+    @Test
+    fun tracksChanged_eachCoordinateJustAboveTheDeadband_isTrue() {
+        val above = deadband + 0.01f
+        for (moved in everyMovedCopy(above)) {
+            assertThat(tracksChanged(tracks(FakeTrack(1)), tracks(moved))).isTrue()
+        }
+    }
+
+    @Test
+    fun tracksChanged_aMoveInTheNegativeDirection_isTrue() {
+        assertThat(tracksChanged(tracks(FakeTrack(1)), tracks(FakeTrack(1, headXImg = 100f - deadband - 0.01f)))).isTrue()
+    }
+
+    @Test
+    fun tracksChanged_aMoveOfTheSecondTrack_isTrue() {
+        val previous = tracks(FakeTrack(1), FakeTrack(2))
+        val current = tracks(FakeTrack(1), FakeTrack(2, boxBottomImg = 240f + deadband + 0.01f))
+
+        assertThat(tracksChanged(previous, current)).isTrue()
+    }
+
+    @Test
+    fun tracksChanged_slowDriftAccumulatesAgainstThePreviousDrawnSnapshot() {
+        val drawn = tracks(FakeTrack(1))
+
+        assertThat(tracksChanged(drawn, tracks(FakeTrack(1, headXImg = 100f + 0.4f)))).isFalse()
+        assertThat(tracksChanged(drawn, tracks(FakeTrack(1, headXImg = 100f + 0.8f)))).isTrue()
+    }
+
+    @Test
+    fun tracksChanged_theLostFlagAlone_isFalse() {
+        assertThat(tracksChanged(tracks(FakeTrack(1)), tracks(FakeTrack(1, lost = true)))).isFalse()
+        assertThat(tracksChanged(tracks(FakeTrack(1, lost = true)), tracks(FakeTrack(1)))).isFalse()
+    }
+
+    @Test
+    fun tracksChanged_theEstimatedHeadFlagAlone_isFalse() {
+        assertThat(tracksChanged(tracks(FakeTrack(1)), tracks(FakeTrack(1, headEstimated = true)))).isFalse()
+    }
+
+    /** Copies of the track with id 1 in which exactly one of the six coordinates moved by [shift]. */
+    private fun everyMovedCopy(shift: Float): List<FakeTrack> {
+        val base = FakeTrack(1)
+        return listOf(
+            base.copy(headXImg = base.headXImg + shift),
+            base.copy(headYImg = base.headYImg + shift),
+            base.copy(boxLeftImg = base.boxLeftImg + shift),
+            base.copy(boxTopImg = base.boxTopImg + shift),
+            base.copy(boxRightImg = base.boxRightImg + shift),
+            base.copy(boxBottomImg = base.boxBottomImg + shift),
+        )
+    }
+
+    private fun redrawMarks(
+        previousTracks: TrackSnapshot = tracks(FakeTrack(1)),
+        currentTracks: TrackSnapshot = tracks(FakeTrack(1)),
+        previousFrame: DetectionFrame? = frame(person()),
+        currentFrame: DetectionFrame? = frame(person()),
+        previousShown: Boolean = true,
+        currentShown: Boolean = true,
+        previousWarning: OverlayWarning? = null,
+        currentWarning: OverlayWarning? = null,
+        debugMarks: Boolean = false,
+        hudDue: Boolean = false,
+    ): Boolean =
+        RedrawPolicy.shouldRedrawMarks(
+            previousTracks = previousTracks,
+            currentTracks = currentTracks,
+            previousFrame = previousFrame,
+            currentFrame = currentFrame,
+            previousShown = previousShown,
+            currentShown = currentShown,
+            previousWarning = previousWarning,
+            currentWarning = currentWarning,
+            deadbandImg = deadband,
+            keypointMinScore = minScore,
+            debugMarks = debugMarks,
+            hudDue = hudDue,
+        )
+
+    @Test
+    fun marks_nothingChanged_doesNotRedraw() {
+        assertThat(redrawMarks()).isFalse()
+        assertThat(redrawMarks(debugMarks = true)).isFalse()
+    }
+
+    @Test
+    fun marks_hudDue_redrawsEvenWhenNothingChanged() {
+        assertThat(redrawMarks(hudDue = true)).isTrue()
+        assertThat(redrawMarks(previousTracks = TrackSnapshot.EMPTY, currentTracks = TrackSnapshot.EMPTY, hudDue = true)).isTrue()
+    }
+
+    @Test
+    fun marks_aChangedWarning_redraws() {
+        assertThat(redrawMarks(currentWarning = OverlayWarning.DETECTOR_UNAVAILABLE)).isTrue()
+        assertThat(
+            redrawMarks(
+                previousWarning = OverlayWarning.IMPORTED_MODEL_NOT_USED,
+                currentWarning = null,
+                previousTracks = TrackSnapshot.EMPTY,
+                currentTracks = TrackSnapshot.EMPTY,
+            ),
+        ).isTrue()
+    }
+
+    @Test
+    fun marks_aTrackAppearingOrDisappearing_redraws() {
+        assertThat(redrawMarks(previousTracks = TrackSnapshot.EMPTY)).isTrue()
+        assertThat(redrawMarks(currentTracks = TrackSnapshot.EMPTY)).isTrue()
+    }
+
+    @Test
+    fun marks_aTrackMovingBeyondTheDeadband_redraws() {
+        val moved = tracks(FakeTrack(1, headYImg = 50f + deadband + 0.01f))
+
+        assertThat(redrawMarks(currentTracks = moved)).isTrue()
+    }
+
+    @Test
+    fun marks_aTrackMovingWithinTheDeadband_doesNotRedraw() {
+        val moved = tracks(FakeTrack(1, headYImg = 50f + deadband - 0.01f))
+
+        assertThat(redrawMarks(currentTracks = moved)).isFalse()
+    }
+
+    @Test
+    fun marks_aTrackBecomingLost_doesNotRedraw() {
+        assertThat(redrawMarks(currentTracks = tracks(FakeTrack(1, lost = true)))).isFalse()
+    }
+
+    @Test
+    fun marks_detectionsMoveAndTracksDoNot_withoutDebugMarks_doesNotRedraw() {
+        val moved = frame(person(shiftX = 20f, shiftY = 20f))
+
+        assertThat(redrawMarks(currentFrame = moved, debugMarks = false)).isFalse()
+        assertThat(redrawMarks(currentFrame = frame(), debugMarks = false)).isFalse()
+        assertThat(redrawMarks(previousFrame = null, currentFrame = null, debugMarks = false)).isFalse()
+    }
+
+    @Test
+    fun marks_detectionsMoveAndTracksDoNot_withDebugMarks_redraws() {
+        val moved = frame(person(shiftX = 20f, shiftY = 20f))
+
+        assertThat(redrawMarks(currentFrame = moved, debugMarks = true)).isTrue()
+    }
+
+    @Test
+    fun marks_aKeypointMovingWithTracksStill_redrawsOnlyWithDebugMarks() {
+        val before = frame(person())
+        val after = frame(personWithKeypointMoved(index = 2, byImg = 5f))
+
+        assertThat(redrawMarks(previousFrame = before, currentFrame = after, debugMarks = false)).isFalse()
+        assertThat(redrawMarks(previousFrame = before, currentFrame = after, debugMarks = true)).isTrue()
+    }
+
+    @Test
+    fun marks_detectionsWithinTheDeadband_withDebugMarks_doNotRedraw() {
+        val nearlyStill = frame(person(shiftX = deadband - 0.01f))
+
+        assertThat(redrawMarks(currentFrame = nearlyStill, debugMarks = true)).isFalse()
+    }
+
+    @Test
+    fun marks_hiddenOnBothSides_neverRedraws() {
+        val moved = tracks(FakeTrack(1, headXImg = 500f))
+
+        assertThat(redrawMarks(currentTracks = moved, previousShown = false, currentShown = false)).isFalse()
+        assertThat(redrawMarks(currentTracks = TrackSnapshot.EMPTY, previousShown = false, currentShown = false)).isFalse()
+        assertThat(
+            redrawMarks(
+                currentFrame = frame(person(shiftX = 20f)),
+                previousShown = false,
+                currentShown = false,
+                debugMarks = true,
+            ),
+        ).isFalse()
+    }
+
+    @Test
+    fun marks_hiddenOnBothSides_stillRedrawsForTheHudAndTheWarning() {
+        assertThat(redrawMarks(previousShown = false, currentShown = false, hudDue = true)).isTrue()
+        assertThat(
+            redrawMarks(previousShown = false, currentShown = false, currentWarning = OverlayWarning.CAPTURE_NOT_DISPLAY_SIZED),
+        ).isTrue()
+    }
+
+    @Test
+    fun marks_shownThenHiddenWithTracks_redraws() {
+        assertThat(redrawMarks(previousShown = true, currentShown = false)).isTrue()
+    }
+
+    @Test
+    fun marks_hiddenThenShownWithTracks_redraws() {
+        assertThat(redrawMarks(previousShown = false, currentShown = true)).isTrue()
+    }
+
+    @Test
+    fun marks_shownThenHiddenWithoutTracks_doesNotRedraw() {
+        assertThat(
+            redrawMarks(
+                previousTracks = TrackSnapshot.EMPTY,
+                currentTracks = TrackSnapshot.EMPTY,
+                previousShown = true,
+                currentShown = false,
+            ),
+        ).isFalse()
     }
 }

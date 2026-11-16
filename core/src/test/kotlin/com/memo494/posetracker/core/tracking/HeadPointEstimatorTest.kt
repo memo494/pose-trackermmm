@@ -472,6 +472,34 @@ class HeadPointEstimatorTest {
     }
 
     @Test
+    fun aBoxLowerThanTheMinimumHeight_isInvalid_andLeavesTheStateUnchanged() {
+        learn(frames = 5, height = 100f)
+        val offsetsBefore = offsets()
+        val visibleBefore = visibility()
+
+        for (height in listOf(1e-25f, 0.5f, config.minBoxHeightImg - 0.01f)) {
+            estimator.update(person(300f, 200f, height), out)
+
+            assertThat(out.valid).isFalse()
+            assertThat(out.varianceImg2.isNaN()).isTrue()
+            assertOffsetsWithin(offsetsBefore, 0f)
+            assertThat(visibility()).isEqualTo(visibleBefore)
+        }
+
+        estimator.update(person(300f, 200f, config.minBoxHeightImg), out)
+        assertThat(out.valid).isTrue()
+    }
+
+    @Test
+    fun theMinimumBoxHeight_comesFromTheEstimatorsConfig() {
+        val strict = HeadPointEstimator(TrackerConfig(minBoxHeightImg = 10f))
+
+        strict.update(person(300f, 200f, 9.9f), out)
+
+        assertThat(out.valid).isFalse()
+    }
+
+    @Test
     fun aDetectionWithoutKeypoints_usesTheFallback() {
         val detection = PoseDetection(100f, 50f, 140f, 150f, 0.9f, FloatArray(0), FloatArray(0))
 

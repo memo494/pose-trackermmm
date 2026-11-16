@@ -3,7 +3,7 @@ package com.memo494.posetracker.core.tracking
 import com.memo494.posetracker.core.TrackerConfig
 
 /** What the scenarios read of one track after a tracker call: id, state, head point and height (Img pixels). */
-data class TrackSnapshot(
+data class RecordedTrack(
     val id: Int,
     val state: TrackState,
     val isShown: Boolean,
@@ -15,8 +15,8 @@ data class TrackSnapshot(
 /** One `onIdle` call: the argument and the track lists right before and right after it. */
 class IdleStep(
     val idleNs: Long,
-    val before: List<TrackSnapshot>,
-    val after: List<TrackSnapshot>,
+    val before: List<RecordedTrack>,
+    val after: List<RecordedTrack>,
 )
 
 /**
@@ -25,7 +25,7 @@ class IdleStep(
  */
 class ScenarioRun(
     val sceneFrames: List<SceneFrame>,
-    val tracks: List<List<TrackSnapshot>>,
+    val tracks: List<List<RecordedTrack>>,
     val highestId: Int,
     val idleSteps: List<IdleStep>,
 ) {
@@ -61,12 +61,12 @@ class ScenarioRunner(
 ) {
     private val tracker = Tracker(config)
     private val fed = ArrayList<SceneFrame>()
-    private val lists = ArrayList<List<TrackSnapshot>>()
+    private val lists = ArrayList<List<RecordedTrack>>()
     private val steps = ArrayList<IdleStep>()
     private var highestId = 0
 
     /** Feeds [frame] and returns the list the tracker answered with. */
-    fun feed(frame: SceneFrame): List<TrackSnapshot> {
+    fun feed(frame: SceneFrame): List<RecordedTrack> {
         val snapshot = snapshot(tracker.update(frame.frame))
         fed.add(frame)
         lists.add(snapshot)
@@ -74,7 +74,7 @@ class ScenarioRunner(
     }
 
     /** Calls `onIdle(idleNs)` after the newest frame and returns the list the tracker answered with. */
-    fun idle(idleNs: Long): List<TrackSnapshot> {
+    fun idle(idleNs: Long): List<RecordedTrack> {
         check(lists.isNotEmpty()) { "onIdle before any frame" }
         val before = lists[lists.size - 1]
         val after = snapshot(tracker.onIdle(idleNs))
@@ -86,13 +86,13 @@ class ScenarioRunner(
     /** Everything recorded so far. */
     fun finish(): ScenarioRun = ScenarioRun(ArrayList(fed), ArrayList(lists), highestId, ArrayList(steps))
 
-    private fun snapshot(list: TrackList): List<TrackSnapshot> {
-        val result = ArrayList<TrackSnapshot>(list.size)
+    private fun snapshot(list: TrackList): List<RecordedTrack> {
+        val result = ArrayList<RecordedTrack>(list.size)
         for (i in 0 until list.size) {
             val id = list.id(i)
             if (id > highestId) highestId = id
             result.add(
-                TrackSnapshot(id, list.state(i), list.isShown(i), list.headXImg(i), list.headYImg(i), list.heightImg(i)),
+                RecordedTrack(id, list.state(i), list.isShown(i), list.headXImg(i), list.headYImg(i), list.heightImg(i)),
             )
         }
         return result

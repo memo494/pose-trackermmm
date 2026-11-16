@@ -153,6 +153,8 @@ class TrackerScenarioTest {
                 }
             }
             assertAtMost(c.message("head point beyond the image, in track heights"), beyond, config.trackExitMarginRatio.toDouble())
+            assertAtLeast(c.message("coverage"), run.metrics.coverage(1, COVERAGE_FROM_FRAME), MetricsThresholds.S11_MIN_COVERAGE)
+            assertCount(c.message("ids"), run.highestId, MetricsThresholds.S11_EXPECTED_IDS)
         }
 
     @Test
@@ -302,7 +304,7 @@ class TrackerScenarioTest {
         val person = ScenePerson(1, listOf(pt(0.0, 600.0), pt(5.0, 600.0)), score = { score })
         val frames = scene(listOf(person), 1.0, c).frames
         val runner = ScenarioRunner(config)
-        var list = emptyList<TrackSnapshot>()
+        var list = emptyList<RecordedTrack>()
         for (i in 0 until fedFrames) list = runner.feed(frames[i])
         val shownBefore = list.count { it.isShown }
         val shownJustBelow = runner.idle(config.trackIdlePromoteNs - TrackerConfig.NANOS_PER_MILLI).count { it.isShown }

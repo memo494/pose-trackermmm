@@ -109,6 +109,12 @@ object MetricsThresholds {
     /** S11: seconds after the end of the path by which the last shown track must be gone, at most. Model worst: 0.056 s. */
     const val S11_MAX_SHOWN_AFTER_END_S = 0.15
 
+    /** S11: lowest coverage of the person from frame 2 (frames after the end of the path do not count). Model worst: 1.0. */
+    const val S11_MIN_COVERAGE = 0.95
+
+    /** S11: highest track id ever returned, exactly. Model worst: 1.0 (always 1). */
+    const val S11_EXPECTED_IDS = 1
+
     /** S12: largest track list size in any frame, at most. Model worst: 1.0 (always 1). */
     const val S12_MAX_LIST_SIZE = 1
 

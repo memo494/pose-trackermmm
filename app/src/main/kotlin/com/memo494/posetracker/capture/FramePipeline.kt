@@ -11,6 +11,9 @@ import com.memo494.posetracker.core.overlay.OverlayWarning
 import com.memo494.posetracker.core.stats.Percentiles
 import com.memo494.posetracker.core.stats.TimingSummary
 import com.memo494.posetracker.core.stats.TimingWindow
+import com.memo494.posetracker.core.tracking.TrackList
+import com.memo494.posetracker.core.tracking.TrackSnapshot
+import com.memo494.posetracker.core.tracking.Tracker
 import com.memo494.posetracker.detector.PoseDetector
 import com.memo494.posetracker.overlay.OverlayState
 
@@ -23,7 +26,16 @@ import com.memo494.posetracker.overlay.OverlayState
  *
  * [onFrame] never throws and closes every image exactly once, whatever happens (including an
  * `OutOfMemoryError`), so a bad frame can never crash the service or leak an image that would stall the
- * `ImageReader`. Our own per-frame allocations are the published [OverlayState] only (pooled in M1).
+ * `ImageReader`. Our own per-frame allocations are the published [OverlayState] and the [TrackSnapshot] in it.
+ *
+ * Tracking (M3b): the pipeline owns one [Tracker] (so one per Start), touched on the capture thread only. A frame
+ * the detector saw goes to `Tracker.update` and the shown tracks are copied into an immutable [TrackSnapshot] at
+ * once, before any other tracker call; the snapshot is published in [OverlayState.tracks]. A frame the detector
+ * did not see (no detector, not display-sized, size mismatch, failed copy) is never given to the tracker: no
+ * information is not "nobody there". Whenever the pipeline drops the detections from the state (a new capture or
+ * display size), the tracker is reset and the state carries no tracks, so positions of an old geometry are never
+ * mapped with a new one. The HUD tick tells the tracker how long ago the newest tracked frame arrived
+ * (`Tracker.onIdle`), so a still picture still gets its marks.
  *
  * Timing: every **processed** frame (detected and published) adds one sample to each of six [TimingWindow]s:
  * copy, pre, inference, post, whole frame (acquire to publish) and result age (publish time minus the image
@@ -62,6 +74,9 @@ internal class FramePipeline(
     private val modelInputHeight = detector?.inputHeight ?: 0
     private var lastState =
         OverlayState(modelInputWidth = modelInputWidth, modelInputHeight = modelInputHeight, modelImported = modelImported)
+    private val tracker = Tracker(config)
+    private var trackedFrameNewest = false
+    private var trackedArrivalNs = 0L
     private var imageClosed = false
     private var failureStreak = 0L
     private val copyWindow = TimingWindow(config.timingWindowFrames)
@@ -129,8 +144,9 @@ internal class FramePipeline(
     /**
      * Sets the size every frame must have (Img pixels). `null` = unknown: every frame is dropped as a
      * size mismatch (fail closed). The copy buffer is replaced by the next frame of a new size.
-     * Leaving a known size (rotation) republishes the state at once without its detections, which are
-     * positions of the old size and must never be mapped with the new geometry.
+     * Leaving a known size (rotation) republishes the state at once without its detections and tracks, which
+     * are positions of the old size and must never be mapped with the new geometry; the tracker is reset.
+     * Capture thread.
      */
     fun setExpectedSize(size: CaptureSize?) {
         val previous = expectedSize
@@ -141,7 +157,7 @@ internal class FramePipeline(
     /**
      * Sets the display size, in pixels, that the capture size was planned for. Every published state carries
      * it and the overlay maps Img to View with it, so the mapping always belongs to the same rotation as the
-     * capture size. Leaving a known size drops the old detections like [setExpectedSize] does. Call it before
+     * capture size. Leaving a known size drops the old detections and tracks like [setExpectedSize] does. Call it before
      * [setExpectedSize] when both change.
      */
     fun setDisplaySizePx(
@@ -163,7 +179,8 @@ internal class FramePipeline(
 
     /**
      * Stores whether the capture is display-sized and republishes the state at once. A change drops the
-     * old detections from the state, so detections of the other size can never be shown again.
+     * old detections and tracks from the state (and resets the tracker), so marks of the other size can never be
+     * shown again.
      */
     fun setDisplaySized(displaySized: Boolean) {
         val changed = this.displaySized != displaySized
@@ -194,14 +211,35 @@ internal class FramePipeline(
 
     /**
      * Republishes the last state with the fps of now, so a static screen (no frames) decays to about 0
-     * fps. Called at the HUD rate. Never throws.
+     * fps. Called at the HUD rate, on the capture thread. When the newest published state came from a tracked
+     * frame, the tracker is told how long ago that frame arrived; if that changes the number of shown tracks
+     * (a tentative track was promoted), the state carries a new [TrackSnapshot]. Never throws.
      */
     fun onHudTick() {
         try {
-            publishSafely(lastState.copy(captureFps = fpsMeter.fps(clock.nowNs())))
+            val nowNs = clock.nowNs()
+            val ticked = lastState.copy(captureFps = fpsMeter.fps(nowNs))
+            publishSafely(if (trackedFrameNewest) withIdleTracks(ticked, nowNs) else ticked)
         } catch (e: Throwable) {
             safeLog("HUD tick failed", e)
         }
+    }
+
+    /** [state] with a fresh snapshot when the idle time changed the number of shown tracks, else [state]. */
+    private fun withIdleTracks(
+        state: OverlayState,
+        nowNs: Long,
+    ): OverlayState {
+        val list = tracker.onIdle(nowNs - trackedArrivalNs)
+        return if (shownCount(list) != state.tracks.count) state.copy(tracks = TrackSnapshot.of(list)) else state
+    }
+
+    private fun shownCount(list: TrackList): Int {
+        var shown = 0
+        for (i in 0 until list.size) {
+            if (list.isShown(i)) shown++
+        }
+        return shown
     }
 
     /**
@@ -250,6 +288,9 @@ internal class FramePipeline(
         closeImage(image)
         if (!captureFrame.set(rgba, widthImg, heightImg, timestampNs, source)) error("capture frame rejected the copy")
         val result = detector.detect(captureFrame)
+        val tracks = TrackSnapshot.of(tracker.update(result))
+        trackedArrivalNs = acquireNs
+        trackedFrameNewest = true
         fpsMeter.onFrame(acquireNs)
         val maxRawScore = detector.lastMaxRawScore
         recordDetections(result, maxRawScore, detector.lastNanRawRows)
@@ -271,6 +312,7 @@ internal class FramePipeline(
                 modelInputWidth = modelInputWidth,
                 modelInputHeight = modelInputHeight,
                 modelImported = modelImported,
+                tracks = tracks,
             ),
         )
         recordTimings(detector, copyStartNs, nowNs, acquireNs, timestampNs, source == TimestampSource.IMAGE)
@@ -309,6 +351,7 @@ internal class FramePipeline(
         acquireNs: Long,
     ) {
         fpsMeter.onFrame(acquireNs)
+        trackedFrameNewest = false
         publish(
             OverlayState(
                 frame = null,
@@ -360,10 +403,15 @@ internal class FramePipeline(
 
     private fun republish(dropFrame: Boolean) {
         try {
+            if (dropFrame) {
+                tracker.reset()
+                trackedFrameNewest = false
+            }
             val base = lastState
             publishSafely(
                 base.copy(
                     frame = if (dropFrame) null else base.frame,
+                    tracks = if (dropFrame) TrackSnapshot.EMPTY else base.tracks,
                     dotsVisible = contentVisible,
                     warning = currentWarning(),
                     displayWidthPx = displayWidthPx,

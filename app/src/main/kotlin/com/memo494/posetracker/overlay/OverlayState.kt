@@ -3,6 +3,7 @@ package com.memo494.posetracker.overlay
 import com.memo494.posetracker.core.model.DetectionFrame
 import com.memo494.posetracker.core.model.TimestampSource
 import com.memo494.posetracker.core.overlay.OverlayWarning
+import com.memo494.posetracker.core.tracking.TrackSnapshot
 import com.memo494.posetracker.detector.Accelerator
 
 /**
@@ -31,6 +32,8 @@ import com.memo494.posetracker.detector.Accelerator
  * @property modelInputWidth width of the running model's input, in model pixels (Mdl); 0 = no model.
  * @property modelInputHeight height of the running model's input, in model pixels (Mdl); 0 = no model.
  * @property modelImported whether the running model is the imported one, not the built-in one.
+ * @property tracks the shown tracks of the tracker for [frame] (or for the idle time since it), Img space, an
+ *   immutable copy made on the capture thread; [TrackSnapshot.EMPTY] when there is no tracked frame.
  */
 data class OverlayState(
     val frame: DetectionFrame? = null,
@@ -49,6 +52,7 @@ data class OverlayState(
     val modelInputWidth: Int = 0,
     val modelInputHeight: Int = 0,
     val modelImported: Boolean = false,
+    val tracks: TrackSnapshot = TrackSnapshot.EMPTY,
 ) {
     /** Whether [frame] may be drawn: content visible and no warning that hides the detections. */
     val detectionsShown: Boolean

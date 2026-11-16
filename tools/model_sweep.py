@@ -182,10 +182,36 @@ def greedy_match(rows: np.ndarray, expected: list[Box], min_iou: float = MATCH_I
     return matched, unmatched
 
 
-def case_stats(rows: np.ndarray, expected: list[Box]) -> dict:
-    """Numbers of one model on one case from canvas-pixel rows (score >= ROW_SCORE)."""
+def split_expected_ignore(placed: list[tuple[Box, float]], cw: int, ch: int) -> tuple[list[Box], list[Box]]:
+    """Placed reference rows (canvas-pixel box, score) -> (expected, ignore).
+
+    Expected = score >= REF_SCORE and fully inside the canvas. Ignore = every other row that still
+    overlaps the canvas (below REF_SCORE, or clipped by the edge), clamped to the canvas.
+    """
+    expected: list[Box] = []
+    ignore: list[Box] = []
+    for box, score in placed:
+        if score >= REF_SCORE and inside(box, cw, ch):
+            expected.append(box)
+            continue
+        c = clamp_box(box, cw, ch)
+        if c[2] > c[0] and c[3] > c[1]:
+            ignore.append(c)
+    return expected, ignore
+
+
+def case_stats(rows: np.ndarray, expected: list[Box], ignore: list[Box] | None = None) -> dict:
+    """Numbers of one model on one case from canvas-pixel rows (score >= ROW_SCORE).
+
+    A row that matches no expected box but matches an ignore box (IoU >= MATCH_IOU, one row per box) is
+    a real person the case does not count: neither found nor extra.
+    """
     matched, unmatched = greedy_match(rows, expected)
     scores = [s for _, _, s in matched]
+    if ignore:
+        taken = {i for i, _, _ in matched}
+        rest = rows[[i for i in range(rows.shape[0]) if i not in taken]]
+        _, unmatched = greedy_match(rest, ignore)
     return {
         "expected": len(expected),
         "found025": sum(1 for s in scores if s >= FOUND_SCORE),
@@ -208,9 +234,14 @@ def md_table(headers: list[str], body: list[list[str]]) -> str:
     return "\n".join(lines)
 
 
-def canvas_table(p_ratios, labels: list[str], cells: dict) -> str:
-    """cells[(p, label)] -> stats dict or None. Rows = p as %, one column per model."""
-    body = [[f"{round(p * 100)}%"] + [format_cell(cells.get((p, lab))) for lab in labels] for p in p_ratios]
+def p_label(p: float, ch: int) -> str:
+    """'20% (122 px)': p as a percentage and the person height in pixels on a canvas ch px high."""
+    return f"{round(p * 100)}% ({round(p * ch)} px)"
+
+
+def canvas_table(p_ratios, labels: list[str], cells: dict, ch: int) -> str:
+    """cells[(p, label)] -> stats dict or None. Rows = p as % of the canvas height ch (and in px)."""
+    body = [[p_label(p, ch)] + [format_cell(cells.get((p, lab))) for lab in labels] for p in p_ratios]
     return md_table(["p"] + labels, body)
 
 
@@ -319,16 +350,44 @@ def self_test() -> None:
     ok("found025 counts scores at 0.25",
        case_stats(mk(((0, 0, 10, 10), 0.25), ((100, 100, 110, 110), 0.49)), exp)["found025"] == 2)
 
+    # ignore boxes: people the case does not count are neither found nor extra
+    placed = [((10.0, 10.0, 50.0, 90.0), 0.9),      # expected
+              ((60.0, 10.0, 100.0, 90.0), 0.3),     # below 0.5 -> ignore
+              ((90.0, 10.0, 130.0, 90.0), 0.9),     # clipped by the right edge (cw=100) -> ignore, clamped
+              ((200.0, 10.0, 240.0, 90.0), 0.9),    # entirely outside the canvas -> dropped
+              ((100.0, 10.0, 140.0, 90.0), 0.9)]    # touches the edge only -> dropped
+    ex, ig = split_expected_ignore(placed, 100, 100)
+    ok("split: expected is score >= 0.5 and fully inside", ex == [(10.0, 10.0, 50.0, 90.0)])
+    ok("split: ignore is weak or clipped boxes still overlapping, clamped",
+       ig == [(60.0, 10.0, 100.0, 90.0), (90.0, 10.0, 100.0, 90.0)])
+    ok("split: nothing to ignore", split_expected_ignore([((0.0, 0.0, 10.0, 10.0), 0.9)], 100, 100)[1] == [])
+    ign = [(60.0, 10.0, 100.0, 90.0)]
+    ex1 = [(10.0, 10.0, 50.0, 90.0)]
+    rws = mk(((10, 10, 50, 90), 0.9), ((60, 10, 100, 90), 0.8))
+    ok("a row on an ignore box is not an extra", case_stats(rws, ex1, ign)["extra025"] == 0)
+    ok("... but is an extra without the ignore box", case_stats(rws, ex1)["extra025"] == 1)
+    st = case_stats(rws, ex1, ign)
+    ok("ignored row is not found either", st["found025"] == 1 and st["maxScore"] == 0.9)
+    rws2 = mk(((10, 10, 50, 90), 0.9), ((60, 10, 100, 90), 0.8), ((61, 10, 100, 90), 0.7))
+    ok("one row per ignore box: a duplicate is an extra", case_stats(rws2, ex1, ign)["extra025"] == 1)
+    rws3 = mk(((10, 10, 50, 90), 0.9), ((70, 10, 90, 30), 0.8))
+    ok("a row that overlaps the ignore box below IoU 0.3 is an extra", case_stats(rws3, ex1, ign)["extra025"] == 1)
+    ok("a row matched to an expected box never goes to ignore",
+       case_stats(mk(((10, 10, 50, 90), 0.9)), ex1, [(10.0, 10.0, 50.0, 90.0)]) ==
+       case_stats(mk(((10, 10, 50, 90), 0.9)), ex1))
+
     # table formatting
     ok("cell", format_cell({"found025": 3, "expected": 4, "maxScore": 0.8765}) == "3/4 (0.88)")
     ok("skipped cell", format_cell(None) == "skipped")
+    ok("p label landscape", p_label(0.20, 610) == "20% (122 px)")
+    ok("p label portrait", p_label(0.20, 1356) == "20% (271 px)" and p_label(0.08, 610) == "8% (49 px)")
     tbl = canvas_table((0.08, 0.5), ["640", "832x384"],
                        {(0.08, "640"): {"found025": 0, "expected": 5, "maxScore": 0.0},
                         (0.5, "640"): {"found025": 5, "expected": 5, "maxScore": 0.94},
-                        (0.5, "832x384"): {"found025": 4, "expected": 5, "maxScore": 0.9}})
+                        (0.5, "832x384"): {"found025": 4, "expected": 5, "maxScore": 0.9}}, 610)
     ok("canvas table", tbl.splitlines() == [
         "| p | 640 | 832x384 |", "|---|---|---|",
-        "| 8% | 0/5 (0.00) | skipped |", "| 50% | 5/5 (0.94) | 4/5 (0.90) |"])
+        "| 8% (49 px) | 0/5 (0.00) | skipped |", "| 50% (305 px) | 5/5 (0.94) | 4/5 (0.90) |"])
     print("self-test passed")
 
 
@@ -447,7 +506,9 @@ def render_md(result: dict) -> str:
            f"reference people: {result['reference']['people']} (largest square model "
            f"{result['reference']['model']}, score >= {REF_SCORE}), tallest {result['reference']['hRef']:.0f} px.",
            "Cell = found at score >= 0.25 / expected people (maxScore of the matched rows). "
-           f"Match: score >= {ROW_SCORE} rows, greedy by score, IoU >= {MATCH_IOU}, one row per box.", ""]
+           f"Match: score >= {ROW_SCORE} rows, greedy by score, IoU >= {MATCH_IOU}, one row per box. "
+           "p is a share of each canvas's height, so the same p is a taller person in px on the portrait canvas "
+           "than on the landscape one (the px in the row label).", ""]
     for canvas in result["canvases"]:
         name = canvas["name"]
         out += [f"## {name} canvas {canvas['width']}x{canvas['height']}", ""]
@@ -456,7 +517,7 @@ def render_md(result: dict) -> str:
             if case["canvas"] == name and not case["skipped"]:
                 for lab, st in case["models"].items():
                     cells[(case["p"], lab)] = st
-        out += [canvas_table(P_RATIOS, labels, cells), ""]
+        out += [canvas_table(P_RATIOS, labels, cells, canvas["height"]), ""]
         out += ["Content scale (letterbox gain) per model:", ""]
         out += [md_table(["model", "content scale"],
                          [[m["label"], f"{m['gain'][name]:.3f}"] for m in result["models"]]), ""]
@@ -500,6 +561,9 @@ def run_sweep(models_dir: Path, out_dir: Path, image_arg: Path | None) -> None:
         tensor, _, _, _ = to_input(scene, m.width, m.height)
         raw = m.infer(tensor)
         raw = raw[raw[:, 4] >= ROW_SCORE]
+        if raw.shape[0] == 0:
+            raise SystemExit(f"{m.path.name}: no row with score >= {ROW_SCORE} on {image_path.name}, so the "
+                             f"coordinate convention (pixels or 0..1) cannot be told; not guessing")
         m.normalised = looks_normalised(raw[:, :4])
         m.cpu_ms = median_ms(lambda m=m, t=tensor: m.infer(t))
         m.coordinates = "normalised 0..1" if m.normalised else "pixels of the model input"
@@ -508,8 +572,9 @@ def run_sweep(models_dir: Path, out_dir: Path, image_arg: Path | None) -> None:
     ref = max(square, key=lambda m: m.width)
     ref_rows, _ = detect(ref.infer, (ref.width, ref.height), scene, ref.normalised)
     # Boxes may overshoot the image by a pixel or two; clamp them to the image.
-    ref_boxes: list[Box] = [clamp_box((float(r[0]), float(r[1]), float(r[2]), float(r[3])), sw, sh)
-                            for r in ref_rows if r[4] >= REF_SCORE]
+    ref_all = [(clamp_box((float(r[0]), float(r[1]), float(r[2]), float(r[3])), sw, sh), float(r[4]))
+               for r in ref_rows]
+    ref_boxes: list[Box] = [b for b, score in ref_all if score >= REF_SCORE]
     if len(ref_boxes) < MIN_REF_PEOPLE:
         raise SystemExit(f"reference model {ref.path.name} found {len(ref_boxes)} people >= {REF_SCORE} "
                          f"on {image_path.name}, expected at least {MIN_REF_PEOPLE}")
@@ -520,22 +585,21 @@ def run_sweep(models_dir: Path, out_dir: Path, image_arg: Path | None) -> None:
     print(f"reference: {len(ref_boxes)} people from {ref.path.name}, hRef={h_ref:.0f}px")
 
     cases = []
-    gains = {m.label: {} for m in models}
+    gains = {m.label: {n: letterbox_params(w, h, m.width, m.height)[0] for n, w, h in CANVASES} for m in models}
     for cname, cw, ch in CANVASES:
         for p in P_RATIOS:
             scale = scene_scale(h_ref, p, ch)
             canvas, new_w, new_h, ox, oy = build_canvas(scene, scale, cw, ch)
-            expected = [b for b in (place_box(r, sw, sh, new_w, new_h, ox, oy) for r in ref_boxes)
-                        if inside(b, cw, ch)]
-            case = {"canvas": cname, "p": p, "scale": scale, "expected": len(expected),
+            expected, ignore = split_expected_ignore(
+                [(place_box(b, sw, sh, new_w, new_h, ox, oy), score) for b, score in ref_all], cw, ch)
+            case = {"canvas": cname, "p": p, "scale": scale, "expected": len(expected), "ignoreBoxes": len(ignore),
                     "skipped": len(expected) < MIN_EXPECTED, "models": {}}
             cases.append(case)
             if case["skipped"]:
                 continue
             for m in models:
                 rows, gain = detect(m.infer, (m.width, m.height), canvas, m.normalised)
-                gains[m.label][cname] = gain
-                case["models"][m.label] = case_stats(rows, expected) | {"contentScale": gain}
+                case["models"][m.label] = case_stats(rows, expected, ignore) | {"contentScale": gain}
 
     result = {
         "image": {"name": image_path.name, "width": sw, "height": sh, "sha256": sha256(image_path)},

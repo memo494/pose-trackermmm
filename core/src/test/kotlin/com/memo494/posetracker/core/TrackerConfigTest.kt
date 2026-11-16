@@ -562,6 +562,181 @@ class TrackerConfigTest {
         }
     }
 
+    @Test
+    fun trackLifecycleFields_haveTheDocumentedDefaults() {
+        val config = TrackerConfig()
+
+        assertThat(config.trackHighScore).isEqualTo(0.5f)
+        assertThat(config.trackBirthScore).isEqualTo(0.25f)
+        assertThat(config.trackConfirmHits).isEqualTo(3)
+        assertThat(config.trackIdlePromoteMs).isEqualTo(400L)
+        assertThat(config.trackIdlePromoteNs).isEqualTo(400_000_000L)
+        assertThat(config.trackMaxLostMs).isEqualTo(800f)
+        assertThat(config.trackMaxDtMs).isEqualTo(250f)
+        assertThat(config.trackGapNoiseInflate).isEqualTo(10f)
+        assertThat(config.trackMissVelocityTauMs).isEqualTo(300f)
+        assertThat(config.trackAccelSigmaRatio).isEqualTo(8f)
+        assertThat(config.trackHeightAccelSigmaRatio).isEqualTo(2f)
+        assertThat(config.trackHeightNoiseRatio).isEqualTo(0.05f)
+        assertThat(config.trackInitVelocitySigmaRatio).isEqualTo(2f)
+        assertThat(config.trackMatchMaxCost).isEqualTo(0.7f)
+        assertThat(config.trackLowMatchMaxCost).isEqualTo(0.6f)
+        assertThat(config.trackExitMarginRatio).isEqualTo(0.1f)
+    }
+
+    @Test
+    fun trackLifecycleFields_defaultsAreWithinTheirBounds() {
+        val config = TrackerConfig()
+
+        assertWithin(config.trackHighScore, TrackerConfig.MIN_TRACK_SCORE, TrackerConfig.MAX_TRACK_SCORE)
+        assertWithin(config.trackBirthScore, TrackerConfig.MIN_TRACK_SCORE, TrackerConfig.MAX_TRACK_SCORE)
+        assertThat(config.trackConfirmHits).isAtLeast(TrackerConfig.MIN_TRACK_CONFIRM_HITS)
+        assertThat(config.trackConfirmHits).isAtMost(TrackerConfig.MAX_TRACK_CONFIRM_HITS)
+        assertThat(config.trackIdlePromoteMs).isAtLeast(TrackerConfig.MIN_TRACK_DURATION_MS_LONG)
+        assertThat(config.trackIdlePromoteMs).isAtMost(TrackerConfig.MAX_TRACK_DURATION_MS_LONG)
+        assertWithin(config.trackMaxLostMs, TrackerConfig.MIN_TRACK_DURATION_MS, TrackerConfig.MAX_TRACK_DURATION_MS)
+        assertWithin(config.trackMaxDtMs, TrackerConfig.MIN_TRACK_MAX_DT_MS, TrackerConfig.MAX_TRACK_MAX_DT_MS)
+        assertWithin(
+            config.trackGapNoiseInflate,
+            TrackerConfig.MIN_TRACK_GAP_NOISE_INFLATE,
+            TrackerConfig.MAX_TRACK_GAP_NOISE_INFLATE,
+        )
+        assertWithin(config.trackMissVelocityTauMs, TrackerConfig.MIN_TRACK_DURATION_MS, TrackerConfig.MAX_TRACK_DURATION_MS)
+        assertWithin(
+            config.trackAccelSigmaRatio,
+            TrackerConfig.MIN_TRACK_ACCEL_SIGMA_RATIO,
+            TrackerConfig.MAX_TRACK_ACCEL_SIGMA_RATIO,
+        )
+        assertWithin(
+            config.trackHeightAccelSigmaRatio,
+            TrackerConfig.MIN_TRACK_ACCEL_SIGMA_RATIO,
+            TrackerConfig.MAX_TRACK_ACCEL_SIGMA_RATIO,
+        )
+        assertWithin(
+            config.trackHeightNoiseRatio,
+            TrackerConfig.MIN_TRACK_HEIGHT_NOISE_RATIO,
+            TrackerConfig.MAX_TRACK_HEIGHT_NOISE_RATIO,
+        )
+        assertWithin(
+            config.trackInitVelocitySigmaRatio,
+            TrackerConfig.MIN_TRACK_INIT_VELOCITY_SIGMA_RATIO,
+            TrackerConfig.MAX_TRACK_INIT_VELOCITY_SIGMA_RATIO,
+        )
+        assertWithin(config.trackMatchMaxCost, TrackerConfig.MIN_TRACK_MATCH_MAX_COST, TrackerConfig.MAX_TRACK_MATCH_MAX_COST)
+        assertWithin(config.trackLowMatchMaxCost, TrackerConfig.MIN_TRACK_MATCH_MAX_COST, TrackerConfig.MAX_TRACK_MATCH_MAX_COST)
+        assertWithin(
+            config.trackExitMarginRatio,
+            TrackerConfig.MIN_TRACK_EXIT_MARGIN_RATIO,
+            TrackerConfig.MAX_TRACK_EXIT_MARGIN_RATIO,
+        )
+    }
+
+    @Test
+    fun trackLifecycleFields_atTheirBounds_areAccepted() {
+        val low =
+            TrackerConfig(
+                trackHighScore = TrackerConfig.MIN_TRACK_SCORE,
+                trackBirthScore = TrackerConfig.MIN_TRACK_SCORE,
+                trackConfirmHits = TrackerConfig.MIN_TRACK_CONFIRM_HITS,
+                trackIdlePromoteMs = TrackerConfig.MIN_TRACK_DURATION_MS_LONG,
+                trackMaxLostMs = TrackerConfig.MIN_TRACK_DURATION_MS,
+                trackMaxDtMs = TrackerConfig.MIN_TRACK_MAX_DT_MS,
+                trackGapNoiseInflate = TrackerConfig.MIN_TRACK_GAP_NOISE_INFLATE,
+                trackMissVelocityTauMs = TrackerConfig.MIN_TRACK_DURATION_MS,
+                trackAccelSigmaRatio = TrackerConfig.MIN_TRACK_ACCEL_SIGMA_RATIO,
+                trackHeightAccelSigmaRatio = TrackerConfig.MIN_TRACK_ACCEL_SIGMA_RATIO,
+                trackHeightNoiseRatio = TrackerConfig.MIN_TRACK_HEIGHT_NOISE_RATIO,
+                trackInitVelocitySigmaRatio = TrackerConfig.MIN_TRACK_INIT_VELOCITY_SIGMA_RATIO,
+                trackMatchMaxCost = TrackerConfig.MIN_TRACK_MATCH_MAX_COST,
+                trackLowMatchMaxCost = TrackerConfig.MIN_TRACK_MATCH_MAX_COST,
+                trackExitMarginRatio = TrackerConfig.MIN_TRACK_EXIT_MARGIN_RATIO,
+            )
+        val high =
+            TrackerConfig(
+                trackHighScore = TrackerConfig.MAX_TRACK_SCORE,
+                trackBirthScore = TrackerConfig.MAX_TRACK_SCORE,
+                trackConfirmHits = TrackerConfig.MAX_TRACK_CONFIRM_HITS,
+                trackIdlePromoteMs = TrackerConfig.MAX_TRACK_DURATION_MS_LONG,
+                trackMaxLostMs = TrackerConfig.MAX_TRACK_DURATION_MS,
+                trackMaxDtMs = TrackerConfig.MAX_TRACK_MAX_DT_MS,
+                trackGapNoiseInflate = TrackerConfig.MAX_TRACK_GAP_NOISE_INFLATE,
+                trackMissVelocityTauMs = TrackerConfig.MAX_TRACK_DURATION_MS,
+                trackAccelSigmaRatio = TrackerConfig.MAX_TRACK_ACCEL_SIGMA_RATIO,
+                trackHeightAccelSigmaRatio = TrackerConfig.MAX_TRACK_ACCEL_SIGMA_RATIO,
+                trackHeightNoiseRatio = TrackerConfig.MAX_TRACK_HEIGHT_NOISE_RATIO,
+                trackInitVelocitySigmaRatio = TrackerConfig.MAX_TRACK_INIT_VELOCITY_SIGMA_RATIO,
+                trackMatchMaxCost = TrackerConfig.MAX_TRACK_MATCH_MAX_COST,
+                trackLowMatchMaxCost = TrackerConfig.MAX_TRACK_MATCH_MAX_COST,
+                trackExitMarginRatio = TrackerConfig.MAX_TRACK_EXIT_MARGIN_RATIO,
+            )
+
+        assertThat(low.trackConfirmHits).isEqualTo(TrackerConfig.MIN_TRACK_CONFIRM_HITS)
+        assertThat(high.trackConfirmHits).isEqualTo(TrackerConfig.MAX_TRACK_CONFIRM_HITS)
+        assertThat(low.trackMaxDtMs).isEqualTo(TrackerConfig.MIN_TRACK_MAX_DT_MS)
+        assertThat(high.trackMatchMaxCost).isEqualTo(TrackerConfig.MAX_TRACK_MATCH_MAX_COST)
+        assertThat(high.trackIdlePromoteMs).isEqualTo(TrackerConfig.MAX_TRACK_DURATION_MS_LONG)
+    }
+
+    @Test
+    fun trackLifecycleFields_outsideTheirBounds_areRejected() {
+        val rejected =
+            listOf<() -> TrackerConfig>(
+                { TrackerConfig(trackHighScore = TrackerConfig.MIN_TRACK_SCORE - 0.01f) },
+                { TrackerConfig(trackHighScore = TrackerConfig.MAX_TRACK_SCORE + 0.01f) },
+                { TrackerConfig(trackBirthScore = TrackerConfig.MIN_TRACK_SCORE - 0.01f) },
+                { TrackerConfig(trackBirthScore = TrackerConfig.MAX_TRACK_SCORE + 0.01f) },
+                { TrackerConfig(trackConfirmHits = TrackerConfig.MIN_TRACK_CONFIRM_HITS - 1) },
+                { TrackerConfig(trackConfirmHits = TrackerConfig.MAX_TRACK_CONFIRM_HITS + 1) },
+                { TrackerConfig(trackIdlePromoteMs = TrackerConfig.MIN_TRACK_DURATION_MS_LONG - 1L) },
+                { TrackerConfig(trackIdlePromoteMs = TrackerConfig.MAX_TRACK_DURATION_MS_LONG + 1L) },
+                { TrackerConfig(trackMaxLostMs = 0f) },
+                { TrackerConfig(trackMaxLostMs = TrackerConfig.MAX_TRACK_DURATION_MS + 1f) },
+                { TrackerConfig(trackMaxDtMs = TrackerConfig.MIN_TRACK_MAX_DT_MS - 1f) },
+                { TrackerConfig(trackMaxDtMs = TrackerConfig.MAX_TRACK_MAX_DT_MS + 1f) },
+                { TrackerConfig(trackGapNoiseInflate = TrackerConfig.MIN_TRACK_GAP_NOISE_INFLATE - 0.01f) },
+                { TrackerConfig(trackGapNoiseInflate = TrackerConfig.MAX_TRACK_GAP_NOISE_INFLATE + 1f) },
+                { TrackerConfig(trackMissVelocityTauMs = 0f) },
+                { TrackerConfig(trackMissVelocityTauMs = TrackerConfig.MAX_TRACK_DURATION_MS + 1f) },
+                { TrackerConfig(trackAccelSigmaRatio = 0f) },
+                { TrackerConfig(trackAccelSigmaRatio = TrackerConfig.MAX_TRACK_ACCEL_SIGMA_RATIO + 1f) },
+                { TrackerConfig(trackHeightAccelSigmaRatio = 0f) },
+                { TrackerConfig(trackHeightAccelSigmaRatio = TrackerConfig.MAX_TRACK_ACCEL_SIGMA_RATIO + 1f) },
+                { TrackerConfig(trackHeightNoiseRatio = 0f) },
+                { TrackerConfig(trackHeightNoiseRatio = TrackerConfig.MAX_TRACK_HEIGHT_NOISE_RATIO + 0.01f) },
+                { TrackerConfig(trackInitVelocitySigmaRatio = 0f) },
+                { TrackerConfig(trackInitVelocitySigmaRatio = TrackerConfig.MAX_TRACK_INIT_VELOCITY_SIGMA_RATIO + 1f) },
+                { TrackerConfig(trackMatchMaxCost = 0f) },
+                { TrackerConfig(trackMatchMaxCost = TrackerConfig.MAX_TRACK_MATCH_MAX_COST + 0.01f) },
+                { TrackerConfig(trackLowMatchMaxCost = 0f) },
+                { TrackerConfig(trackLowMatchMaxCost = TrackerConfig.MAX_TRACK_MATCH_MAX_COST + 0.01f) },
+                { TrackerConfig(trackExitMarginRatio = -0.01f) },
+                { TrackerConfig(trackExitMarginRatio = TrackerConfig.MAX_TRACK_EXIT_MARGIN_RATIO + 0.01f) },
+            )
+
+        for (build in rejected) {
+            assertThrows(IllegalArgumentException::class.java) { build() }
+        }
+    }
+
+    @Test
+    fun trackLifecycleFields_nanAndInfinity_areRejected() {
+        for (value in listOf(Float.NaN, Float.POSITIVE_INFINITY, Float.NEGATIVE_INFINITY)) {
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(trackHighScore = value) }
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(trackBirthScore = value) }
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(trackMaxLostMs = value) }
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(trackMaxDtMs = value) }
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(trackGapNoiseInflate = value) }
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(trackMissVelocityTauMs = value) }
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(trackAccelSigmaRatio = value) }
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(trackHeightAccelSigmaRatio = value) }
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(trackHeightNoiseRatio = value) }
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(trackInitVelocitySigmaRatio = value) }
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(trackMatchMaxCost = value) }
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(trackLowMatchMaxCost = value) }
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(trackExitMarginRatio = value) }
+        }
+    }
+
     private fun assertWithin(
         value: Float,
         min: Float,

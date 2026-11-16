@@ -69,6 +69,40 @@ package com.memo494.posetracker.core
  *   [MAX_ASSOC_HEAD_SCALE_RATIO]]; 0.5 means half a person height.
  * @property dedupeIou two detections of one frame whose boxes overlap with at least this IoU (unitless) are
  *   one person: the lower score is dropped before association, in [[MIN_DEDUPE_IOU], [MAX_DEDUPE_IOU]].
+ * @property trackHighScore a detection with at least this score (unitless) takes part in the first, strict matching
+ *   stage of the tracker, in [[MIN_TRACK_SCORE], [MAX_TRACK_SCORE]]; lower ones only in the second stage.
+ * @property trackBirthScore a detection that matches no track starts a new track only with at least this score
+ *   (unitless), in [[MIN_TRACK_SCORE], [MAX_TRACK_SCORE]]; weaker detections can keep a track alive but never start one.
+ * @property trackConfirmHits matched frames, counting the first, after which a tentative track becomes confirmed
+ *   and is shown, in frames, in [[MIN_TRACK_CONFIRM_HITS], [MAX_TRACK_CONFIRM_HITS]].
+ * @property trackIdlePromoteMs idle time in milliseconds (time since the newest frame arrived) at which tentative
+ *   tracks become confirmed without further frames (a still screen sends no frames), in
+ *   [[MIN_TRACK_DURATION_MS], [MAX_TRACK_DURATION_MS]]; see [trackIdlePromoteNs].
+ * @property trackMaxLostMs longest time in milliseconds a confirmed track survives without a matching detection,
+ *   in [[MIN_TRACK_DURATION_MS], [MAX_TRACK_DURATION_MS]].
+ * @property trackMaxDtMs longest time step in milliseconds the tracker predicts over in one frame; a longer step
+ *   is predicted as this long and counts as a gap step (see [trackGapNoiseInflate]), in
+ *   [[MIN_TRACK_MAX_DT_MS], [MAX_TRACK_MAX_DT_MS]].
+ * @property trackGapNoiseInflate factor (unitless) on the process noise of the one predict step that follows a gap
+ *   step, in [[MIN_TRACK_GAP_NOISE_INFLATE], [MAX_TRACK_GAP_NOISE_INFLATE]]; 1 = no inflation.
+ * @property trackMissVelocityTauMs time constant in milliseconds with which the velocity of a track without a
+ *   matching detection decays (`exp(-dt / tau)`), in [[MIN_TRACK_DURATION_MS], [MAX_TRACK_DURATION_MS]].
+ * @property trackAccelSigmaRatio standard deviation of the head's acceleration (process noise) as a multiple of the
+ *   track height per second squared (h/s²), in [[MIN_TRACK_ACCEL_SIGMA_RATIO], [MAX_TRACK_ACCEL_SIGMA_RATIO]].
+ * @property trackHeightAccelSigmaRatio the same for the track height's rate of change, in h/s², in
+ *   [[MIN_TRACK_ACCEL_SIGMA_RATIO], [MAX_TRACK_ACCEL_SIGMA_RATIO]].
+ * @property trackHeightNoiseRatio standard deviation of the measured box height as a fraction of the predicted
+ *   height (unitless), in [[MIN_TRACK_HEIGHT_NOISE_RATIO], [MAX_TRACK_HEIGHT_NOISE_RATIO]].
+ * @property trackInitVelocitySigmaRatio standard deviation of the velocity of a new track, on each axis, as a
+ *   multiple of its height per second (h/s), in [[MIN_TRACK_INIT_VELOCITY_SIGMA_RATIO],
+ *   [MAX_TRACK_INIT_VELOCITY_SIGMA_RATIO]].
+ * @property trackMatchMaxCost largest association cost (unitless; the cost is at most 2) of a pair made in the
+ *   first matching stage, in [[MIN_TRACK_MATCH_MAX_COST], [MAX_TRACK_MATCH_MAX_COST]].
+ * @property trackLowMatchMaxCost the same for the second stage (tracks left over, low-score detections), in
+ *   [[MIN_TRACK_MATCH_MAX_COST], [MAX_TRACK_MATCH_MAX_COST]].
+ * @property trackExitMarginRatio a lost track whose head point is outside the image by more than this fraction of
+ *   its height (unitless) is removed at once, in [[MIN_TRACK_EXIT_MARGIN_RATIO], [MAX_TRACK_EXIT_MARGIN_RATIO]];
+ *   0 removes it as soon as the head leaves the image.
  */
 data class TrackerConfig(
     val scoreThreshold: Float = DEFAULT_SCORE_THRESHOLD,
@@ -106,6 +140,21 @@ data class TrackerConfig(
     val assocHeadWeight: Float = DEFAULT_ASSOC_WEIGHT,
     val assocHeadScaleRatio: Float = DEFAULT_ASSOC_HEAD_SCALE_RATIO,
     val dedupeIou: Float = DEFAULT_DEDUPE_IOU,
+    val trackHighScore: Float = DEFAULT_TRACK_HIGH_SCORE,
+    val trackBirthScore: Float = DEFAULT_TRACK_BIRTH_SCORE,
+    val trackConfirmHits: Int = DEFAULT_TRACK_CONFIRM_HITS,
+    val trackIdlePromoteMs: Long = DEFAULT_TRACK_IDLE_PROMOTE_MS,
+    val trackMaxLostMs: Float = DEFAULT_TRACK_MAX_LOST_MS,
+    val trackMaxDtMs: Float = DEFAULT_TRACK_MAX_DT_MS,
+    val trackGapNoiseInflate: Float = DEFAULT_TRACK_GAP_NOISE_INFLATE,
+    val trackMissVelocityTauMs: Float = DEFAULT_TRACK_MISS_VELOCITY_TAU_MS,
+    val trackAccelSigmaRatio: Float = DEFAULT_TRACK_ACCEL_SIGMA_RATIO,
+    val trackHeightAccelSigmaRatio: Float = DEFAULT_TRACK_HEIGHT_ACCEL_SIGMA_RATIO,
+    val trackHeightNoiseRatio: Float = DEFAULT_TRACK_HEIGHT_NOISE_RATIO,
+    val trackInitVelocitySigmaRatio: Float = DEFAULT_TRACK_INIT_VELOCITY_SIGMA_RATIO,
+    val trackMatchMaxCost: Float = DEFAULT_TRACK_MATCH_MAX_COST,
+    val trackLowMatchMaxCost: Float = DEFAULT_TRACK_LOW_MATCH_MAX_COST,
+    val trackExitMarginRatio: Float = DEFAULT_TRACK_EXIT_MARGIN_RATIO,
 ) {
     init {
         require(scoreThreshold in MIN_SCORE_THRESHOLD..MAX_SCORE_THRESHOLD) {
@@ -231,6 +280,53 @@ data class TrackerConfig(
         require(dedupeIou in MIN_DEDUPE_IOU..MAX_DEDUPE_IOU) {
             "dedupeIou $dedupeIou outside [$MIN_DEDUPE_IOU, $MAX_DEDUPE_IOU]"
         }
+        require(trackHighScore in MIN_TRACK_SCORE..MAX_TRACK_SCORE) {
+            "trackHighScore $trackHighScore outside [$MIN_TRACK_SCORE, $MAX_TRACK_SCORE]"
+        }
+        require(trackBirthScore in MIN_TRACK_SCORE..MAX_TRACK_SCORE) {
+            "trackBirthScore $trackBirthScore outside [$MIN_TRACK_SCORE, $MAX_TRACK_SCORE]"
+        }
+        require(trackConfirmHits in MIN_TRACK_CONFIRM_HITS..MAX_TRACK_CONFIRM_HITS) {
+            "trackConfirmHits $trackConfirmHits outside [$MIN_TRACK_CONFIRM_HITS, $MAX_TRACK_CONFIRM_HITS]"
+        }
+        require(trackIdlePromoteMs in MIN_TRACK_DURATION_MS_LONG..MAX_TRACK_DURATION_MS_LONG) {
+            "trackIdlePromoteMs $trackIdlePromoteMs outside [$MIN_TRACK_DURATION_MS_LONG, $MAX_TRACK_DURATION_MS_LONG]"
+        }
+        require(trackMaxLostMs in MIN_TRACK_DURATION_MS..MAX_TRACK_DURATION_MS) {
+            "trackMaxLostMs $trackMaxLostMs outside [$MIN_TRACK_DURATION_MS, $MAX_TRACK_DURATION_MS]"
+        }
+        require(trackMaxDtMs in MIN_TRACK_MAX_DT_MS..MAX_TRACK_MAX_DT_MS) {
+            "trackMaxDtMs $trackMaxDtMs outside [$MIN_TRACK_MAX_DT_MS, $MAX_TRACK_MAX_DT_MS]"
+        }
+        require(trackGapNoiseInflate in MIN_TRACK_GAP_NOISE_INFLATE..MAX_TRACK_GAP_NOISE_INFLATE) {
+            "trackGapNoiseInflate $trackGapNoiseInflate outside [$MIN_TRACK_GAP_NOISE_INFLATE, $MAX_TRACK_GAP_NOISE_INFLATE]"
+        }
+        require(trackMissVelocityTauMs in MIN_TRACK_DURATION_MS..MAX_TRACK_DURATION_MS) {
+            "trackMissVelocityTauMs $trackMissVelocityTauMs outside [$MIN_TRACK_DURATION_MS, $MAX_TRACK_DURATION_MS]"
+        }
+        require(trackAccelSigmaRatio in MIN_TRACK_ACCEL_SIGMA_RATIO..MAX_TRACK_ACCEL_SIGMA_RATIO) {
+            "trackAccelSigmaRatio $trackAccelSigmaRatio outside [$MIN_TRACK_ACCEL_SIGMA_RATIO, $MAX_TRACK_ACCEL_SIGMA_RATIO]"
+        }
+        require(trackHeightAccelSigmaRatio in MIN_TRACK_ACCEL_SIGMA_RATIO..MAX_TRACK_ACCEL_SIGMA_RATIO) {
+            "trackHeightAccelSigmaRatio $trackHeightAccelSigmaRatio outside " +
+                "[$MIN_TRACK_ACCEL_SIGMA_RATIO, $MAX_TRACK_ACCEL_SIGMA_RATIO]"
+        }
+        require(trackHeightNoiseRatio in MIN_TRACK_HEIGHT_NOISE_RATIO..MAX_TRACK_HEIGHT_NOISE_RATIO) {
+            "trackHeightNoiseRatio $trackHeightNoiseRatio outside [$MIN_TRACK_HEIGHT_NOISE_RATIO, $MAX_TRACK_HEIGHT_NOISE_RATIO]"
+        }
+        require(trackInitVelocitySigmaRatio in MIN_TRACK_INIT_VELOCITY_SIGMA_RATIO..MAX_TRACK_INIT_VELOCITY_SIGMA_RATIO) {
+            "trackInitVelocitySigmaRatio $trackInitVelocitySigmaRatio outside " +
+                "[$MIN_TRACK_INIT_VELOCITY_SIGMA_RATIO, $MAX_TRACK_INIT_VELOCITY_SIGMA_RATIO]"
+        }
+        require(trackMatchMaxCost in MIN_TRACK_MATCH_MAX_COST..MAX_TRACK_MATCH_MAX_COST) {
+            "trackMatchMaxCost $trackMatchMaxCost outside [$MIN_TRACK_MATCH_MAX_COST, $MAX_TRACK_MATCH_MAX_COST]"
+        }
+        require(trackLowMatchMaxCost in MIN_TRACK_MATCH_MAX_COST..MAX_TRACK_MATCH_MAX_COST) {
+            "trackLowMatchMaxCost $trackLowMatchMaxCost outside [$MIN_TRACK_MATCH_MAX_COST, $MAX_TRACK_MATCH_MAX_COST]"
+        }
+        require(trackExitMarginRatio in MIN_TRACK_EXIT_MARGIN_RATIO..MAX_TRACK_EXIT_MARGIN_RATIO) {
+            "trackExitMarginRatio $trackExitMarginRatio outside [$MIN_TRACK_EXIT_MARGIN_RATIO, $MAX_TRACK_EXIT_MARGIN_RATIO]"
+        }
     }
 
     /** Minimum time between two HUD text updates, in nanoseconds (duration, not a timestamp). */
@@ -240,6 +336,10 @@ data class TrackerConfig(
     /** Shortest time between two thermal reads, in nanoseconds (duration, not a timestamp). */
     val thermalSampleIntervalNs: Long
         get() = thermalSampleIntervalMs * NANOS_PER_MILLI
+
+    /** Idle time at which tentative tracks are promoted, in nanoseconds (duration, not a timestamp). */
+    val trackIdlePromoteNs: Long
+        get() = trackIdlePromoteMs * NANOS_PER_MILLI
 
     /**
      * Capture rate, in frames per second, below which the HUD shows 0 fps and does not refresh its numbers.
@@ -528,6 +628,117 @@ data class TrackerConfig(
 
         /** Highest accepted [dedupeIou]. */
         const val MAX_DEDUPE_IOU = 0.95f
+
+        /** Default [trackHighScore]: unitless confidence. */
+        const val DEFAULT_TRACK_HIGH_SCORE = 0.5f
+
+        /** Default [trackBirthScore]: unitless confidence. */
+        const val DEFAULT_TRACK_BIRTH_SCORE = 0.25f
+
+        /** Lowest accepted [trackHighScore] / [trackBirthScore]. */
+        const val MIN_TRACK_SCORE = 0.0f
+
+        /** Highest accepted [trackHighScore] / [trackBirthScore]. */
+        const val MAX_TRACK_SCORE = 1.0f
+
+        /** Default [trackConfirmHits], in frames. */
+        const val DEFAULT_TRACK_CONFIRM_HITS = 3
+
+        /** Lowest accepted [trackConfirmHits], in frames (1 = shown from the first detection). */
+        const val MIN_TRACK_CONFIRM_HITS = 1
+
+        /** Highest accepted [trackConfirmHits], in frames. */
+        const val MAX_TRACK_CONFIRM_HITS = 10
+
+        /** Default [trackIdlePromoteMs], in milliseconds. */
+        const val DEFAULT_TRACK_IDLE_PROMOTE_MS = 400L
+
+        /** Default [trackMaxLostMs], in milliseconds. */
+        const val DEFAULT_TRACK_MAX_LOST_MS = 800f
+
+        /** Default [trackMissVelocityTauMs], in milliseconds (Consult C3). */
+        const val DEFAULT_TRACK_MISS_VELOCITY_TAU_MS = 300f
+
+        /** Lowest accepted [trackMaxLostMs] / [trackMissVelocityTauMs], in milliseconds. */
+        const val MIN_TRACK_DURATION_MS = 1f
+
+        /** Highest accepted [trackMaxLostMs] / [trackMissVelocityTauMs]: 10 s, in milliseconds. */
+        const val MAX_TRACK_DURATION_MS = 10_000f
+
+        /** Lowest accepted [trackIdlePromoteMs], in milliseconds. */
+        const val MIN_TRACK_DURATION_MS_LONG = 1L
+
+        /** Highest accepted [trackIdlePromoteMs]: 10 s, in milliseconds. */
+        const val MAX_TRACK_DURATION_MS_LONG = 10_000L
+
+        /** Default [trackMaxDtMs], in milliseconds (Consult C3). */
+        const val DEFAULT_TRACK_MAX_DT_MS = 250f
+
+        /** Lowest accepted [trackMaxDtMs], in milliseconds (a step shorter than ordinary frame intervals would make every step a gap). */
+        const val MIN_TRACK_MAX_DT_MS = 20f
+
+        /** Highest accepted [trackMaxDtMs]: 5 s, in milliseconds. */
+        const val MAX_TRACK_MAX_DT_MS = 5000f
+
+        /** Default [trackGapNoiseInflate], unitless. */
+        const val DEFAULT_TRACK_GAP_NOISE_INFLATE = 10f
+
+        /** Lowest accepted [trackGapNoiseInflate] (1 = off). */
+        const val MIN_TRACK_GAP_NOISE_INFLATE = 1f
+
+        /** Highest accepted [trackGapNoiseInflate]. */
+        const val MAX_TRACK_GAP_NOISE_INFLATE = 1000f
+
+        /** Default [trackAccelSigmaRatio], in h/s². */
+        const val DEFAULT_TRACK_ACCEL_SIGMA_RATIO = 8f
+
+        /** Default [trackHeightAccelSigmaRatio], in h/s². */
+        const val DEFAULT_TRACK_HEIGHT_ACCEL_SIGMA_RATIO = 2f
+
+        /** Lowest accepted [trackAccelSigmaRatio] / [trackHeightAccelSigmaRatio], in h/s². */
+        const val MIN_TRACK_ACCEL_SIGMA_RATIO = 0.01f
+
+        /** Highest accepted [trackAccelSigmaRatio] / [trackHeightAccelSigmaRatio], in h/s². */
+        const val MAX_TRACK_ACCEL_SIGMA_RATIO = 100f
+
+        /** Default [trackHeightNoiseRatio]: unitless fraction of the predicted height. */
+        const val DEFAULT_TRACK_HEIGHT_NOISE_RATIO = 0.05f
+
+        /** Lowest accepted [trackHeightNoiseRatio]. */
+        const val MIN_TRACK_HEIGHT_NOISE_RATIO = 0.005f
+
+        /** Highest accepted [trackHeightNoiseRatio]. */
+        const val MAX_TRACK_HEIGHT_NOISE_RATIO = 1.0f
+
+        /** Default [trackInitVelocitySigmaRatio], in h/s. */
+        const val DEFAULT_TRACK_INIT_VELOCITY_SIGMA_RATIO = 2f
+
+        /** Lowest accepted [trackInitVelocitySigmaRatio], in h/s. */
+        const val MIN_TRACK_INIT_VELOCITY_SIGMA_RATIO = 0.1f
+
+        /** Highest accepted [trackInitVelocitySigmaRatio], in h/s. */
+        const val MAX_TRACK_INIT_VELOCITY_SIGMA_RATIO = 20f
+
+        /** Default [trackMatchMaxCost], unitless (Consult C3). */
+        const val DEFAULT_TRACK_MATCH_MAX_COST = 0.7f
+
+        /** Default [trackLowMatchMaxCost], unitless (Consult C3). */
+        const val DEFAULT_TRACK_LOW_MATCH_MAX_COST = 0.6f
+
+        /** Lowest accepted [trackMatchMaxCost] / [trackLowMatchMaxCost] (above 0: a limit of 0 would allow no pair). */
+        const val MIN_TRACK_MATCH_MAX_COST = 0.05f
+
+        /** Highest accepted [trackMatchMaxCost] / [trackLowMatchMaxCost]: the association cost never exceeds 2. */
+        const val MAX_TRACK_MATCH_MAX_COST = 2.0f
+
+        /** Default [trackExitMarginRatio]: unitless fraction of the track height. */
+        const val DEFAULT_TRACK_EXIT_MARGIN_RATIO = 0.1f
+
+        /** Lowest accepted [trackExitMarginRatio]. */
+        const val MIN_TRACK_EXIT_MARGIN_RATIO = 0.0f
+
+        /** Highest accepted [trackExitMarginRatio]. */
+        const val MAX_TRACK_EXIT_MARGIN_RATIO = 2.0f
 
         /** How far ahead, in seconds, the thermal headroom is forecast; 0 = the current headroom. */
         const val THERMAL_HEADROOM_FORECAST_SECONDS = 0

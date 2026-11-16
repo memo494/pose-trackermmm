@@ -18,6 +18,15 @@ Package root: `com.memo494.posetracker`. `applicationId` = `com.memo494.posetrac
 - `core/modelimport/` — layout version 2 (`[1,3,H,W]`) and meta v2; `detector` passes width and height.
 - `tools/export_model.py --sizes S|WxH --out DIR` (`--self-test`); rectangular files live in the `models` release.
 
+## Added in M3a (not used by `app` yet; M3b wires it in)
+- `core/tracking/` — the tracker: `HeadMeasurement`, `HeadPointEstimator` (`HeadPoint`), `KalmanAxis`,
+  `AssociationCost` (`BoxOverlap`), `Assigner` / `HungarianAssigner` (cost limit), `DetectionDedupe`, `Tracker`
+  (`TrackList`, `TrackState`). Every number is a `TrackerConfig` field (`head…`, `assoc…`, `dedupe…`, `track…`).
+- `core/src/test/.../tracking/` — test tools `SyntheticScene`, `TrackingMetrics`, `ScenarioRunner`; the acceptance
+  scenarios `TrackerScenarioTest` (S1–S14); their numbers in `MetricsThresholds.kt` (protected).
+- `docs/plans/M3_sim/` — the lead's Python reference model of the tracker and the scenarios (analysis only,
+  not run by CI): `python3 scenarios.py`.
+
 ## Build & tooling
 - `gradle/libs.versions.toml` — pinned versions (PROTECTED). `settings.gradle.kts` — module list.
 - `scripts/cloud-setup.sh` — installs the Android SDK (paste into the env Setup script, BUILD_PLAN §1.3).

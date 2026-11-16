@@ -30,8 +30,19 @@ class DetectionDedupe(
     fun dedupe(
         detections: List<PoseDetection>,
         keptOut: IntArray,
+    ): Int = dedupe(detections, detections.size, keptOut)
+
+    /**
+     * Like the two-argument overload, but looks only at the first [count] entries of [detections] (the tracker
+     * uses it to cap an oversized frame without copying the list). Throws `IllegalArgumentException` when
+     * [count] is negative, above [maxDetections] or above the list size, or [keptOut] is shorter than [count].
+     */
+    fun dedupe(
+        detections: List<PoseDetection>,
+        count: Int,
+        keptOut: IntArray,
     ): Int {
-        val count = detections.size
+        require(count in 0..detections.size) { "count $count outside 0..${detections.size}" }
         require(count <= maxDetections) { "$count detections exceed the capacity $maxDetections" }
         require(keptOut.size >= count) { "keptOut has ${keptOut.size} entries for $count detections" }
         rankByScore(detections, count)
@@ -56,13 +67,16 @@ class DetectionDedupe(
     ) {
         for (index in 0 until count) {
             var slot = index
-            while (slot > 0 && detections[index].score > detections[rankOrder[slot - 1]].score) {
+            while (slot > 0 && rankKey(detections[index]) > rankKey(detections[rankOrder[slot - 1]])) {
                 rankOrder[slot] = rankOrder[slot - 1]
                 slot--
             }
             rankOrder[slot] = index
         }
     }
+
+    /** The score used for ranking: a `NaN` score ranks last, so it can never suppress a detection with a real score. */
+    private fun rankKey(detection: PoseDetection): Float = if (detection.score.isNaN()) Float.NEGATIVE_INFINITY else detection.score
 
     private fun overlapsAKeptOne(
         detections: List<PoseDetection>,

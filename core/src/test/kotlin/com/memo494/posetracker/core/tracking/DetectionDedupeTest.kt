@@ -113,6 +113,33 @@ class DetectionDedupeTest {
         assertThrows(IllegalArgumentException::class.java) { dedupe.dedupe(two, IntArray(1)) }
     }
 
+    @Test
+    fun withACount_onlyTheFirstDetectionsAreLookedAt() {
+        val detections = List(TrackerConfig.MAX_DETECTIONS_PER_FRAME + 5) { box(it * 300f, 0.5f) }
+
+        val count = dedupe.dedupe(detections, TrackerConfig.MAX_DETECTIONS_PER_FRAME, kept)
+
+        assertThat(count).isEqualTo(TrackerConfig.MAX_DETECTIONS_PER_FRAME)
+        assertThat(keptList(count).last()).isEqualTo(TrackerConfig.MAX_DETECTIONS_PER_FRAME - 1)
+    }
+
+    @Test
+    fun withACountAboveTheListSizeOrTheCapacity_isRejected() {
+        val two = listOf(box(0f, 0.9f), box(300f, 0.8f))
+        val many = List(TrackerConfig.MAX_DETECTIONS_PER_FRAME + 1) { box(it * 300f, 0.5f) }
+
+        assertThrows(IllegalArgumentException::class.java) { dedupe.dedupe(two, 3, kept) }
+        assertThrows(IllegalArgumentException::class.java) { dedupe.dedupe(many, many.size, IntArray(many.size)) }
+        assertThrows(IllegalArgumentException::class.java) { dedupe.dedupe(two, -1, kept) }
+    }
+
+    @Test
+    fun aNaNScore_neverSuppressesADetectionWithARealScore() {
+        val count = dedupe.dedupe(listOf(box(0f, Float.NaN), box(2f, 0.6f)), kept)
+
+        assertThat(keptList(count)).containsExactly(1)
+    }
+
     private fun keptList(count: Int): List<Int> = kept.take(count)
 
     /** A 100x100 person box whose left edge is [leftImg], with no useful keypoints. */

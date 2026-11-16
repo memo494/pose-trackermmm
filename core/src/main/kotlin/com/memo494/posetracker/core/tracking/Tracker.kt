@@ -2,64 +2,461 @@ package com.memo494.posetracker.core.tracking
 
 import com.memo494.posetracker.core.TrackerConfig
 import com.memo494.posetracker.core.model.DetectionFrame
+import com.memo494.posetracker.core.model.PoseDetection
 
 /**
- * Multi-person tracker: detections in, stable tracks with ids and a smoothed head point out
- * (docs/plans/M3.md, M3a). Not thread-safe: one capture thread calls it.
+ * Multi-person tracker: detections in, stable tracks with ids and a smoothed head point out. The algorithm is
+ * the reference model `docs/plans/M3_sim/tracker_ref.py`; the decisions behind it are Consults C1 to C3 of
+ * `docs/plans/M3.md`.
  *
- * **Skeleton, implemented in M3a T6:** today [update] and [onIdle] return an empty list and [reset] does nothing.
- * No call allocates.
+ * One [update] does, in order:
+ * 1. time: the first frame does not predict; `dt <= 0` ignores the frame; a step is `min(dt, trackMaxDtMs)`
+ *    long and a longer one (a gap step) inflates the process noise by `trackGapNoiseInflate`;
+ * 2. every track is predicted (head x and y, and the box height, as constant-velocity Kalman filters);
+ * 3. detections: at most [TrackerConfig.MAX_DETECTIONS_PER_FRAME], duplicates dropped, scores below
+ *    `scoreThreshold` and unusable boxes ignored; "high" means a score of at least `trackHighScore`;
+ * 4. stage 1 assigns all tracks to the high detections, stage 2 the unmatched tracks to the low ones, each
+ *    with a cost limit (`AssociationCost`, `HungarianAssigner`);
+ * 5. a matched track is updated and counted a hit (a tentative one is confirmed after `trackConfirmHits`);
+ * 6. an unmatched tentative track is removed; an unmatched confirmed one is LOST (its velocity decays) and
+ *    is removed after `trackMaxLostMs` or when its head point is more than `trackExitMarginRatio` heights
+ *    outside the image;
+ * 7. an unmatched detection with a score of at least `trackBirthScore` starts a tentative track while fewer
+ *    than `maxTracks` tracks exist;
+ * 8. [onIdle] promotes the tentative tracks after `trackIdlePromoteMs` without a frame.
+ *
+ * Thread rule: not thread-safe, one capture thread calls everything. **Allocation-free after construction**
+ * (AGENTS rule 8): the pool of `maxTracks` tracks, the order array and every scratch array are made in the
+ * constructor, [update] and [onIdle] use index loops only. The returned [TrackList] is one object owned by the
+ * tracker, valid until the next call.
+ *
+ * Fail closed: a detection with a non-finite score or an unusable box is ignored; a track whose position,
+ * height or covariance is not finite, or whose height is not positive, is removed.
  */
 class Tracker(
     private val config: TrackerConfig,
 ) {
-    private val emptyTracks: TrackList = EmptyTrackList
+    /** One pooled track; every field is overwritten at birth. */
+    private class Track(
+        config: TrackerConfig,
+    ) {
+        val x = KalmanAxis()
+        val y = KalmanAxis()
+        val height = KalmanAxis()
+        val estimator = HeadPointEstimator(config)
+        var id = 0
+        var state = TrackState.TENTATIVE
+        var hits = 0
+        var lostMs = 0f
+        var score = 0f
+        var headEstimated = false
 
-    /** Feeds one frame of detections and returns the tracks afterwards (skeleton: always empty). */
-    fun update(frame: DetectionFrame): TrackList = emptyTracks
+        /** Box edges relative to the head point, in units of the box height. */
+        var offLeft = 0f
+        var offTop = 0f
+        var offRight = 0f
+        var offBottom = 0f
+
+        fun boxLeft(): Float = x.position + offLeft * height.position
+
+        fun boxTop(): Float = y.position + offTop * height.position
+
+        fun boxRight(): Float = x.position + offRight * height.position
+
+        fun boxBottom(): Float = y.position + offBottom * height.position
+
+        /** True when position, height and covariances are finite and the height is positive. */
+        fun isHealthy(): Boolean =
+            x.position.isFinite() && y.position.isFinite() && height.position.isFinite() && height.position > 0f &&
+                x.pPos.isFinite() && y.pPos.isFinite() && height.pPos.isFinite()
+    }
+
+    private val maxTracks = config.maxTracks
+    private val tracks = Array(maxTracks) { Track(config) }
+    private val inUse = BooleanArray(maxTracks)
+
+    /** Pool indices of the active tracks, in creation order; the first [activeCount] entries count. */
+    private val order = IntArray(maxTracks)
+    private var activeCount = 0
+
+    private val dedupeKept = IntArray(TrackerConfig.MAX_DETECTIONS_PER_FRAME)
+    private val keep = IntArray(TrackerConfig.MAX_DETECTIONS_PER_FRAME)
+    private val high = IntArray(TrackerConfig.MAX_DETECTIONS_PER_FRAME)
+    private val low = IntArray(TrackerConfig.MAX_DETECTIONS_PER_FRAME)
+    private val detUsed = BooleanArray(TrackerConfig.MAX_DETECTIONS_PER_FRAME)
+    private val heads = Array(TrackerConfig.MAX_DETECTIONS_PER_FRAME) { HeadPoint() }
+    private val point = HeadPoint()
+    private var keepCount = 0
+    private var highCount = 0
+    private var lowCount = 0
+
+    /** Per position in [order]: the detection index matched this frame, or -1. */
+    private val trackDet = IntArray(maxTracks)
+    private val stageTracks = IntArray(maxTracks)
+    private val rowToCol = IntArray(maxTracks)
+    private val colToRow = IntArray(TrackerConfig.MAX_DETECTIONS_PER_FRAME)
+    private val assigner = HungarianAssigner(maxTracks, TrackerConfig.MAX_DETECTIONS_PER_FRAME)
+    private val dedupe = DetectionDedupe(TrackerConfig.MAX_DETECTIONS_PER_FRAME, config)
+
+    private val maxDtNs: Double = config.trackMaxDtMs.toDouble() * TrackerConfig.NANOS_PER_MILLI
+    private val nanosPerSecond: Double = TrackerConfig.NANOS_PER_SECOND.toDouble()
+    private val nanosPerMilli: Double = TrackerConfig.NANOS_PER_MILLI.toDouble()
+    private val missTauS: Float = (config.trackMissVelocityTauMs.toDouble() * nanosPerMilli / nanosPerSecond).toFloat()
+
+    private var hasLastFrame = false
+    private var lastTimestampNs = 0L
+    private var nextId = 1
+    private val view = View()
+
+    /** Tracks started since construction (`reset` keeps it). */
+    var birthCount: Int = 0
+        private set
+
+    /** Tentative tracks confirmed by enough hits since construction. */
+    var confirmCount: Int = 0
+        private set
+
+    /** Tentative tracks promoted by [onIdle] since construction. */
+    var idlePromoteCount: Int = 0
+        private set
+
+    /** LOST tracks that were matched again (back to CONFIRMED) since construction. */
+    var recoverCount: Int = 0
+        private set
+
+    /** Confirmed or lost tracks removed since construction (tentative ones do not count). */
+    var removeCount: Int = 0
+        private set
+
+    /** Most tracks shown (CONFIRMED or LOST) at once after any call since construction. */
+    var mostShownAtOnce: Int = 0
+        private set
+
+    /** Feeds one frame of detections and returns the tracks afterwards (the same list object every call). */
+    fun update(frame: DetectionFrame): TrackList {
+        var dteNs = 0.0
+        if (hasLastFrame) {
+            val dtNs = frame.timestampNs - lastTimestampNs
+            if (dtNs <= 0L) return view
+            val gap = dtNs.toDouble() > maxDtNs
+            dteNs = minOf(dtNs.toDouble(), maxDtNs)
+            predictAll((dteNs / nanosPerSecond).toFloat(), if (gap) config.trackGapNoiseInflate else 1f)
+        }
+        hasLastFrame = true
+        lastTimestampNs = frame.timestampNs
+
+        val detections = frame.detections
+        prepareDetections(detections)
+        matchTracks(detections)
+        updateTracks(detections, dteNs, frame)
+        giveBirths(detections)
+        noteShown()
+        return view
+    }
 
     /**
      * Tells the tracker that [idleNs] nanoseconds have passed since the newest frame arrived (measured by the
-     * caller) and returns the tracks afterwards (skeleton: always empty).
+     * caller) and returns the tracks afterwards. At or above `trackIdlePromoteMs` every tentative track
+     * becomes confirmed; nothing else changes.
      */
-    fun onIdle(idleNs: Long): TrackList = emptyTracks
+    fun onIdle(idleNs: Long): TrackList {
+        if (idleNs >= config.trackIdlePromoteNs) {
+            for (pos in 0 until activeCount) {
+                val track = tracks[order[pos]]
+                if (track.state == TrackState.TENTATIVE) {
+                    track.state = TrackState.CONFIRMED
+                    idlePromoteCount++
+                }
+            }
+            noteShown()
+        }
+        return view
+    }
 
-    /** Forgets every track and the last timestamp; the id counter goes on (skeleton: does nothing). */
-    fun reset() = Unit
+    /** Forgets every track and the last timestamp; the id counter and the counters go on. */
+    fun reset() {
+        inUse.fill(false)
+        activeCount = 0
+        hasLastFrame = false
+    }
 
-    private object EmptyTrackList : TrackList {
-        override val size: Int = 0
+    private fun predictAll(
+        dteS: Float,
+        inflate: Float,
+    ) {
+        for (pos in 0 until activeCount) {
+            val track = tracks[order[pos]]
+            val heightImg = track.height.position
+            track.x.predict(dteS, config.trackAccelSigmaRatio * heightImg, inflate)
+            track.y.predict(dteS, config.trackAccelSigmaRatio * heightImg, inflate)
+            track.height.predict(dteS, config.trackHeightAccelSigmaRatio * heightImg, inflate)
+        }
+    }
 
-        override fun id(index: Int): Int = outOfRange(index)
+    /** Fills `keep`, `high` and `low` (detection indices in input order) and the head points of the kept ones. */
+    private fun prepareDetections(detections: List<PoseDetection>) {
+        val count = minOf(detections.size, TrackerConfig.MAX_DETECTIONS_PER_FRAME)
+        val dedupedCount = dedupe.dedupe(detections, count, dedupeKept)
+        keepCount = 0
+        highCount = 0
+        lowCount = 0
+        for (k in 0 until dedupedCount) {
+            val index = dedupeKept[k]
+            val detection = detections[index]
+            if (!(detection.score.isFinite() && detection.score >= config.scoreThreshold)) continue
+            HeadMeasurement.of(detection, config, heads[index])
+            if (!heads[index].valid) continue
+            keep[keepCount++] = index
+            if (detection.score >= config.trackHighScore) high[highCount++] = index else low[lowCount++] = index
+        }
+        detUsed.fill(false)
+    }
 
-        override fun state(index: Int): TrackState = outOfRange(index)
+    private fun matchTracks(detections: List<PoseDetection>) {
+        trackDet.fill(-1, 0, activeCount)
+        for (pos in 0 until activeCount) stageTracks[pos] = pos
+        runStage(detections, activeCount, high, highCount, config.trackMatchMaxCost)
+        var unmatched = 0
+        for (pos in 0 until activeCount) {
+            if (trackDet[pos] < 0) stageTracks[unmatched++] = pos
+        }
+        runStage(detections, unmatched, low, lowCount, config.trackLowMatchMaxCost)
+    }
 
-        override fun isShown(index: Int): Boolean = outOfRange(index)
+    /** Assigns the tracks `stageTracks[0 until trackCount]` to the detections `candidates[0 until candidateCount]`. */
+    private fun runStage(
+        detections: List<PoseDetection>,
+        trackCount: Int,
+        candidates: IntArray,
+        candidateCount: Int,
+        maxCost: Float,
+    ) {
+        if (trackCount == 0 || candidateCount == 0) return
+        for (row in 0 until trackCount) {
+            val track = tracks[order[stageTracks[row]]]
+            val left = track.boxLeft()
+            val top = track.boxTop()
+            val right = track.boxRight()
+            val bottom = track.boxBottom()
+            for (col in 0 until candidateCount) {
+                val index = candidates[col]
+                val detection = detections[index]
+                val head = heads[index]
+                val cost =
+                    AssociationCost.cost(
+                        left,
+                        top,
+                        right,
+                        bottom,
+                        detection.boxLeftImg,
+                        detection.boxTopImg,
+                        detection.boxRightImg,
+                        detection.boxBottomImg,
+                        track.x.position,
+                        track.y.position,
+                        head.headXImg,
+                        head.headYImg,
+                        track.x.pPos + head.varianceImg2,
+                        track.y.pPos + head.varianceImg2,
+                        track.height.position,
+                        config,
+                    )
+                assigner.setCost(row, col, cost)
+            }
+        }
+        assigner.assign(trackCount, candidateCount, maxCost, rowToCol, colToRow)
+        for (row in 0 until trackCount) {
+            val col = rowToCol[row]
+            if (col >= 0) {
+                trackDet[stageTracks[row]] = candidates[col]
+                detUsed[candidates[col]] = true
+            }
+        }
+    }
 
-        override fun headXImg(index: Int): Float = outOfRange(index)
+    /** Applies hits and misses and compacts [order] to the surviving tracks (creation order kept). */
+    private fun updateTracks(
+        detections: List<PoseDetection>,
+        dteNs: Double,
+        frame: DetectionFrame,
+    ) {
+        val dteMs = (dteNs / nanosPerMilli).toFloat()
+        val dteS = (dteNs / nanosPerSecond).toFloat()
+        var survivors = 0
+        for (pos in 0 until activeCount) {
+            val slot = order[pos]
+            val track = tracks[slot]
+            val matched = trackDet[pos] >= 0 && applyHit(track, detections[trackDet[pos]])
+            val alive =
+                if (matched) {
+                    track.isHealthy()
+                } else {
+                    applyMiss(track, dteMs, dteS, frame) && track.isHealthy()
+                }
+            if (alive) {
+                order[survivors++] = slot
+            } else {
+                if (track.state != TrackState.TENTATIVE) removeCount++
+                inUse[slot] = false
+            }
+        }
+        activeCount = survivors
+    }
 
-        override fun headYImg(index: Int): Float = outOfRange(index)
+    /** Folds a matched detection into [track]; false when its head point was unusable (then it counts as a miss). */
+    private fun applyHit(
+        track: Track,
+        detection: PoseDetection,
+    ): Boolean {
+        track.estimator.update(detection, point)
+        if (!point.valid) return false
+        val boxHeightImg = detection.boxBottomImg - detection.boxTopImg
+        val heightNoiseImg = config.trackHeightNoiseRatio * track.height.position
+        track.x.update(point.headXImg, point.varianceImg2)
+        track.y.update(point.headYImg, point.varianceImg2)
+        track.height.update(boxHeightImg, heightNoiseImg * heightNoiseImg)
+        setOffsets(track, detection, boxHeightImg)
+        track.hits++
+        track.lostMs = 0f
+        track.score = detection.score
+        track.headEstimated = point.estimated
+        if (track.state == TrackState.TENTATIVE && track.hits >= config.trackConfirmHits) {
+            track.state = TrackState.CONFIRMED
+            confirmCount++
+        } else if (track.state == TrackState.LOST) {
+            track.state = TrackState.CONFIRMED
+            recoverCount++
+        }
+        return true
+    }
 
-        override fun velocityXImgPerS(index: Int): Float = outOfRange(index)
+    /** Handles a frame without a match; false when the track must be removed. */
+    private fun applyMiss(
+        track: Track,
+        dteMs: Float,
+        dteS: Float,
+        frame: DetectionFrame,
+    ): Boolean {
+        if (track.state == TrackState.TENTATIVE) return false
+        track.state = TrackState.LOST
+        track.lostMs += dteMs
+        track.x.decayVelocity(dteS, missTauS)
+        track.y.decayVelocity(dteS, missTauS)
+        track.height.decayVelocity(dteS, missTauS)
+        if (track.lostMs > config.trackMaxLostMs) return false
+        val margin = config.trackExitMarginRatio * track.height.position
+        val x = track.x.position
+        val y = track.y.position
+        return !(x < -margin || x > frame.widthImg + margin || y < -margin || y > frame.heightImg + margin)
+    }
 
-        override fun velocityYImgPerS(index: Int): Float = outOfRange(index)
+    private fun setOffsets(
+        track: Track,
+        detection: PoseDetection,
+        boxHeightImg: Float,
+    ) {
+        track.offLeft = (detection.boxLeftImg - point.headXImg) / boxHeightImg
+        track.offTop = (detection.boxTopImg - point.headYImg) / boxHeightImg
+        track.offRight = (detection.boxRightImg - point.headXImg) / boxHeightImg
+        track.offBottom = (detection.boxBottomImg - point.headYImg) / boxHeightImg
+    }
 
-        override fun boxLeftImg(index: Int): Float = outOfRange(index)
+    private fun giveBirths(detections: List<PoseDetection>) {
+        for (k in 0 until keepCount) {
+            val index = keep[k]
+            val detection = detections[index]
+            if (detUsed[index] || detection.score < config.trackBirthScore) continue
+            if (activeCount >= maxTracks) return
+            val slot = freeSlot()
+            if (slot < 0) return
+            if (start(tracks[slot], detection)) {
+                inUse[slot] = true
+                order[activeCount++] = slot
+                birthCount++
+            }
+        }
+    }
 
-        override fun boxTopImg(index: Int): Float = outOfRange(index)
+    private fun freeSlot(): Int {
+        for (slot in 0 until maxTracks) {
+            if (!inUse[slot]) return slot
+        }
+        return -1
+    }
 
-        override fun boxRightImg(index: Int): Float = outOfRange(index)
+    /** Starts [track] on [detection]; false (and the track unused) when the detection gives no usable state. */
+    private fun start(
+        track: Track,
+        detection: PoseDetection,
+    ): Boolean {
+        track.estimator.reset()
+        track.estimator.update(detection, point)
+        if (!point.valid) return false
+        val boxHeightImg = detection.boxBottomImg - detection.boxTopImg
+        val velocityNoiseImg = config.trackInitVelocitySigmaRatio * boxHeightImg
+        val heightNoiseImg = config.trackHeightNoiseRatio * boxHeightImg
+        val velocityVariance = velocityNoiseImg * velocityNoiseImg
+        val started =
+            track.x.reset(point.headXImg, point.varianceImg2, velocityVariance) &&
+                track.y.reset(point.headYImg, point.varianceImg2, velocityVariance) &&
+                track.height.reset(boxHeightImg, heightNoiseImg * heightNoiseImg, velocityVariance)
+        if (!started) return false
+        setOffsets(track, detection, boxHeightImg)
+        track.id = nextId++
+        track.state = TrackState.TENTATIVE
+        track.hits = 1
+        track.lostMs = 0f
+        track.score = detection.score
+        track.headEstimated = point.estimated
+        return true
+    }
 
-        override fun boxBottomImg(index: Int): Float = outOfRange(index)
+    private fun noteShown() {
+        var shown = 0
+        for (pos in 0 until activeCount) {
+            if (tracks[order[pos]].state != TrackState.TENTATIVE) shown++
+        }
+        if (shown > mostShownAtOnce) mostShownAtOnce = shown
+    }
 
-        override fun heightImg(index: Int): Float = outOfRange(index)
+    /** The reused read-only view of the active tracks. */
+    private inner class View : TrackList {
+        override val size: Int
+            get() = activeCount
 
-        override fun score(index: Int): Float = outOfRange(index)
+        override fun id(index: Int): Int = at(index).id
 
-        override fun isHeadEstimated(index: Int): Boolean = outOfRange(index)
+        override fun state(index: Int): TrackState = at(index).state
 
-        override fun lostMs(index: Int): Float = outOfRange(index)
+        override fun isShown(index: Int): Boolean = at(index).state != TrackState.TENTATIVE
 
-        private fun outOfRange(index: Int): Nothing = throw IndexOutOfBoundsException("index $index, size 0")
+        override fun headXImg(index: Int): Float = at(index).x.position
+
+        override fun headYImg(index: Int): Float = at(index).y.position
+
+        override fun velocityXImgPerS(index: Int): Float = at(index).x.velocity
+
+        override fun velocityYImgPerS(index: Int): Float = at(index).y.velocity
+
+        override fun boxLeftImg(index: Int): Float = at(index).boxLeft()
+
+        override fun boxTopImg(index: Int): Float = at(index).boxTop()
+
+        override fun boxRightImg(index: Int): Float = at(index).boxRight()
+
+        override fun boxBottomImg(index: Int): Float = at(index).boxBottom()
+
+        override fun heightImg(index: Int): Float = at(index).height.position
+
+        override fun score(index: Int): Float = at(index).score
+
+        override fun isHeadEstimated(index: Int): Boolean = at(index).headEstimated
+
+        override fun lostMs(index: Int): Float = at(index).lostMs
+
+        private fun at(index: Int): Track {
+            if (index < 0 || index >= activeCount) throw IndexOutOfBoundsException("index $index, size $activeCount")
+            return tracks[order[index]]
+        }
     }
 }

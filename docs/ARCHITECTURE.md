@@ -1,4 +1,4 @@
-# pose-tracker-android — Architecture (v0.7)
+# pose-tracker-android — Architecture (v0.8)
 
 Real-time Android app: a screen-capture overlay that draws a stable, low-latency dot on each person's head
 over any other app (video, stream, game), using YOLO26n-pose on-device. Built and modified by AI coding agents (Claude Code, Codex); built only
@@ -10,6 +10,9 @@ Ultralytics Flutter plugin (§2.1). Screen capture, overlay, tracking, smoothing
 and tests are ours.
 
 How the app gets built step by step is in `docs/BUILD_PLAN.md`. Changes per version are in §15.
+
+**v0.8 (M3a):** §6.2 and §6.3 describe the tracker as built in `core` (head point, three Kalman filters, one
+time rule, two-stage association with cost limits, lifecycle); §9 the scenario tests (also §7.1, §12, §13).
 
 **v0.7 (M1a):** model inputs may be rectangular (`[1, 3, H, W]`, sizes written `WIDTHxHEIGHT`), rectangular models are
 downloads, and `summary.txt` carries timing percentiles and the thermal state (§6.1, §6.7, §8, §12).
@@ -272,30 +275,74 @@ Thread-confined: create, `detect` and `close` on the capture thread (a call from
 - `FakePoseDetector` replays JSON → tests and a "replay mode" in the debug sheet.
 
 ### 6.2 Head point (`core/tracking/HeadPointEstimator`)
-- Keypoints 0–4 (nose, eyes, ears). Visibility hysteresis: enter ≥ 0.5, leave < 0.3.
-- Per track, EMA (α 0.1) of each keypoint's offset from the head centre; missing keypoints filled from these
-  offsets → no jumps when an ear disappears.
-- Fewer than 2 ever visible: fallback `(boxCx, top + 0.10·h)`, flagged estimated.
-- Measurement noise `R ∝ (0.03·h)² / meanKeypointConf`. Configurable vertical offset (face centre ↔ top of head).
+- Keypoints 0–4 (nose, eyes, ears). Two classes, both pure and allocation-free:
+  - `HeadMeasurement` (stateless, used for association before a detection has a track): plain mean of the head
+    keypoints with score ≥ `headKeypointEnterScore` (0.5); none → the box fallback below.
+  - `HeadPointEstimator` (one per track, the point the track is updated with). Visibility hysteresis per
+    keypoint: enter ≥ 0.5, leave < 0.3.
+- Offsets: per head keypoint, its offset from the head centre in units of `h`, EMA `headOffsetAlpha` (0.2).
+  A keypoint's centre estimate is `keypoint − offset·h`; the centre is the confidence-weighted mean of these
+  estimates → no jump when an ear appears or disappears.
+  - All five visible: the offsets are learned against the plain mean of the five (their targets sum to zero, so
+    the reference cannot drift; a track that started with a partial view converges to the plain mean).
+  - Partial view: the centre is computed first; a keypoint that has no offset yet gets one, existing offsets
+    are never changed.
+- Fallback when no keypoint can anchor the centre: `(box centre x, top + headFallbackTopRatio·h)` (0.10), flagged
+  `estimated`; learned offsets are kept.
+- Measurement variance `(headMeasurementNoiseRatio·h)² / mean keypoint confidence` (0.03; the mean is floored
+  at `headMinMeanConfidence` 0.05); fallback `(headFallbackNoiseRatio·h)²` (0.10). A box with `h ≤ 0` gives an
+  invalid point and changes nothing.
 
 ### 6.3 Tracker (`core/tracking`)
-- **Kalman CV** per track, state `[hx, hy, vx, vy, h, vh]`, real dt from timestamps.
-  Noise scaled by box height `h`: σ_accel ≈ 8·h px/s², σ_meas ≈ 0.03·h.
-- Adaptive: if NIS > 9.21 (χ² 99 %, 2 dof) inflate Q ×10 for **one step only**.
-- On a frame where the person was not detected (a miss): decay velocity by `exp(−dt / 100 ms)`.
+Reference model: `docs/plans/M3_sim/` (Python); the code in `core/tracking` (`Tracker`) is its port. Every number
+below is a `TrackerConfig` field. Capture thread only; allocation-free after construction (a pool of `maxTracks`
+tracks, index loops); deterministic.
+- **Kalman:** three independent position/velocity filters per track (`KalmanAxis`): head x, head y, box height
+  `h`. Discrete white-noise acceleration, noise scaled by `h`: σ_accel `trackAccelSigmaRatio`·h (8 h/s²) for the
+  head, `trackHeightAccelSigmaRatio`·h (2 h/s²) for the height; height noise `trackHeightNoiseRatio` 0.05; the
+  head's measurement noise comes from §6.2. A new track starts with velocity σ `trackInitVelocitySigmaRatio`·h
+  (2 h/s) on all three.
+- **One time rule:** `dtEff = min(dt, trackMaxDtMs)` (250 ms) for every filter step and every lifecycle clock. A
+  step with `dt > trackMaxDtMs` is a gap step and inflates the process noise ×`trackGapNoiseInflate` (10) once.
+  `dt ≤ 0` (repeated or backward timestamp) ignores the frame; the first frame does not predict.
+- **No "NIS > 9.21 inflates Q" rule:** the same gate is in the association, so a matched pair cannot exceed it.
+  No noise inflation on a miss either (it made slow crossings worse).
+- **Miss:** the three velocities decay by `exp(−dtEff / trackMissVelocityTauMs)`, τ **300 ms** (with 100 ms slow
+  crossings swapped ids).
 - **Idle screen = no information, not a miss.** The virtual display only produces a frame when the screen content
-  changes, so a paused video or a static page yields no frames. A time gap without frames never counts as a miss,
-  never advances lifecycle counters (`maxLostMs`, lock timeout) and never decays velocity; tracks are held as they
-  are and the HUD shows capture fps ≈ 0. Only an actual frame that lacks a person is a miss. The first frame after
-  a gap does its update with `dt` clamped to a `TrackerConfig` maximum (so the Kalman step stays sane).
-- **Association** (ByteTrack two-stage: high ≥ 0.5, then low 0.15–0.5 vs remaining tracks):
-  cost = 0.5·(1 − IoU) + 0.5·min(1, d_head / (0.5·h)); Mahalanobis gate < 9.21;
-  **Hungarian** behind an `Assigner` interface (deterministic tie-break).
-- Lifecycle (time-based, measured over frames that exist — see above): new track needs score ≥ 0.6; confirmed
-  after 3 hits within 300 ms; tentative deleted on first miss; confirmed deleted after `maxLostMs = 800`;
-  **locked track 2000 ms**.
-- Works identically at 30 and 60 fps and with irregular frame spacing (everything uses real dt from frame
-  timestamps; tests run at both rates and with idle gaps).
+  changes, so a paused video or a static page yields no frames. A time gap without frames never counts as a miss
+  and never decays velocity; tracks are held as they are and the HUD shows capture fps ≈ 0. Only an actual frame
+  that lacks a person is a miss. The first frame after a gap steps with `dtEff` (a gap adds at most
+  `trackMaxDtMs` once, to the Kalman step and to the lifecycle clocks); nothing ages during the gap itself.
+- **Detections:** at most `MAX_DETECTIONS_PER_FRAME` (30); dedupe first (IoU ≥ `dedupeIou` 0.7 drops the lower
+  score); scores below `scoreThreshold` and unusable boxes are ignored.
+- **Association** (ByteTrack two-stage): stage 1 = all tracks × detections with score ≥ `trackHighScore` (0.5);
+  stage 2 = the still unmatched tracks × the low ones (down to `scoreThreshold`). Cost
+  `assocIouWeight·(1 − IoU) + assocHeadWeight·min(1, d_head / (assocHeadScaleRatio·h))` (0.5, 0.5, 0.5);
+  Mahalanobis gate `trackGateChi2` (9.21) on the head innovation. **Hungarian** (`HungarianAssigner`) behind an
+  `Assigner` interface, deterministic tie-break, with a **cost limit** per stage: `trackMatchMaxCost` 0.7,
+  `trackLowMatchMaxCost` 0.6. It maximises `sum(limit − cost)` over pairs below the limit; it does not maximise
+  the number of pairs (a missing person must not shift the ids of the others).
+- **Lifecycle** (time in `dtEff`, measured over frames that exist):
+  - an unmatched detection with score ≥ `trackBirthScore` (0.25) starts a TENTATIVE track (while fewer than
+    `maxTracks` = 32 exist);
+  - CONFIRMED, and shown, from the `trackConfirmHits`-th (3rd) consecutive hit; a tentative track is removed on
+    its first miss, so a one- or two-frame false positive is never shown;
+  - `onIdle(idleNs)` (`idleNs` = time since the newest frame, measured by the caller) promotes the tentative
+    tracks once `idleNs ≥ trackIdlePromoteMs` (400 ms): a still picture;
+  - a confirmed track that misses is LOST: it stays shown and coasts, and is removed after `trackMaxLostMs`
+    (800 ms of `dtEff` time) or when its head point is more than `trackExitMarginRatio` (0.1) × its height
+    outside the image; a hit makes it CONFIRMED again;
+  - a track whose state is not finite or whose height is not positive is removed;
+  - **locked track 2000 ms** (M4).
+- **Ids** start at 1 and are never reused in a session; `reset()` (geometry change) drops the tracks and keeps
+  the id counter. Counters for the diagnostics, cumulative, kept by `reset()`: `birthCount`, `confirmCount`,
+  `idlePromoteCount`, `recoverCount`, `removeCount` (confirmed tracks only), `mostShownAtOnce`.
+- Works identically at 20, 30 and 60 fps and with irregular frame spacing (everything uses `dtEff` from frame
+  timestamps; the scenarios of §9 run at several rates and with idle gaps).
+- **Known limits (not asserted):** slow crossings in one row can swap ids (no appearance model); a person
+  missing for 0.5 s while moving at 2 h/s gets a new id; a person faster than about 1 h/s whose picture freezes
+  without a frozen frame gets a new id afterwards.
 
 ### 6.4 Prediction & smoothing (render side; from M4)
 - **Prediction looks forward.** The detection describes the screen at `image.timestamp`; the content is already
@@ -414,7 +461,12 @@ The overlay is a plain `View` (not `ComposeView`) in a `TYPE_APPLICATION_OVERLAY
 elsewhere. Debug sheet exposes the important ones as sliders + "reset to defaults", plus: model size
 (`modelInputSize`, 320 or 416, default 416), capture scale, analysis fps cap (60/30), accelerator override (auto/CPU).
 Capture-related entries (M0b): score threshold 0.15, capture scale ½, HUD rate 2 Hz, timestamp guard 100 ms,
-overlay alpha cap fallback 0.8, dot/box stroke widths, lock arm timeout, max `dt` after an idle gap.
+overlay alpha cap fallback 0.8, dot/box stroke widths, lock arm timeout.
+Tracker entries (M3a), all in `TrackerConfig` with unit and bounds: head point (keypoint enter/leave scores, offset
+EMA, fallback and noise ratios), Kalman (acceleration and noise ratios, initial velocity, longest time step
+`trackMaxDtMs`, gap inflation, miss velocity decay), association (weights, head scale, gate, dedupe IoU, cost
+limits per stage) and lifecycle (high and birth scores, confirm hits, idle promotion, lost time, exit margin,
+`maxTracks`).
 
 ### 7.2 Thermal policy (M5)
 If thermal status ≥ `MODERATE` or headroom forecast > 0.9: step down the analysis fps cap 60 → 30; then 416 → 320;
@@ -491,8 +543,8 @@ step back up after 60 s below the threshold. Every step is logged and shown in t
 | Geometry | table tests in `core`: `Letterbox` Img↔Mdl round-trip; `FitCenter` corners → view corners and back, portrait + landscape, with offset (cutout) and different window/capture sizes; `CaptureSize` (1220×2712 → 610×1356, exact aspect, even dimensions) |
 | Capture math | `RowCopy` (padded row stride, short last row, tight output); `FrameTimestamp` guard (in range, negative, > 100 ms → fallback); teardown idempotent and size-mismatch frames dropped (fake session); per-frame `catch` handles `OutOfMemoryError` |
 | Overlay | `HudFormatter` writes the expected text into a reused `CharArray`; the invalidate decision (new snapshot / deadband) as a pure function |
-| Tracking (synthetic, known truth) | crossing, stop/start, 0.5 s dropout, keypoint dropout, variable dt, idle gap (no frames ≠ miss); each at 30 and 60 fps |
-| Tracking metrics (asserted) | ID switches = 0 on crossing; still jitter RMS(2nd diff) < 1 px; stop overshoot < 0.1h; lag < 1 frame |
+| Tracking (synthetic, known truth) | scenarios S1 to S14 on `SyntheticScene` (crossing, stop, 0.5 s dropout, keypoint dropout, idle gap = no frames ≠ miss, still picture, score ramps, false positives, walking out, duplicate box, random dropouts, growing person), each at 20, 30 and 60 fps and at 30 fps ± 30 %; the Python functions in `docs/plans/M3_sim/scenarios.py` define them; measured first on the reference model (§6.3) |
+| Tracking metrics (asserted) | numbers in `core/src/test/**/MetricsThresholds.kt` (protected): ID switches 0 on crossings; M3: still-jitter **ratio** track / raw (RMS of the 2nd difference) ≤ 0.60 at 20 fps, 0.45 at 30, 0.25 at 60; stop overshoot < 0.10 h; \|lag\| < 0.5 frame. The absolute "still jitter < 1 px" belongs to M4 (OneEuro on top; the Kalman alone gives 1.37 px at 20 fps, h = 200 px, in the model) |
 | Real replays | from Share diagnostics, added as regression tests |
 | Decoding | golden test vs Python output, for both model sizes |
 | On phone | `docs/TEST_CHECKLIST.md` per milestone with pass criteria: taps pass through (no "Untrusted touch" in logcat), paused video → capture fps ≈ 0, `now − image.timestamp` 0–30 ms, dot A/B, rotate to landscape, lock screen → clean stop and new consent on restart, CPU banner, DRM app captures black (expected), permission-denied paths, two people cross, occlusion, sudden stop, 10-min soak |
@@ -555,7 +607,7 @@ Agents may not loosen asserted thresholds (protected files).
 | M1a | Rectangular model inputs end to end (import layout v2, meta v2, engine, HUD, diagnostics), rectangular models to download (`640x288`, `832x384`, `960x448`), timing statistics (p50/p95 per stage, result age, thermal state) in `summary.txt`; plan `docs/plans/M1.md`. Done in this PR; the one-thread LiteRT item is already true since M0b | import `832x384`, HUD `in 832x384 imp`; real ms / fps per model on one video; timing lines in the diagnostics |
 | M1b | Later: raw-output goldens and the golden decode test, allocation-free pure-Kotlin decoder (D2), benchmark screen with CSV and soak mode, a bundled landscape model with a per-geometry choice | real numbers for fps / ms / heat; no per-frame allocation in the decoder |
 | M2 | Img→View hardening: `FitCenter` extended and checked on the phone across rotation, cutout and resize events (no camera) | green dots exactly on heads in portrait and landscape |
-| M3 | Tracker + Kalman + synthetic tests (30 & 60 fps, idle gaps); IDs | red dots with IDs, stable when crossing |
+| M3 | **M3a** (done): tracker + Kalman in `core`, scenario tests S1-S14 (20/30/60 fps, idle gaps); **M3b**: the tracker in the app, IDs; plan `docs/plans/M3.md` | M3a nothing; M3b rings and brackets from tracks, IDs |
 | M4 | Forward prediction + OneEuro + handle-window lock + debug sheet | smooth dot, tap-to-lock, tuning sliders |
 | M5 | Thermal policy, perf pass, lifecycle/permission polish, replay mode | stable over 30 min |
 
@@ -573,7 +625,12 @@ One session per milestone; M4 may need a second session for tuning on the phone.
   **Debug marks** switch off and on (`docs/TEST_CHECKLIST.md`, M0c).
 - **People of 12–15 % of the video height stay undetected** at 640 (and far workers and the snow scene still
   score 0.00); the area crop is M0d (parked), rectangular inputs M1a (the phone numbers decide which size to use).
-- **Duplicate boxes on one person** were seen once (v0.1.37): dedupe before association, in M3.
+- **Duplicate boxes on one person** were seen once (v0.1.37): dedupe before association is in the tracker (IoU ≥
+  0.7). Not handled: duplicate boxes with IoU below 0.7 give two tracks on one person.
+- **Tracker limits (M3a, not asserted):** slow crossings in one row can swap ids (no appearance model); a person
+  missing for 0.5 s while moving at 2 h/s gets a new id; a person faster than about 1 h/s whose picture freezes
+  without a frozen frame gets a new id afterwards. Score numbers (`trackBirthScore` 0.25, `trackHighScore` 0.5) and
+  the other tracker defaults are tuned on the phone in M4.
 - **Unmerged branch `fix-export-model-deps`** holds a stricter export script (self-check against `predict()`,
   raw-output goldens, public-domain fixture); its raw-output goldens are needed for M1b.
 - **M1b:** raw-output goldens (script on `fix-export-model-deps`), pure decoder + golden test, benchmark screen, a
@@ -594,6 +651,21 @@ answers hard questions. Each change is verified in the session with `scripts/ver
 and always by GitHub Actions, which is the source of truth. The owner's laptop is not used for builds.
 
 ## 15. Changes
+- **v0.8 (M3a, 2026-11-16):** the tracker in `core`, documented as built (plan `docs/plans/M3.md`, Consults C1 to
+  C3). (A) §6.2: `HeadMeasurement` (stateless) and `HeadPointEstimator` (per track); offset EMA α 0.2 (was 0.1);
+  offsets learned against the plain mean of the five keypoints when all are visible; the fallback box point is
+  used whenever no keypoint can anchor the centre (was "fewer than 2 ever visible"); variance floor
+  `headMinMeanConfidence`. (B) §6.3 rewritten: three independent position/velocity filters (head x, head y,
+  height); one time rule `dtEff = min(dt, trackMaxDtMs)` with a gap step inflating the noise ×10 once; the
+  "NIS > 9.21 inflates Q" rule and any inflation on a miss are gone; dedupe before association; association with
+  a cost limit per stage (`trackMatchMaxCost` 0.7, `trackLowMatchMaxCost` 0.6) instead of "most pairs";
+  lifecycle (tentative, confirmed, lost, idle promotion, exit margin); ids never reused, `reset()` keeps the
+  counter; counters for the diagnostics; known limits. Numbers that differ from v0.7: velocity decay on a miss
+  τ **300 ms** (was 100 ms); longest time step `trackMaxDtMs` **250 ms** (was 100 ms); birth at score **0.25**
+  (was 0.6) and shown from the **third** consecutive hit (was 3 hits within 300 ms). (C) §9: scenarios S1 to S14
+  at 20/30/60 fps and 30 fps ± 30 %, asserted ratios (jitter track / raw ≤ 0.60 / 0.45 / 0.25), the absolute
+  "still jitter < 1 px" moved to M4. (D) §7.1: tracker config groups; §12: M3 split into M3a (done) and M3b;
+  §13: tracker limits, duplicate boxes with IoU below 0.7 not handled.
 - **v0.7 (M1a, 2026-11-15):** (A) rectangular model inputs end to end: accepted layout version 2 (`[1, 3, H, W]`, each
   side a multiple of 32, long/short at most `importMaxInputAspect` 4.0; rejection `input_aspect` replaces
   `input_not_square`), imported-model meta version 2 (`inputWidth`, `inputHeight`; v1 still read), `PoseEngine` /

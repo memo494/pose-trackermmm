@@ -473,6 +473,95 @@ class TrackerConfigTest {
             .isEqualTo(0.4f)
     }
 
+    @Test
+    fun associationFields_haveTheDocumentedDefaults() {
+        val config = TrackerConfig()
+
+        assertThat(config.maxTracks).isEqualTo(32)
+        assertThat(config.trackGateChi2).isEqualTo(9.21f)
+        assertThat(config.assocIouWeight).isEqualTo(0.5f)
+        assertThat(config.assocHeadWeight).isEqualTo(0.5f)
+        assertThat(config.assocHeadScaleRatio).isEqualTo(0.5f)
+        assertThat(config.dedupeIou).isEqualTo(0.7f)
+    }
+
+    @Test
+    fun associationFields_defaultsAreWithinTheirBounds() {
+        val config = TrackerConfig()
+
+        assertThat(config.maxTracks).isAtLeast(TrackerConfig.MIN_MAX_TRACKS)
+        assertThat(config.maxTracks).isAtMost(TrackerConfig.MAX_MAX_TRACKS)
+        assertWithin(config.trackGateChi2, TrackerConfig.MIN_TRACK_GATE_CHI2, TrackerConfig.MAX_TRACK_GATE_CHI2)
+        assertWithin(config.assocIouWeight, TrackerConfig.MIN_ASSOC_WEIGHT, TrackerConfig.MAX_ASSOC_WEIGHT)
+        assertWithin(config.assocHeadWeight, TrackerConfig.MIN_ASSOC_WEIGHT, TrackerConfig.MAX_ASSOC_WEIGHT)
+        assertWithin(
+            config.assocHeadScaleRatio,
+            TrackerConfig.MIN_ASSOC_HEAD_SCALE_RATIO,
+            TrackerConfig.MAX_ASSOC_HEAD_SCALE_RATIO,
+        )
+        assertWithin(config.dedupeIou, TrackerConfig.MIN_DEDUPE_IOU, TrackerConfig.MAX_DEDUPE_IOU)
+    }
+
+    @Test
+    fun associationFields_atTheirBounds_areAccepted() {
+        val low =
+            TrackerConfig(
+                maxTracks = TrackerConfig.MIN_MAX_TRACKS,
+                trackGateChi2 = TrackerConfig.MIN_TRACK_GATE_CHI2,
+                assocIouWeight = TrackerConfig.MIN_ASSOC_WEIGHT,
+                assocHeadWeight = TrackerConfig.MIN_ASSOC_WEIGHT,
+                assocHeadScaleRatio = TrackerConfig.MIN_ASSOC_HEAD_SCALE_RATIO,
+                dedupeIou = TrackerConfig.MIN_DEDUPE_IOU,
+            )
+        val high =
+            TrackerConfig(
+                maxTracks = TrackerConfig.MAX_MAX_TRACKS,
+                trackGateChi2 = TrackerConfig.MAX_TRACK_GATE_CHI2,
+                assocIouWeight = TrackerConfig.MAX_ASSOC_WEIGHT,
+                assocHeadWeight = TrackerConfig.MAX_ASSOC_WEIGHT,
+                assocHeadScaleRatio = TrackerConfig.MAX_ASSOC_HEAD_SCALE_RATIO,
+                dedupeIou = TrackerConfig.MAX_DEDUPE_IOU,
+            )
+
+        assertThat(low.maxTracks).isEqualTo(TrackerConfig.MIN_MAX_TRACKS)
+        assertThat(high.maxTracks).isEqualTo(TrackerConfig.MAX_MAX_TRACKS)
+        assertThat(high.dedupeIou).isEqualTo(TrackerConfig.MAX_DEDUPE_IOU)
+    }
+
+    @Test
+    fun associationFields_outsideTheirBounds_areRejected() {
+        val rejected =
+            listOf<() -> TrackerConfig>(
+                { TrackerConfig(maxTracks = TrackerConfig.MIN_MAX_TRACKS - 1) },
+                { TrackerConfig(maxTracks = TrackerConfig.MAX_MAX_TRACKS + 1) },
+                { TrackerConfig(trackGateChi2 = TrackerConfig.MIN_TRACK_GATE_CHI2 - 0.01f) },
+                { TrackerConfig(trackGateChi2 = TrackerConfig.MAX_TRACK_GATE_CHI2 + 0.01f) },
+                { TrackerConfig(assocIouWeight = 0.0f) },
+                { TrackerConfig(assocIouWeight = TrackerConfig.MAX_ASSOC_WEIGHT + 0.01f) },
+                { TrackerConfig(assocHeadWeight = 0.0f) },
+                { TrackerConfig(assocHeadWeight = TrackerConfig.MAX_ASSOC_WEIGHT + 0.01f) },
+                { TrackerConfig(assocHeadScaleRatio = 0.0f) },
+                { TrackerConfig(assocHeadScaleRatio = TrackerConfig.MAX_ASSOC_HEAD_SCALE_RATIO + 0.01f) },
+                { TrackerConfig(dedupeIou = TrackerConfig.MIN_DEDUPE_IOU - 0.01f) },
+                { TrackerConfig(dedupeIou = TrackerConfig.MAX_DEDUPE_IOU + 0.01f) },
+            )
+
+        for (build in rejected) {
+            assertThrows(IllegalArgumentException::class.java) { build() }
+        }
+    }
+
+    @Test
+    fun associationFields_nanAndInfinity_areRejected() {
+        for (value in listOf(Float.NaN, Float.POSITIVE_INFINITY, Float.NEGATIVE_INFINITY)) {
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(trackGateChi2 = value) }
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(assocIouWeight = value) }
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(assocHeadWeight = value) }
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(assocHeadScaleRatio = value) }
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(dedupeIou = value) }
+        }
+    }
+
     private fun assertWithin(
         value: Float,
         min: Float,

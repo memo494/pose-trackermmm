@@ -184,10 +184,20 @@ class AssociationCostTest {
     /** A track and a detection with the same box (0, 0, 40, 100) and the head at (20, 10); variance 25 px^2. */
     private fun scene(): FloatArray =
         floatArrayOf(
-            0f, 0f, 40f, 100f,
-            0f, 0f, 40f, 100f,
-            20f, 10f, 20f, 10f,
-            25f, 25f,
+            0f,
+            0f,
+            40f,
+            100f,
+            0f,
+            0f,
+            40f,
+            100f,
+            20f,
+            10f,
+            20f,
+            10f,
+            25f,
+            25f,
             100f,
         )
 

@@ -119,8 +119,7 @@ class DetectionDedupeTest {
     private fun box(
         leftImg: Float,
         score: Float,
-    ): PoseDetection =
-        PoseDetection(leftImg, 0f, leftImg + BOX_SIDE, BOX_SIDE, score, FloatArray(KEYPOINT_FLOATS), FloatArray(KEYPOINTS))
+    ): PoseDetection = PoseDetection(leftImg, 0f, leftImg + BOX_SIDE, BOX_SIDE, score, FloatArray(KEYPOINT_FLOATS), FloatArray(KEYPOINTS))
 
     private companion object {
         const val BOX_SIDE = 100f

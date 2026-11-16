@@ -7,16 +7,16 @@ import java.util.Arrays
  * `O(n^2 m)` for `n <= m`), no matrix library, no allocation after construction. [maxRows] x [maxCols] is
  * the capacity (tracks x detections); the cost matrix is one row-major [FloatArray] with stride [maxCols].
  *
- * **Objective (see [Assigner]):** most non-forbidden pairs first, then least total cost. Inside the solver a
- * forbidden pair costs `BIG = n * maxReal + 1`, where `n = min(rows, cols)` and `maxReal` is the largest real
- * (finite) cost of this call. The solver saturates the smaller side, so an assignment with `f` forbidden pairs
- * and `n - f` real pairs costs `realSum + f * BIG` with `0 <= realSum <= (n - f) * maxReal < BIG`. Hence one
- * more forbidden pair always costs more than any possible saving in real cost, and the optimum has the fewest
- * forbidden pairs, which is the most real pairs (every set of real pairs extends to a saturating assignment,
- * because the matrix is complete once forbidden pairs are priced); among assignments with the same count the
- * `f * BIG` part is equal, so the smallest real total wins. With `maxReal <= MAX_COST` (1e6) and `n <= 128`,
- * BIG is below 1.3e8, far inside the exact range of a `Double` next to float costs, so rounding cannot reorder
- * the two levels. Forbidden pairs that the solver picks are dropped from the answer.
+ * **Objective (see [Assigner]):** the largest total gain `sum(maxCost - cost)` over eligible pairs (finite cost
+ * below `maxCost`). Inside the solver every ineligible pair costs exactly `maxCost` and every eligible pair its
+ * own cost, and the smaller side is saturated (every row of the algorithm gets a column). A saturating
+ * assignment whose eligible pairs are `E` costs `n * maxCost - sum_E(maxCost - cost)`, with `n = min(rows, cols)`
+ * fixed, so the cheapest saturating assignment is the one with the largest gain over its eligible pairs. Every
+ * set of eligible pairs extends to a saturating assignment (the matrix is complete once ineligible pairs are
+ * priced at `maxCost`), and the extension only adds ineligible pairs, whose gain is 0, so the maximum over
+ * saturating assignments equals the maximum over all sets of eligible pairs. Ineligible pairs that the solver
+ * picks are dropped from the answer. With `maxCost` and every cost at most `MAX_COST` (1e6) and `n <= 128`,
+ * all sums stay below 1.3e8, far inside the exact range of a `Double` next to float costs.
  *
  * **Ties:** rows are added in index order and every scan over columns uses a strict `<`, so among equal
  * choices the lower column index (and, because rows are processed in index order, the lower row index) is
@@ -54,9 +54,13 @@ class HungarianAssigner(
     override fun assign(
         rows: Int,
         cols: Int,
+        maxCost: Float,
         rowToCol: IntArray,
         colToRow: IntArray,
     ): Int {
+        require(maxCost.isFinite() && maxCost > 0f && maxCost <= Assigner.MAX_COST) {
+            "maxCost $maxCost outside (0, ${Assigner.MAX_COST}]"
+        }
         require(rows in 0..maxRows) { "rows $rows outside [0, $maxRows]" }
         require(cols in 0..maxCols) { "cols $cols outside [0, $maxCols]" }
         require(rowToCol.size >= rows) { "rowToCol has ${rowToCol.size} entries for $rows rows" }
@@ -65,21 +69,19 @@ class HungarianAssigner(
         Arrays.fill(colToRow, 0, cols, Assigner.UNASSIGNED)
         if (rows == 0 || cols == 0) return 0
 
-        val maxReal = largestRealCost(rows, cols)
+        validateCosts(rows, cols)
         val transposed = rows > cols
         val n = if (transposed) cols else rows
         val m = if (transposed) rows else cols
-        val big = n * maxReal + 1.0
-        solve(n, m, transposed, big)
-        return extract(m, transposed, rowToCol, colToRow)
+        solve(n, m, transposed, maxCost)
+        return extract(m, transposed, maxCost, rowToCol, colToRow)
     }
 
-    /** Checks every real cost of the window and returns the largest one (0 when there is none). */
-    private fun largestRealCost(
+    /** Checks that every real (finite) cost of the window is in `[0, MAX_COST]`; `NaN` and [Assigner.FORBIDDEN] are allowed. */
+    private fun validateCosts(
         rows: Int,
         cols: Int,
-    ): Double {
-        var largest = 0f
+    ) {
         for (r in 0 until rows) {
             for (c in 0 until cols) {
                 val cost = costs[r * maxCols + c]
@@ -87,22 +89,20 @@ class HungarianAssigner(
                     require(cost >= 0f && cost <= Assigner.MAX_COST) {
                         "cost $cost at ($r, $c) outside [0, ${Assigner.MAX_COST}]"
                     }
-                    if (cost > largest) largest = cost
                 }
             }
         }
-        return largest.toDouble()
     }
 
-    /** Cost of algorithm row [i] with algorithm column [j] (0-based); a forbidden or `NaN` pair costs [big]. */
+    /** Cost of algorithm row [i] with algorithm column [j] (0-based); an ineligible pair costs [maxCost]. */
     private fun pairCost(
         i: Int,
         j: Int,
         transposed: Boolean,
-        big: Double,
+        maxCost: Float,
     ): Double {
         val cost = if (transposed) costs[j * maxCols + i] else costs[i * maxCols + j]
-        return if (cost < Assigner.FORBIDDEN) cost.toDouble() else big
+        return if (cost < maxCost) cost.toDouble() else maxCost.toDouble()
     }
 
     /** Saturates the [n] algorithm rows over [m] >= [n] columns; the answer is left in [matchedRow]. */
@@ -110,7 +110,7 @@ class HungarianAssigner(
         n: Int,
         m: Int,
         transposed: Boolean,
-        big: Double,
+        maxCost: Float,
     ) {
         Arrays.fill(rowPotential, 0, n + 1, 0.0)
         Arrays.fill(colPotential, 0, m + 1, 0.0)
@@ -127,7 +127,7 @@ class HungarianAssigner(
                 var j1 = 0
                 for (j in 1..m) {
                     if (!visited[j]) {
-                        val slack = pairCost(i0 - 1, j - 1, transposed, big) - rowPotential[i0] - colPotential[j]
+                        val slack = pairCost(i0 - 1, j - 1, transposed, maxCost) - rowPotential[i0] - colPotential[j]
                         if (slack < minSlack[j]) {
                             minSlack[j] = slack
                             pathFrom[j] = j0
@@ -157,10 +157,11 @@ class HungarianAssigner(
         }
     }
 
-    /** Copies the real pairs of [matchedRow] into the caller's arrays, in track x detection orientation. */
+    /** Copies the eligible pairs of [matchedRow] into the caller's arrays, in track x detection orientation. */
     private fun extract(
         m: Int,
         transposed: Boolean,
+        maxCost: Float,
         rowToCol: IntArray,
         colToRow: IntArray,
     ): Int {
@@ -170,7 +171,7 @@ class HungarianAssigner(
             if (i != 0) {
                 val row = if (transposed) j - 1 else i - 1
                 val col = if (transposed) i - 1 else j - 1
-                if (costs[row * maxCols + col] < Assigner.FORBIDDEN) {
+                if (costs[row * maxCols + col] < maxCost) {
                     rowToCol[row] = col
                     colToRow[col] = row
                     pairs++

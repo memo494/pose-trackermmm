@@ -75,8 +75,8 @@ class DetectionDedupe(
         }
     }
 
-    /** The score used for ranking: a `NaN` score ranks last, so it can never suppress a detection with a real score. */
-    private fun rankKey(detection: PoseDetection): Float = if (detection.score.isNaN()) Float.NEGATIVE_INFINITY else detection.score
+    /** The score used for ranking: a non-finite score (`NaN`, `+inf`, `-inf`) ranks last, so it can never suppress a real one. */
+    private fun rankKey(detection: PoseDetection): Float = if (detection.score.isFinite()) detection.score else Float.NEGATIVE_INFINITY
 
     private fun overlapsAKeptOne(
         detections: List<PoseDetection>,

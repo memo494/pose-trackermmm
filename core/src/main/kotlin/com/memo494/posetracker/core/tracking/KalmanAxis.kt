@@ -60,9 +60,10 @@ class KalmanAxis {
 
     /**
      * Moves the state forward by [dtS] seconds: constant velocity plus process noise `q = sigmaAccel² · inflate`.
-     * [inflate] is the adaptive-noise factor (1 normally, 10 for one step after a gate failure). A [dtS] that
-     * is not finite and positive (a repeated timestamp, a clock going backwards), a negative or non-finite
-     * [sigmaAccel], or an [inflate] that is not finite and positive is a no-op.
+     * [inflate] is the process-noise factor (1 normally; the tracker passes `trackGapNoiseInflate` for a gap step,
+     * a step longer than `trackMaxDtMs`). A [dtS] that is not finite and positive (a repeated timestamp, a clock
+     * going backwards), a negative or non-finite [sigmaAccel], or an [inflate] that is not finite and positive is
+     * a no-op.
      */
     fun predict(
         dtS: Float,

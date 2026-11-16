@@ -140,6 +140,17 @@ class DetectionDedupeTest {
         assertThat(keptList(count)).containsExactly(1)
     }
 
+    @Test
+    fun anInfiniteScore_neverSuppressesADetectionWithARealScore() {
+        val plusInfinity = dedupe.dedupe(listOf(box(0f, Float.POSITIVE_INFINITY), box(2f, 0.9f)), kept)
+        val plusKept = keptList(plusInfinity)
+        val minusInfinity = dedupe.dedupe(listOf(box(0f, Float.NEGATIVE_INFINITY), box(2f, 0.9f)), kept)
+        val minusKept = keptList(minusInfinity)
+
+        assertThat(plusKept).containsExactly(1)
+        assertThat(minusKept).containsExactly(1)
+    }
+
     private fun keptList(count: Int): List<Int> = kept.take(count)
 
     /** A 100x100 person box whose left edge is [leftImg], with no useful keypoints. */

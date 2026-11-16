@@ -7,6 +7,7 @@ import com.memo494.posetracker.core.model.PoseDetection
 import com.memo494.posetracker.core.model.TimestampSource
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
+import kotlin.math.abs
 
 /** Unit tests of [Tracker] (docs/plans/M3.md, T6); the acceptance scenarios are in `TrackerScenarioTest`. */
 class TrackerTest {
@@ -355,6 +356,157 @@ class TrackerTest {
         assertThat(tracker.birthCount).isEqualTo(2)
     }
 
+    @Test
+    fun aMatchedDetectionWithAZeroVariance_isAMissAndTheTrackStaysFinite() {
+        for (k in 0 until 3) feed(tracker, k, person(600f))
+        val control = Tracker(config)
+        for (k in 0 until 3) feed(control, k, person(600f))
+        val tiny = zeroVarianceDetection()
+        val head = HeadPoint()
+        HeadMeasurement.of(tiny, config, head)
+        // Precondition: the box is usable, yet the variance underflowed to zero, and the pair is matched (cost 0.5).
+        assertThat(head.valid).isTrue()
+        assertThat(head.varianceImg2).isEqualTo(0f)
+
+        val list = feed(tracker, 3, tiny)
+        val expected = feed(control, 3)
+
+        assertThat(list.size).isEqualTo(1)
+        assertThat(list.state(0)).isEqualTo(TrackState.LOST)
+        assertThat(list.lostMs(0)).isWithin(0.5f).of(STEP_MS)
+        assertThat(list.headXImg(0).isFinite()).isTrue()
+        assertThat(list.headYImg(0).isFinite()).isTrue()
+        assertThat(list.heightImg(0)).isEqualTo(expected.heightImg(0))
+        assertThat(list.headXImg(0)).isEqualTo(expected.headXImg(0))
+        assertThat(list.headYImg(0)).isEqualTo(expected.headYImg(0))
+        assertThat(list.boxLeftImg(0)).isEqualTo(expected.boxLeftImg(0))
+        assertThat(tracker.recoverCount).isEqualTo(0)
+    }
+
+    @Test
+    fun withOneConfirmHit_aTrackIsShownFromItsFirstDetection() {
+        val once = Tracker(TrackerConfig(trackConfirmHits = 1))
+
+        val list = feed(once, 0, person(600f))
+
+        assertThat(list.size).isEqualTo(1)
+        assertThat(list.state(0)).isEqualTo(TrackState.CONFIRMED)
+        assertThat(list.isShown(0)).isTrue()
+        assertThat(once.birthCount).isEqualTo(1)
+        assertThat(once.confirmCount).isEqualTo(1)
+        assertThat(once.mostShownAtOnce).isEqualTo(1)
+    }
+
+    @Test
+    fun aLostTrackCoastingOffTheLeftEdge_isRemovedInTheFrameItPassesTheMargin() {
+        val emptyFrames = coastOffTheImage(startXImg = 120f, startYImg = ROW_Y, stepXImg = -COAST_STEP, stepYImg = 0f)
+
+        assertThat(emptyFrames).isLessThan(MAX_COAST_FRAMES)
+    }
+
+    @Test
+    fun aLostTrackCoastingOffTheTopEdge_isRemovedInTheFrameItPassesTheMargin() {
+        val emptyFrames = coastOffTheImage(startXImg = 600f, startYImg = 120f, stepXImg = 0f, stepYImg = -COAST_STEP)
+
+        assertThat(emptyFrames).isLessThan(MAX_COAST_FRAMES)
+    }
+
+    @Test
+    fun aLostTrackCoastingOffTheBottomEdge_isRemovedInTheFrameItPassesTheMargin() {
+        val startYImg = IMAGE_HEIGHT - 120f
+
+        val emptyFrames = coastOffTheImage(startXImg = 600f, startYImg = startYImg, stepXImg = 0f, stepYImg = COAST_STEP)
+
+        assertThat(emptyFrames).isLessThan(MAX_COAST_FRAMES)
+    }
+
+    @Test
+    fun aLostTrackCoastingInsideTheImage_staysUntilTheMaxLostTime() {
+        val local = Tracker(config)
+        for (k in 0 until COAST_HITS) local.update(frameAt(START_NS + k * STEP_NS, personAt(600f - k * COAST_STEP, ROW_Y)))
+
+        var list: TrackList = local.update(frameAt(START_NS + COAST_HITS * STEP_NS))
+        for (k in 1 until MAX_COAST_FRAMES) list = local.update(frameAt(START_NS + (COAST_HITS + k) * STEP_NS))
+
+        assertThat(list.size).isEqualTo(1)
+        assertThat(list.state(0)).isEqualTo(TrackState.LOST)
+        assertThat(local.removeCount).isEqualTo(0)
+    }
+
+    @Test
+    fun aGapStep_correctsMoreThanAnOrdinaryStep_becauseItsNoiseIsInflated() {
+        val ordinary = Tracker(config)
+        val gap = Tracker(config)
+        for (k in 0 until 3) {
+            feed(ordinary, k, person(600f))
+            feed(gap, k, person(600f))
+        }
+        val lastHitNs = START_NS + 2 * STEP_NS
+        val maxDtNs = config.trackMaxDtMs.toLong() * NANOS_PER_MS.toLong()
+        val displaced = person(600f + DISPLACEMENT)
+
+        val afterOrdinary = ordinary.update(frameAt(lastHitNs + maxDtNs, displaced))
+        val afterGap = gap.update(frameAt(lastHitNs + GAP_NS, displaced))
+
+        assertThat(afterOrdinary.state(0)).isEqualTo(TrackState.CONFIRMED)
+        assertThat(afterGap.state(0)).isEqualTo(TrackState.CONFIRMED)
+        val ordinaryErrorImg = abs(afterOrdinary.headXImg(0) - (600f + DISPLACEMENT))
+        val gapErrorImg = abs(afterGap.headXImg(0) - (600f + DISPLACEMENT))
+        assertThat(ordinaryErrorImg).isGreaterThan(MIN_ORDINARY_ERROR)
+        assertThat(gapErrorImg).isLessThan(ordinaryErrorImg)
+    }
+
+    @Test
+    fun aLostTrackWhoseHeightShrinksToZero_isRemovedBeforeTheMaxLostTimeAndCounted() {
+        val heights = floatArrayOf(100f, 80f, 60f, 40f)
+        for ((k, heightImg) in heights.withIndex()) feed(tracker, k, person(600f, heightImg = heightImg))
+        assertThat(tracker.confirmCount).isEqualTo(1)
+        assertThat(tracker.removeCount).isEqualTo(0)
+
+        var emptyFrames = 0
+        while (emptyFrames < MAX_COAST_FRAMES && feed(tracker, heights.size + emptyFrames).size > 0) emptyFrames++
+
+        // The head stays well inside the image, so only the health check can remove it, and 8 frames are 400 ms < 800 ms.
+        assertThat(emptyFrames).isLessThan(MAX_COAST_FRAMES)
+        assertThat(emptyFrames * STEP_MS).isLessThan(config.trackMaxLostMs)
+        assertThat(tracker.removeCount).isEqualTo(1)
+    }
+
+    /**
+     * Feeds [COAST_HITS] detections that move by (`stepXImg`, `stepYImg`) per frame from (`startXImg`, `startYImg`),
+     * then empty frames until the track is gone; returns how many empty frames left it alive (at most [MAX_COAST_FRAMES]).
+     */
+    private fun coastOffTheImage(
+        startXImg: Float,
+        startYImg: Float,
+        stepXImg: Float,
+        stepYImg: Float,
+    ): Int {
+        val local = Tracker(config)
+        for (k in 0 until COAST_HITS) {
+            local.update(frameAt(START_NS + k * STEP_NS, personAt(startXImg + k * stepXImg, startYImg + k * stepYImg)))
+        }
+        assertThat(local.confirmCount).isEqualTo(1)
+        var emptyFrames = 0
+        while (emptyFrames < MAX_COAST_FRAMES && local.update(frameAt(START_NS + (COAST_HITS + emptyFrames) * STEP_NS)).size > 0) {
+            emptyFrames++
+        }
+        assertThat(local.removeCount).isEqualTo(if (emptyFrames < MAX_COAST_FRAMES) 1 else 0)
+        return emptyFrames
+    }
+
+    /** A person at the head point (`xImg`, `yImg`) with the default height; its box edges follow the head. */
+    private fun personAt(
+        xImg: Float,
+        yImg: Float,
+    ) = HeadTestDetections.person(xImg, yImg, HEIGHT)
+
+    /** A box 1e-25 px high at the top of the image whose five head keypoints sit on the head of [person]: variance 0 in float. */
+    private fun zeroVarianceDetection(): PoseDetection {
+        val keypointsXyImg = FloatArray(TrackerConfig.POSE_KEYPOINT_COUNT * 2) { if (it % 2 == 0) 600f else ROW_Y }
+        return PoseDetection(590f, 0f, 610f, TINY_HEIGHT, 0.9f, keypointsXyImg, HeadTestDetections.allHead(0.9f))
+    }
+
     /** A frame with the capture time [timestampNs]. */
     private fun frameAt(
         timestampNs: Long,
@@ -413,5 +565,11 @@ class TrackerTest {
         const val MAX_EMPTY_FRAMES = 200
         const val EXPECTED_SPEED = 400f
         const val VELOCITY_TOLERANCE = 0.1f
+        const val COAST_HITS = 4
+        const val COAST_STEP = 30f
+        const val MAX_COAST_FRAMES = 8
+        const val DISPLACEMENT = 30f
+        const val MIN_ORDINARY_ERROR = 0.1f
+        const val TINY_HEIGHT = 1e-25f
     }
 }

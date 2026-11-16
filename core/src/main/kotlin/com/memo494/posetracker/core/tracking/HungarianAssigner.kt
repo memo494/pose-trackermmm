@@ -18,11 +18,11 @@ import java.util.Arrays
  * picks are dropped from the answer. With `maxCost` and every cost at most `MAX_COST` (1e6) and `n <= 128`,
  * all sums stay below 1.3e8, far inside the exact range of a `Double` next to float costs.
  *
- * **Ties:** rows are added in index order and every scan over columns uses a strict `<`, so among equal
- * choices the lower column index (and, because rows are processed in index order, the lower row index) is
- * taken. When there are more rows than columns the problem is solved transposed (the smaller side as the rows
- * of the algorithm), which gives the same rule with the roles swapped: the lower track index wins. The result
- * only depends on the matrix, so the same input always gives the same output.
+ * **Ties:** the result is deterministic: it depends only on the matrix, so the same input always gives the
+ * same pairs. Among assignments with the same total gain the solver's scan order decides (rows are added in
+ * index order, every scan over columns uses a strict `<`, and a problem with more rows than columns is solved
+ * transposed); no rule such as "the lower track index wins" is promised. For example `[[0.25, 0.125],
+ * [0.125, 0.0]]` with a limit of 0.7 gives `rowToCol = [1, 0]`, although `[0, 1]` costs the same.
  */
 class HungarianAssigner(
     override val maxRows: Int,

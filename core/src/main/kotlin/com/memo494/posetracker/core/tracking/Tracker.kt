@@ -22,7 +22,7 @@ import com.memo494.posetracker.core.model.PoseDetection
  *    is removed after `trackMaxLostMs` or when its head point is more than `trackExitMarginRatio` heights
  *    outside the image;
  * 7. an unmatched detection with a score of at least `trackBirthScore` starts a tentative track while fewer
- *    than `maxTracks` tracks exist;
+ *    than `maxTracks` tracks exist (confirmed at once when `trackConfirmHits` is 1);
  * 8. [onIdle] promotes the tentative tracks after `trackIdlePromoteMs` without a frame.
  *
  * Thread rule: not thread-safe, one capture thread calls everything. **Allocation-free after construction**
@@ -57,13 +57,13 @@ class Tracker(
         var offRight = 0f
         var offBottom = 0f
 
-        fun boxLeft(): Float = x.position + offLeft * height.position
+        fun boxLeftImg(): Float = x.position + offLeft * height.position
 
-        fun boxTop(): Float = y.position + offTop * height.position
+        fun boxTopImg(): Float = y.position + offTop * height.position
 
-        fun boxRight(): Float = x.position + offRight * height.position
+        fun boxRightImg(): Float = x.position + offRight * height.position
 
-        fun boxBottom(): Float = y.position + offBottom * height.position
+        fun boxBottomImg(): Float = y.position + offBottom * height.position
 
         /** True when position, height and covariances are finite and the height is positive. */
         fun isHealthy(): Boolean =
@@ -234,20 +234,20 @@ class Tracker(
         if (trackCount == 0 || candidateCount == 0) return
         for (row in 0 until trackCount) {
             val track = tracks[order[stageTracks[row]]]
-            val left = track.boxLeft()
-            val top = track.boxTop()
-            val right = track.boxRight()
-            val bottom = track.boxBottom()
+            val trackLeftImg = track.boxLeftImg()
+            val trackTopImg = track.boxTopImg()
+            val trackRightImg = track.boxRightImg()
+            val trackBottomImg = track.boxBottomImg()
             for (col in 0 until candidateCount) {
                 val index = candidates[col]
                 val detection = detections[index]
                 val head = heads[index]
                 val cost =
                     AssociationCost.cost(
-                        left,
-                        top,
-                        right,
-                        bottom,
+                        trackLeftImg,
+                        trackTopImg,
+                        trackRightImg,
+                        trackBottomImg,
                         detection.boxLeftImg,
                         detection.boxTopImg,
                         detection.boxRightImg,
@@ -303,13 +303,16 @@ class Tracker(
         activeCount = survivors
     }
 
-    /** Folds a matched detection into [track]; false when its head point was unusable (then it counts as a miss). */
+    /**
+     * Folds a matched detection into [track]; false when its head point was unusable (not valid, or a variance
+     * that is not finite and positive), checked before any filter changes; then it counts as a miss.
+     */
     private fun applyHit(
         track: Track,
         detection: PoseDetection,
     ): Boolean {
         track.estimator.update(detection, point)
-        if (!point.valid) return false
+        if (!point.valid || !(point.varianceImg2 > 0f && point.varianceImg2.isFinite())) return false
         val boxHeightImg = detection.boxBottomImg - detection.boxTopImg
         val heightNoiseImg = config.trackHeightNoiseRatio * track.height.position
         track.x.update(point.headXImg, point.varianceImg2)
@@ -344,10 +347,10 @@ class Tracker(
         track.y.decayVelocity(dteS, missTauS)
         track.height.decayVelocity(dteS, missTauS)
         if (track.lostMs > config.trackMaxLostMs) return false
-        val margin = config.trackExitMarginRatio * track.height.position
-        val x = track.x.position
-        val y = track.y.position
-        return !(x < -margin || x > frame.widthImg + margin || y < -margin || y > frame.heightImg + margin)
+        val marginImg = config.trackExitMarginRatio * track.height.position
+        val xImg = track.x.position
+        val yImg = track.y.position
+        return !(xImg < -marginImg || xImg > frame.widthImg + marginImg || yImg < -marginImg || yImg > frame.heightImg + marginImg)
     }
 
     private fun setOffsets(
@@ -403,11 +406,16 @@ class Tracker(
         if (!started) return false
         setOffsets(track, detection, boxHeightImg)
         track.id = nextId++
-        track.state = TrackState.TENTATIVE
         track.hits = 1
         track.lostMs = 0f
         track.score = detection.score
         track.headEstimated = point.estimated
+        if (config.trackConfirmHits <= 1) {
+            track.state = TrackState.CONFIRMED
+            confirmCount++
+        } else {
+            track.state = TrackState.TENTATIVE
+        }
         return true
     }
 
@@ -438,13 +446,13 @@ class Tracker(
 
         override fun velocityYImgPerS(index: Int): Float = at(index).y.velocity
 
-        override fun boxLeftImg(index: Int): Float = at(index).boxLeft()
+        override fun boxLeftImg(index: Int): Float = at(index).boxLeftImg()
 
-        override fun boxTopImg(index: Int): Float = at(index).boxTop()
+        override fun boxTopImg(index: Int): Float = at(index).boxTopImg()
 
-        override fun boxRightImg(index: Int): Float = at(index).boxRight()
+        override fun boxRightImg(index: Int): Float = at(index).boxRightImg()
 
-        override fun boxBottomImg(index: Int): Float = at(index).boxBottom()
+        override fun boxBottomImg(index: Int): Float = at(index).boxBottomImg()
 
         override fun heightImg(index: Int): Float = at(index).height.position
 

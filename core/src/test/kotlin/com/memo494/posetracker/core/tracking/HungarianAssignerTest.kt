@@ -212,6 +212,20 @@ class HungarianAssignerTest {
     }
 
     @Test
+    fun equalOptima_areDecidedByTheScanOrder_andRepeatably() {
+        // Both full assignments cost 0.25 (0.25 + 0.0 and 0.125 + 0.125); the solver's scan order takes the second.
+        val matrix = arrayOf(floatArrayOf(0.25f, 0.125f), floatArrayOf(0.125f, 0.0f))
+
+        val first = solve(assigner, matrix, maxCost = TIE_LIMIT)
+        val second = solve(assigner, matrix, maxCost = TIE_LIMIT)
+
+        assertThat(first.rowToCol.toList()).containsExactly(1, 0).inOrder()
+        assertThat(first.colToRow.toList()).containsExactly(1, 0).inOrder()
+        assertThat(second.rowToCol.toList()).isEqualTo(first.rowToCol.toList())
+        assertThat(second.colToRow.toList()).isEqualTo(first.colToRow.toList())
+    }
+
+    @Test
     fun theSameInputAlwaysGivesTheSameOutput_onOneInstanceAndOnAFreshOne() {
         val matrix = randomMatrix(Random(SEED), rows = 6, cols = 5, forbiddenShare = 0.3f)
 
@@ -474,6 +488,7 @@ class HungarianAssignerTest {
         const val SEED = 20_261_116L
         const val SENTINEL = -99
         const val LIMIT = 100f
+        const val TIE_LIMIT = 0.7f
         const val LIMIT_STEPS = 60
         const val LIMIT_GRID = 0.05f
         const val LIMIT_OFFSET = 0.0137f

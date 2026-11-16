@@ -74,7 +74,8 @@ package com.memo494.posetracker.core
  * @property trackBirthScore a detection that matches no track starts a new track only with at least this score
  *   (unitless), in [[MIN_TRACK_SCORE], [MAX_TRACK_SCORE]]; weaker detections can keep a track alive but never start one.
  * @property trackConfirmHits matched frames, counting the first, after which a tentative track becomes confirmed
- *   and is shown, in frames, in [[MIN_TRACK_CONFIRM_HITS], [MAX_TRACK_CONFIRM_HITS]].
+ *   and is shown, in frames, in [[MIN_TRACK_CONFIRM_HITS], [MAX_TRACK_CONFIRM_HITS]]; 1 = a new track is confirmed
+ *   (and shown) at once, from its first detection.
  * @property trackIdlePromoteMs idle time in milliseconds (time since the newest frame arrived) at which tentative
  *   tracks become confirmed without further frames (a still screen sends no frames), in
  *   [[MIN_TRACK_DURATION_MS], [MAX_TRACK_DURATION_MS]]; see [trackIdlePromoteNs].
@@ -83,8 +84,9 @@ package com.memo494.posetracker.core
  * @property trackMaxDtMs longest time step in milliseconds the tracker predicts over in one frame; a longer step
  *   is predicted as this long and counts as a gap step (see [trackGapNoiseInflate]), in
  *   [[MIN_TRACK_MAX_DT_MS], [MAX_TRACK_MAX_DT_MS]].
- * @property trackGapNoiseInflate factor (unitless) on the process noise of the one predict step that follows a gap
- *   step, in [[MIN_TRACK_GAP_NOISE_INFLATE], [MAX_TRACK_GAP_NOISE_INFLATE]]; 1 = no inflation.
+ * @property trackGapNoiseInflate factor (unitless) on the process noise of the gap step itself (the predict step of
+ *   a frame that came more than [trackMaxDtMs] after the previous one), in
+ *   [[MIN_TRACK_GAP_NOISE_INFLATE], [MAX_TRACK_GAP_NOISE_INFLATE]]; 1 = no inflation.
  * @property trackMissVelocityTauMs time constant in milliseconds with which the velocity of a track without a
  *   matching detection decays (`exp(-dt / tau)`), in [[MIN_TRACK_DURATION_MS], [MAX_TRACK_DURATION_MS]].
  * @property trackAccelSigmaRatio standard deviation of the head's acceleration (process noise) as a multiple of the

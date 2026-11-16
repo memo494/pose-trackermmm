@@ -105,7 +105,7 @@ def exit_right(fps, jit, seed, c):
     fr = make_scene([P], 3, fps, seed, jit, **N); m, av, tr = run(fr, c)
     late = [f['t'] - 1.0 for f in m.f if f['t'] > 1.0 and f['tracks']]
     beyond = max([max(-t['x'], t['x'] - W, -t['y'], t['y'] - 610) / t['h'] for v in av for t in v] + [-9.0])
-    return dict(shownAfterS=max(late + [0.0]), beyondInH=beyond, ids=ids_made(tr))
+    return dict(shownAfterS=max(late + [0.0]), beyondInH=beyond, ids=ids_made(tr), coverage=m.coverage(1, 2))
 
 
 def duplicate(fps, jit, seed, c):

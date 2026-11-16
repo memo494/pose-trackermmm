@@ -54,6 +54,8 @@ sessions, so CI is the build.
   steady scores). The owner's content may flicker, jitter and duplicate differently; the first phone test of
   M3b and a recorded replay (planned: `replay.json` in the diagnostics) are the check.
 - **Allocation-freeness of `Tracker.update`** by measurement (checked by reading, lead and reviewer).
+- **Degenerate boxes.** A matched detection whose box is far lower than a pixel can spoil a track's learned
+  head offsets (the track then leaves the image and is removed; no crash). M3b T1 refuses such boxes.
 
 ## Open items / proposals
 - Follow-up for the model sweep tool (review of PR #9, OK WITH FIXES): stop on duplicate reference boxes, a

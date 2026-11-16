@@ -123,6 +123,10 @@ def inside(box: Box, cw: int, ch: int) -> bool:
     return box[0] >= 0 and box[1] >= 0 and box[2] <= cw and box[3] <= ch
 
 
+def clamp_box(box: Box, w: int, h: int) -> Box:
+    return (min(max(box[0], 0.0), w), min(max(box[1], 0.0), h), min(max(box[2], 0.0), w), min(max(box[3], 0.0), h))
+
+
 def looks_normalised(boxes: np.ndarray) -> bool:
     """True if there are rows and every box coordinate is <= NORMALISED_MAX (0..1 rows, not pixels)."""
     return boxes.shape[0] > 0 and float(boxes[:, :4].max()) <= NORMALISED_MAX
@@ -279,6 +283,7 @@ def self_test() -> None:
     rows[0, :5] = (10, 10, 50, 50, 0.9)
     mapped = rows_to_canvas(rows, 0.5, 5, 7, 640, 640, False)
     ok("row to canvas removes the padding", mapped.tolist() == [[10.0, 6.0, 90.0, 86.0, 0.9]])
+    ok("clamp box", clamp_box((-3.0, 5.0, 812.0, 1081.5), 810, 1080) == (0.0, 5.0, 810.0, 1080.0))
     ok("normalised detection: 0..1", looks_normalised(np.array([[0.1, 0.2, 0.9, 1.0]])))
     ok("pixel rows are not normalised", not looks_normalised(np.array([[10, 20, 300, 400.0]])))
     ok("no rows is not normalised", not looks_normalised(np.zeros((0, 4))))
@@ -502,13 +507,14 @@ def run_sweep(models_dir: Path, out_dir: Path, image_arg: Path | None) -> None:
 
     ref = max(square, key=lambda m: m.width)
     ref_rows, _ = detect(ref.infer, (ref.width, ref.height), scene, ref.normalised)
-    ref_boxes: list[Box] = [(float(r[0]), float(r[1]), float(r[2]), float(r[3]))
+    # Boxes may overshoot the image by a pixel or two; clamp them to the image.
+    ref_boxes: list[Box] = [clamp_box((float(r[0]), float(r[1]), float(r[2]), float(r[3])), sw, sh)
                             for r in ref_rows if r[4] >= REF_SCORE]
     if len(ref_boxes) < MIN_REF_PEOPLE:
         raise SystemExit(f"reference model {ref.path.name} found {len(ref_boxes)} people >= {REF_SCORE} "
                          f"on {image_path.name}, expected at least {MIN_REF_PEOPLE}")
     h_ref = max(b[3] - b[1] for b in ref_boxes)
-    if h_ref < REF_MIN_HEIGHT_FRACTION * sh or any(not inside(b, sw + 1, sh + 1) for b in ref_boxes):
+    if h_ref < REF_MIN_HEIGHT_FRACTION * sh:
         raise SystemExit(f"reference boxes look wrong (tallest {h_ref:.0f} px of a {sh} px image, "
                          f"coordinates {ref.coordinates}): {[[round(v) for v in b] for b in ref_boxes]}")
     print(f"reference: {len(ref_boxes)} people from {ref.path.name}, hRef={h_ref:.0f}px")

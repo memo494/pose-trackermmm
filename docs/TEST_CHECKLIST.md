@@ -325,11 +325,50 @@ least the number of people you saw together.
 
 ---
 
+## M4a — rings sooner, steadier marks
+
+Do M3 first (the app must already work). This section is about two changes: a person gets the ring **sooner**
+(a single missed frame no longer restarts the wait) and the ring and corner marks are **smoothed** so they do not
+tremble. Use the **same video as in M3**, played from the same point, and the same settings.
+
+### 1. Rings come sooner
+1. Install the newest build from the `latest` release. Press **Start** (allow the screen recording again) and
+   play the M3 video. Watch the people whose ring came late in M3.
+
+**Pass:** those people get their ring **sooner**, about half a second at most for most of them.
+**If it fails:** the same people still wait as long as in M3, or rings appear on things that are not people:
+Share diagnostics and say which person and at which second of the video.
+
+### 2. A person standing still
+1. Watch a person who stands (or sits) still for a few seconds, ring on the head.
+
+**Pass:** the ring does **not tremble**; it stays calm on the head.
+**If it fails:** the ring still shakes by a few pixels, or it drifts away from the head: Share diagnostics and say
+how far away the person was.
+
+### 3. A walking person
+1. Watch a person walk across the picture, and then a person who stops suddenly.
+
+**Pass:** the ring **follows without visible delay** and the corner marks stay around the person together with the
+ring; after a sudden stop the ring **does not shoot past** the head.
+**If it fails:** the ring clearly trails behind the head, runs ahead of it after a stop, or the ring and the
+corner marks move apart: Share diagnostics and say which of the three it was.
+
+### 4. The numbers in the report
+1. After the same run, press **Share diagnostics** and open `summary.txt` (or send the zip to the agent).
+2. Divide `trackConfirmations` by `trackBirths`.
+
+**Pass:** the share of confirmations is **higher than in M3** (in M3 the run had 103 confirmations for 278 births,
+about 0.37); the other tracker lines are still numbers, not `n/a`.
+**If it fails:** the share is the same or lower, or the lines are missing: send the zip and both numbers.
+
+---
+
 ## What to send back
 1. The **diagnostics zip** (press **Share diagnostics** right after the problem, not hours later).
 2. **One sentence** about what was on the screen (which app, how many people, what you did).
 3. The **block number** of this checklist that failed (for example "block 5"; for the M0c section say "M0c block 5",
-   for M1a "M1a block 3", for M3 "M3 block 3").
+   for M1a "M1a block 3", for M3 "M3 block 3", for M4a "M4a block 2").
 4. A **screenshot** if the corner text or a warning looked strange.
 5. If everything passed: say "all blocks passed" and the build id from the top of the app.
 

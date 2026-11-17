@@ -1,4 +1,4 @@
-# pose-tracker-android — Architecture (v0.9)
+# pose-tracker-android — Architecture (v1.0)
 
 Real-time Android app: a screen-capture overlay that draws a stable, low-latency dot on each person's head
 over any other app (video, stream, game), using YOLO26n-pose on-device. Built and modified by AI coding agents (Claude Code, Codex); built only
@@ -10,6 +10,9 @@ Ultralytics Flutter plugin (§2.1). Screen capture, overlay, tracking, smoothing
 and tests are ours.
 
 How the app gets built step by step is in `docs/BUILD_PLAN.md`. Changes per version are in §15.
+
+**v1.0 (M4a):** a tentative track survives one missed frame (§6.3) and a display smoother (OneEuro per shown track)
+moves the head point and the box before they are drawn (§6.4); §7.1, §12, §15.
 
 **v0.8 (M3a):** §6.2 and §6.3 describe the tracker as built in `core` (head point, three Kalman filters, one
 time rule, two-stage association with cost limits, lifecycle); §9 the scenario tests (also §7.1, §12, §13).
@@ -189,14 +192,15 @@ Dependencies: `app → detector → core`, `app → core`. Nothing else.
 [capture HandlerThread — ONE dedicated thread = the analysis thread, owns CompiledModel + tracker]
   ImageReader listener → acquireLatestImage → FrameTimestamp → RowCopy into a reused exact-width buffer
      → image.close()  → PoseDetector.detect → DetectionFrame(Img)
-     → Tracker.update → TrackSnapshot.of (immutable copy of the shown tracks, taken at once)
+     → Tracker.update → TrackSnapshot.ofSmoothed (HeadSmoother, §6.4; immutable copy of the shown tracks)
      → OverlayState(detections, tracks, …) → OverlayStateHolder (AtomicReference)
-  HUD tick (2 Hz) → Tracker.onIdle(now − arrival of the newest tracked frame) → new snapshot if the shown
-     tracks changed → same state path
-  geometry change (capture or display size) → Tracker.reset() → state with TrackSnapshot.EMPTY
+  HUD tick (2 Hz) → Tracker.onIdle(now − arrival of the newest tracked frame) → TrackSnapshot.ofIdle (the
+     smoother is not advanced) → new snapshot if the shown tracks changed → same state path
+  geometry change (capture or display size) → Tracker.reset() + HeadSmoother.reset() → state with
+     TrackSnapshot.EMPTY
 [main thread — overlay View]
   RedrawPolicy.shouldRedrawMarks says changed → invalidate → onDraw: Img→View (FitCenter) → brackets and
-     ring per track (OneEuro/Predictor from M4)
+     ring per track (the head points are already smoothed; forward prediction from M4b)
 ```
 
 | Object | Owner thread | Rule |
@@ -205,7 +209,8 @@ Dependencies: `app → detector → core`, `app → core`. Nothing else.
 | `CompiledModel` + its `TensorBuffer`s | capture (= analysis) | create, warm up, run, close on this thread only; never on main; buffers allocated **once** and reused; buffers closed before the model |
 | `MediaProjection` callbacks, `ImageReader` listener | capture | `registerCallback(…, captureHandler)` |
 | `Tracker` and its reused `TrackList` | capture | one per `FramePipeline` (so per Start); sole writer and reader; the overlay never sees the `TrackList`: it is only valid until the next tracker call |
-| `TrackSnapshot` (in `OverlayState.tracks`) | made on capture, read on main | immutable copy of the shown tracks, taken right after each `update` / `onIdle`; `TrackSnapshot.EMPTY` is shared, so nothing is allocated while nobody is tracked |
+| `HeadSmoother` (M4a) | capture | one per `FramePipeline`, next to the tracker; pool of `maxTracks` slots, allocation-free; reset wherever the tracker is reset |
+| `TrackSnapshot` (in `OverlayState.tracks`) | made on capture, read on main | immutable copy of the shown tracks (head points smoothed by `HeadSmoother`), taken right after each `update` / `onIdle`; `TrackSnapshot.EMPTY` is shared, so nothing is allocated while nobody is tracked |
 | Probe `CompiledModel` (`ModelProbe`, M0c import) | IO worker, CPU only | created and closed inside one call; never on main, never GPU, never kept |
 | `ImportedModelStore` | any worker thread | one process-wide lock serialises every call; refuses the main thread (`IllegalStateException`) |
 | Import single-flight flag (`ModelImporter`) | any thread | process-wide `AtomicBoolean`, set before `import.tflite` is created and cleared in `finally`; a second import answers `Failed(BUSY)`; a recreated screen seeds `importing` from it |
@@ -213,7 +218,7 @@ Dependencies: `app → detector → core`, `app → core`. Nothing else.
 | Imported model file (hash check) | capture | the capture thread hashes `model-<sha16>.tflite` against its meta before loading it |
 | Imported model file (hash check after a probe trip) | IO worker / capture | `ImportedModelStore.storedFileMatches` reads the file once, only for a probe trip with a meta and a file: on `Dispatchers.IO` for the control screen and on the capture thread at Start; refuses the main thread |
 | `OverlayState` | made on capture, read on main | immutable; one new per processed frame, per HUD tick and per geometry change |
-| Overlay `View`, `WindowManager` calls, Predictor / OneEuro state | main | plain classes, preallocated; no work except drawing |
+| Overlay `View`, `WindowManager` calls, Predictor state (M4b) | main | plain classes, preallocated; no work except drawing |
 | TrackerConfig | DataStore → StateFlow | applied at next frame boundary |
 
 - **Copy, then close, then infer:** `maxImages = 2`; copy the frame out (`RowCopy`: handles `rowStride` padding
@@ -337,8 +342,14 @@ tracks, index loops); deterministic.
 - **Lifecycle** (time in `dtEff`, measured over frames that exist):
   - an unmatched detection with score ≥ `trackBirthScore` (0.25) starts a TENTATIVE track (while fewer than
     `maxTracks` = 32 exist);
-  - CONFIRMED, and shown, from the `trackConfirmHits`-th (3rd) consecutive hit; a tentative track is removed on
-    its first miss, so a one- or two-frame false positive is never shown;
+  - CONFIRMED, and shown, from the `trackConfirmHits`-th (3rd) consecutive hit; a tentative track survives
+    `trackTentativeMaxMisses` (1, bounds 0..5) consecutive missed frames and is removed on the next one. While it
+    survives it coasts like a lost track (velocity decay as for a miss, no `lostMs`), is not shown and not LOST;
+    a miss does not reset its hit counter, a hit resets its miss counter; with 0 a tentative track is removed on
+    its first miss. Why (M4a, owner's phone run: 278 births, 103 confirmations): a person whose detection flickers
+    at score 0.4 waited long for the ring; on the reference model (`docs/plans/M4_sim/tentative.py`, 20 fps,
+    40 seeds) the p90 time until the ring is shown fell from 1050 to 600 ms when a frame is missing 40 % of the
+    time and from 2650 to 1450 ms at 60 %; the one- and two-frame false positives (S1, S9) stay unshown;
   - `onIdle(idleNs)` (`idleNs` = time since the newest frame, measured by the caller) promotes the tentative
     tracks once `idleNs ≥ trackIdlePromoteMs` (400 ms): a still picture;
   - a confirmed track that misses is LOST: it stays shown and coasts, and is removed after `trackMaxLostMs`
@@ -355,15 +366,32 @@ tracks, index loops); deterministic.
   missing for 0.5 s while moving at 2 h/s gets a new id; a person faster than about 1 h/s whose picture freezes
   without a frozen frame gets a new id afterwards.
 
-### 6.4 Prediction & smoothing (render side; from M4)
-- **Prediction looks forward.** The detection describes the screen at `image.timestamp`; the content is already
-  on screen and has moved on by the time the result is drawn (capture → copy → inference → handoff → next
-  vsync). Render target time `t = now + displayLeadMs` (default tuned in M4, `TrackerConfig`); there is no
-  camera-preview latency to subtract any more.
-- Extrapolate `pos + v·clamp(t − lastUpdate, 0, 80 ms)`, scaled by velocity confidence (from covariance).
-  After an idle gap (§6.3) nothing is extrapolated.
-- OneEuro in Img space normalised by `h`: minCutoff 1.5 Hz, beta 0.5, dCutoff 1 Hz; reset on birth/re-lock.
-- Lost tracks drawn faded; removed tracks fade out over 150 ms.
+### 6.4 Smoothing (built in M4a) and prediction (M4b)
+- **The display smoother** (`core/tracking/HeadSmoother`, plan `docs/plans/M4.md`) runs on the capture thread
+  between `Tracker.update` and the snapshot (`TrackSnapshot.ofSmoothed`, with the frame's timestamp, the one the
+  tracker was given). The tracker's own state is never touched: association and lifecycle see the raw head point.
+- **OneEuro per shown track id** on the head point (x, y), in Img px. Per axis `alpha = r / (r + 1)`,
+  `r = 2π·fc·dt`; the speed is the low-passed derivative (cutoff `smoothDerivativeCutoffHz`, x and y combined),
+  `fc = smoothMinCutoffHz + smoothBeta · speed / h` (`h` = the track's box height). Defaults: `smoothMinCutoffHz`
+  1.0 Hz, `smoothBeta` 3.0, `smoothDerivativeCutoffHz` 1.0 Hz; `smoothEnabled` (default true) off = identity.
+  The first sample of an id passes through; `dt ≤ 0`, a non-finite point or a height that is not positive leave
+  the state alone.
+- **The box moves with the head point** (same delta; its offsets to the head are kept), so ring and brackets stay
+  together.
+- **Slots:** a pool of `maxTracks` slots keyed by track id, no allocation after construction. An id that is not
+  shown in a frame frees its slot, so an id that comes back starts again as a first sample. The **idle republish
+  does not advance the smoother** (`TrackSnapshot.ofIdle`): a track the smoother knows keeps its last smoothed
+  point, a track newly promoted by the HUD tick passes through unsmoothed. `reset()` is called wherever the
+  tracker is reset (geometry change).
+- **Measured on the reference model** (`docs/plans/M4_sim/euro.py`, 8 seeds): jitter ratio of a still person
+  0.51 → 0.10 at 20 fps and 0.37 → 0.05 at 30 fps; walking lag +0.37 / +0.50 frame; overshoot after an abrupt
+  stop ≤ 0.04 h. In the code tests: jitter ratio ≤ 0.2 (measured 0.19), lag 0.35 frame, overshoot 0.
+- **Prediction looks forward (M4b, not built).** The detection describes the screen at `image.timestamp`; the
+  content is already on screen and has moved on by the time the result is drawn (capture → copy → inference →
+  handoff → next vsync). Render target time `t = now + displayLeadMs` (default tuned in M4b, `TrackerConfig`);
+  there is no camera-preview latency to subtract any more. Extrapolate `pos + v·clamp(t − lastUpdate, 0, 80 ms)`,
+  scaled by velocity confidence (from covariance). After an idle gap (§6.3) nothing is extrapolated.
+- Lost tracks drawn faded and removed tracks fading out over 150 ms are M4b too.
 - Any redraw this needs between frames obeys the invalidate rules in §6.5 (it may only run while a dot actually
   moves by more than the deadband).
 
@@ -394,7 +422,8 @@ The overlay is a plain `View` (not `ComposeView`) in a `TYPE_APPLICATION_OVERLAY
   the Img→View mapping uses the display size that the capture plan published in `OverlayState`
   (`OverlayMapping.forState` → `FitCenter`, §4.2). While that size or the capture size is unknown, nothing is drawn.
   The debug track id is written from a reused `CharArray` (`LabelPlacement` keeps it inside the view).
-- **What the owner sees (M3b):** a track is shown from its third consecutive hit, so on a playing video the marks
+- **What the owner sees (M3b, M4a):** a track is shown from its third hit (since M4a one missed frame in
+  between is tolerated, §6.3), so on a playing video the marks
   appear from the third frame (about 100 to 150 ms). A still picture sends no further frames, so the HUD tick
   (`Tracker.onIdle`, §5) promotes a person after `trackIdlePromoteMs` (400 ms) of silence: the marks come
   **0.4 to 0.9 s after the last frame** (400 ms plus up to one tick of 0.5 s at 2 Hz); before M3b they came at
@@ -502,7 +531,9 @@ Tracker entries (M3a), all in `TrackerConfig` with unit and bounds: head point (
 EMA, fallback and noise ratios), Kalman (acceleration and noise ratios, initial velocity, longest time step
 `trackMaxDtMs`, gap inflation, miss velocity decay), association (weights, head scale, gate, dedupe IoU, cost
 limits per stage) and lifecycle (high and birth scores, confirm hits, idle promotion, lost time, exit margin,
-`maxTracks`).
+`maxTracks`). M4a adds `trackTentativeMaxMisses` (frames, 0..5, default 1) to the lifecycle group and the
+smoother group (`smoothEnabled`, `smoothMinCutoffHz` 0.05..30, `smoothBeta` 0..100, `smoothDerivativeCutoffHz`
+0.05..30); defaults in §6.4.
 
 ### 7.2 Thermal policy (M5)
 If thermal status ≥ `MODERATE` or headroom forecast > 0.9: step down the analysis fps cap 60 → 30; then 416 → 320;
@@ -579,7 +610,7 @@ step back up after 60 s below the threshold. Every step is logged and shown in t
 | Geometry | table tests in `core`: `Letterbox` Img↔Mdl round-trip; `FitCenter` corners → view corners and back, portrait + landscape, with offset (cutout) and different window/capture sizes; `CaptureSize` (1220×2712 → 610×1356, exact aspect, even dimensions) |
 | Capture math | `RowCopy` (padded row stride, short last row, tight output); `FrameTimestamp` guard (in range, negative, > 100 ms → fallback); teardown idempotent and size-mismatch frames dropped (fake session); per-frame `catch` handles `OutOfMemoryError` |
 | Overlay | `HudFormatter` writes the expected text into a reused `CharArray`; the invalidate decision (new snapshot / deadband) as a pure function |
-| Tracking (synthetic, known truth) | scenarios S1 to S14 on `SyntheticScene` (crossing, stop, 0.5 s dropout, keypoint dropout, idle gap = no frames ≠ miss, still picture, score ramps, false positives, walking out, duplicate box, random dropouts, growing person), each at 20, 30 and 60 fps and at 30 fps ± 30 %; the Python functions in `docs/plans/M3_sim/scenarios.py` define them; measured first on the reference model (§6.3) |
+| Tracking (synthetic, known truth) | scenarios S1 to S15 on `SyntheticScene` (crossing, stop, 0.5 s dropout, keypoint dropout, idle gap = no frames ≠ miss, still picture, score ramps, false positives, walking out, duplicate box, random dropouts, growing person, S15 a flickering person at score 0.4 shown within 1000 ms), each at 20, 30 and 60 fps and at 30 fps ± 30 %; the Python functions in `docs/plans/M3_sim/scenarios.py` define them; measured first on the reference model (§6.3) |
 | Tracking metrics (asserted) | numbers in `core/src/test/**/MetricsThresholds.kt` (protected): ID switches 0 on crossings; M3: still-jitter **ratio** track / raw (RMS of the 2nd difference) ≤ 0.60 at 20 fps, 0.45 at 30, 0.25 at 60; stop overshoot < 0.10 h; \|lag\| < 0.5 frame. The absolute "still jitter < 1 px" belongs to M4 (OneEuro on top; the Kalman alone gives 1.37 px at 20 fps, h = 200 px, in the model) |
 | Real replays | from Share diagnostics, added as regression tests |
 | Decoding | golden test vs Python output, for both model sizes |
@@ -644,7 +675,7 @@ Agents may not loosen asserted thresholds (protected files).
 | M1b | Later: raw-output goldens and the golden decode test, allocation-free pure-Kotlin decoder (D2), benchmark screen with CSV and soak mode, a bundled landscape model with a per-geometry choice | real numbers for fps / ms / heat; no per-frame allocation in the decoder |
 | M2 | Img→View hardening: `FitCenter` extended and checked on the phone across rotation, cutout and resize events (no camera) | green dots exactly on heads in portrait and landscape |
 | M3 | **M3a** (done): tracker + Kalman in `core`, scenario tests S1-S14 (20/30/60 fps, idle gaps); **M3b** (done): the tracker in the app (`FramePipeline` → `TrackSnapshot` → overlay; rings and brackets from tracks, `trk N` in the HUD, track ids with `debugMarks`, tracker counters in `summary.txt`); plan `docs/plans/M3.md` | rings and brackets from tracks that bridge short misses, a ring on a still picture after 0.4 to 0.9 s, `trk N` in the HUD, `track…` lines in the diagnostics |
-| M4 | Forward prediction + OneEuro + handle-window lock + debug sheet | smooth dot, tap-to-lock, tuning sliders |
+| M4 | **M4a** (done): tentative tracks survive one missed frame (rings come sooner), display smoother (OneEuro per shown track, box moves with the head), scenario S15; plan `docs/plans/M4.md`; **M4b**: forward prediction, fading LOST tracks, handle-window tap-to-lock, tuning sheet | M4a: rings that come sooner and do not tremble on a still person; M4b: smooth dot without lag, tap-to-lock, tuning sliders |
 | M5 | Thermal policy, perf pass, lifecycle/permission polish, replay mode | stable over 30 min |
 
 One session per milestone; M4 may need a second session for tuning on the phone.
@@ -682,7 +713,7 @@ One session per milestone; M4 may need a second session for tuning on the phone.
   (`third_party/ULTRALYTICS.md`).
 - **DRM / secure apps capture black** (`FLAG_SECURE`): expected and unfixable by us; no dots there. Only
   documented, plus the HUD may say "no frames".
-- `displayLeadMs` default — tuned on the phone in M4.
+- `displayLeadMs` default — tuned on the phone in M4b.
 
 ## 14. Build environment (summary; details in BUILD_PLAN.md)
 Code is written in Claude Code cloud sessions (claude.ai/code) on this repo by the AI team in
@@ -692,6 +723,16 @@ answers hard questions. Each change is verified in the session with `scripts/ver
 and always by GitHub Actions, which is the source of truth. The owner's laptop is not used for builds.
 
 ## 15. Changes
+- **v1.0 (M4a, 2026-11-17):** faster confirmation and a display smoother, documented as built (plan
+  `docs/plans/M4.md`). (A) §6.3: a tentative track survives `trackTentativeMaxMisses` (1) missed frames (coasts,
+  not shown, hit counter kept) instead of dying on the first; scenario S15 (score 0.4, frames dropped at random,
+  shown within 1000 ms). (B) §6.4 rewritten: `HeadSmoother`, a OneEuro filter per shown track id on the head point
+  in Img px (defaults 1.0 Hz, beta 3.0, derivative 1.0 Hz; the old 1.5 Hz / 0.5 / 1 Hz and "normalised by h"
+  design is replaced by a cutoff that grows with speed / h), the box moved by the same delta, an id that is not
+  shown frees its slot, the idle republish does not advance it, reset with the tracker; forward prediction, fading
+  and the lead time stay M4b. (C) §5: `TrackSnapshot.ofSmoothed` / `ofIdle` and the smoother in the flow and the
+  thread table (capture thread, not main). (D) §7.1: config entries `trackTentativeMaxMisses` and the four
+  `smooth…` fields; §12: M4 split into M4a (done) and M4b.
 - **v0.9 (M3b, 2026-11-17):** the tracker in the app, documented as built (plan `docs/plans/M3.md`). (A) §5: data
   flow and thread table: `Tracker` per `FramePipeline` on the capture thread, `TrackSnapshot` (immutable copy of
   the shown tracks, shared `EMPTY`) inside `OverlayState`, HUD tick → `Tracker.onIdle`, a geometry change →

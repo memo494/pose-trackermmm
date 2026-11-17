@@ -303,7 +303,7 @@ class TorsoRegionTest {
 
     @Test
     fun tiltedShoulders_theUpperBodyTorsoStartsAtTheLowerShoulder() {
-        val detection = person(hipScore = 0.1f, boxBottomImg = 140f, shoulderYImg = 100f, rightShoulderYImg = 70f)
+        val detection = person(hipScore = 0.1f, boxBottomImg = 120f, shoulderYImg = 100f, rightShoulderYImg = 70f)
 
         assertThat(torso(detection, upperConfig)).isTrue()
 

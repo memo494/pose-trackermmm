@@ -222,7 +222,8 @@ class TorsoRegionTest {
     }
 
     /** Upper-body config: a quarter cut, and a torso half a shoulder width tall (exact in binary). */
-    private val upperConfig = TrackerConfig(
+    private val upperConfig =
+        TrackerConfig(
             relockTorsoShrink = 0.25f,
             relockBoxBottomRatio = 0.5f,
             relockBoxWidthRatio = 0.5f,

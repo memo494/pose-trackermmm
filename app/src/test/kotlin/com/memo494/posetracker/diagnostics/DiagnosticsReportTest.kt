@@ -271,15 +271,16 @@ class DiagnosticsReportTest {
 
         val values = trackKeys.map { key -> lines.first { it.startsWith("$key=") } }
 
-        assertThat(values).containsExactly(
-            "tracksShown=0",
-            "tracksMostAtOnce=0",
-            "trackBirths=0",
-            "trackConfirmations=0",
-            "trackIdlePromotions=0",
-            "trackRecoveries=0",
-            "trackRemovals=0",
-        ).inOrder()
+        assertThat(values)
+            .containsExactly(
+                "tracksShown=0",
+                "tracksMostAtOnce=0",
+                "trackBirths=0",
+                "trackConfirmations=0",
+                "trackIdlePromotions=0",
+                "trackRecoveries=0",
+                "trackRemovals=0",
+            ).inOrder()
     }
 
     @Test

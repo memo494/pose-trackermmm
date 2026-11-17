@@ -41,6 +41,11 @@ import com.memo494.posetracker.overlay.OverlayState
  * @property trackIdlePromotions tentative tracks promoted on a still picture since Start, count.
  * @property trackRecoveries lost tracks that were matched again since Start, count.
  * @property trackRemovals shown tracks that were removed since Start, count.
+ * @property locks locks set (a tap on a person) since Start, count.
+ * @property lockRelocks times a pending lock moved to a returning person (re-lock by clothing colours) since Start, count.
+ * @property lockRelockRejects new tracks compared with a pending lock and not accepted (too different, or not clearly
+ *   the closest) since Start, count.
+ * @property lockExpired pending locks whose memory ran out since Start, count.
  * @property model the model of the session (source, file, fallback, input size); `null` = not known.
  * @property timing percentiles of the per-frame timings over the newest frames; [TimingSummary.EMPTY] = none yet.
  * @property thermalStatus name of the device's thermal status (`NONE` to `SHUTDOWN`); `n/a` = not known.
@@ -77,6 +82,10 @@ internal data class CaptureStats(
     val trackIdlePromotions: Int = 0,
     val trackRecoveries: Int = 0,
     val trackRemovals: Int = 0,
+    val locks: Int = 0,
+    val lockRelocks: Int = 0,
+    val lockRelockRejects: Int = 0,
+    val lockExpired: Int = 0,
     val model: ModelStatus? = null,
     val timing: TimingSummary = TimingSummary.EMPTY,
     val thermalStatus: String = ThermalStatusText.NOT_AVAILABLE,

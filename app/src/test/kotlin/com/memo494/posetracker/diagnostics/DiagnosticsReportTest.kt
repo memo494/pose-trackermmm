@@ -291,6 +291,40 @@ class DiagnosticsReportTest {
         assertThat(lines.indexOf("trackRemovals=0")).isLessThan(lines.indexOf("modelSource=unknown"))
     }
 
+    // ---- lock counters (M4c T2) ----
+
+    private val lockKeys = listOf("locks", "lockRelocks", "lockRelockRejects", "lockExpired")
+
+    @Test
+    fun summary_lockLines_showTheNumbersAfterTheTrackLinesInTheDocumentedOrder() {
+        val locked = stats.copy(locks = 3, lockRelocks = 2, lockRelockRejects = 5, lockExpired = 1)
+
+        val lines = build(stats = locked).text("summary.txt").trimEnd('\n').split("\n")
+        val first = lines.indexOf("locks=3")
+
+        assertThat(first).isEqualTo(lines.indexOf("trackRemovals=0") + 1)
+        assertThat(lines.subList(first, first + lockKeys.size))
+            .containsExactly("locks=3", "lockRelocks=2", "lockRelockRejects=5", "lockExpired=1")
+            .inOrder()
+    }
+
+    @Test
+    fun summary_lockLines_areZeroBeforeTheFirstLock() {
+        val lines = summaryLines(stats)
+
+        val values = lockKeys.map { key -> lines.first { it.startsWith("$key=") } }
+
+        assertThat(values).containsExactly("locks=0", "lockRelocks=0", "lockRelockRejects=0", "lockExpired=0").inOrder()
+        assertThat(lines.indexOf("lockExpired=0")).isLessThan(lines.indexOf("modelSource=unknown"))
+    }
+
+    @Test
+    fun summary_withoutStats_hasNoLockLines() {
+        val lines = summaryLines(null)
+
+        assertThat(lines.none { line -> lockKeys.any { line.startsWith("$it=") } }).isTrue()
+    }
+
     @Test
     fun summary_withoutStats_hasNoTrackLines() {
         val lines = summaryLines(null)

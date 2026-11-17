@@ -13,11 +13,11 @@ import com.memo494.posetracker.core.stats.Percentiles
 import com.memo494.posetracker.core.stats.TimingSummary
 import com.memo494.posetracker.core.stats.TimingWindow
 import com.memo494.posetracker.core.tracking.HeadSmoother
+import com.memo494.posetracker.core.tracking.TrackList
 import com.memo494.posetracker.core.tracking.TrackSnapshot
 import com.memo494.posetracker.core.tracking.Tracker
 import com.memo494.posetracker.detector.PoseDetector
 import com.memo494.posetracker.overlay.OverlayState
-import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Per-frame work of the screen capture, free of `android.*`: size check, row copy, timestamp, image
@@ -45,10 +45,12 @@ import java.util.concurrent.atomic.AtomicInteger
  * reset also resets the smoother. The idle republish never advances it: it reuses the last smoothed point of a track
  * the smoother knows and passes a newly promoted track through unsmoothed.
  *
- * Lock (M4b): [requestLock] and [clearLock] may be called from the UI thread; the locked id is an [AtomicInteger]
+ * Lock (M4b, M4c): [requestLock] and [clearLock] may be called from the UI thread; the [LockKeeper] holds the lock
  * ([OverlayState.NO_LOCK] = none). Every state the pipeline publishes carries it only while that id is among the
- * state's shown tracks; otherwise the lock is cleared on the capture thread (the track was removed, the tracker was
- * reset, or the id never existed), and an id is never given to another track. There is no re-lock.
+ * state's shown tracks; an id that never was shown is dropped, a reset ends the lock, and an id is never given to
+ * another track. While the locked person is tracked, the colours of their torso are kept as a signature (pixels read
+ * right after `detect`, on the capture thread); when the track is removed the lock waits (pending, nothing drawn) and
+ * moves to a track that appears later only if its colours match clearly and unambiguously ([LockKeeper]).
  *
  * Timing: every **processed** frame (detected and published) adds one sample to each of six [TimingWindow]s:
  * copy, pre, inference, post, whole frame (acquire to publish) and result age (publish time minus the image
@@ -94,7 +96,7 @@ internal class FramePipeline(
     internal val smootherActiveCount: Int
         get() = smoother.activeCount
     private var trackedFrameNewest = false
-    private val lockedId = AtomicInteger(OverlayState.NO_LOCK)
+    private val lockKeeper = LockKeeper(config) { message -> safeLog(message, null) }
 
     /** Clock reading after the newest tracked frame was published (not its arrival): idle time starts here. */
     private var trackedArrivalNs = 0L
@@ -184,21 +186,45 @@ internal class FramePipeline(
     /** Most tracks shown at once since the start; see [trackBirths]. */
     val tracksMostAtOnce: Int get() = tracker.mostShownAtOnce
 
-    /** Whether a track is locked (or a lock was requested and the next state has not dropped it yet). Any thread. */
+    /**
+     * Whether a lock exists: a track is locked, a lock waits for its person to come back (pending), or a lock was
+     * requested and the next state has not dropped it yet. Any thread.
+     */
     val hasLock: Boolean
-        get() = lockedId.get() != OverlayState.NO_LOCK
+        get() = lockKeeper.hasLock
+
+    /** Locks set since this pipeline (so this Start) began, count; read on the capture thread (the HUD tick). */
+    val lockCount: Int get() = lockKeeper.lockCount
+
+    /** Pending locks that moved to a returning person, count; see [lockCount]. */
+    val lockRelockCount: Int get() = lockKeeper.relockCount
+
+    /** New tracks compared with a pending lock and not accepted, count; see [lockCount]. */
+    val lockRelockRejectCount: Int get() = lockKeeper.relockRejectCount
+
+    /** Pending locks whose memory ran out, count; see [lockCount]. */
+    val lockExpiredCount: Int get() = lockKeeper.expiredCount
 
     /**
      * Locks the track with [id] (the next published state carries it while that track is shown; an id that is not
      * shown is dropped there). A negative [id] clears the lock. Any thread, meant for the UI thread.
      */
     fun requestLock(id: Int) {
-        lockedId.set(if (id < 0) OverlayState.NO_LOCK else id)
+        lockKeeper.request(id)
     }
 
-    /** Ends the lock; the next published state carries none. Any thread, meant for the UI thread. */
+    /** Ends the lock (a pending one too); the next published state carries none. Any thread, meant for the UI thread. */
     fun clearLock() {
-        lockedId.set(OverlayState.NO_LOCK)
+        lockKeeper.clear()
+    }
+
+    /** The session ends: ends the lock and drops its signature (the log line says `stop`). Capture thread. */
+    fun onStop() {
+        try {
+            lockKeeper.onStop()
+        } catch (e: Throwable) {
+            safeLog("ending the lock failed", e)
+        }
     }
 
     /**
@@ -344,7 +370,9 @@ internal class FramePipeline(
         closeImage(image)
         if (!captureFrame.set(rgba, widthImg, heightImg, timestampNs, source)) error("capture frame rejected the copy")
         val result = detector.detect(captureFrame)
-        val tracks = TrackSnapshot.ofSmoothed(tracker.update(result), widthImg, heightImg, smoother, result.timestampNs)
+        val list = tracker.update(result)
+        val tracks = TrackSnapshot.ofSmoothed(list, widthImg, heightImg, smoother, result.timestampNs)
+        followLock(list, tracks, result)
         trackedFrameNewest = true
         fpsMeter.onFrame(acquireNs)
         val maxRawScore = detector.lastMaxRawScore
@@ -374,6 +402,22 @@ internal class FramePipeline(
         recordTimings(detector, copyStartNs, nowNs, acquireNs, timestampNs, source == TimestampSource.IMAGE)
         frames++
         failureStreak = 0L
+    }
+
+    /**
+     * Gives the lock keeper this frame (it reads the frame's pixels, which must still be intact: right after `detect`).
+     * A failure is logged and never stops the frame from being published.
+     */
+    private fun followLock(
+        list: TrackList,
+        tracks: TrackSnapshot,
+        result: DetectionFrame,
+    ) {
+        try {
+            lockKeeper.onFrame(list, tracks, result.detections, captureFrame)
+        } catch (e: Throwable) {
+            safeLog("following the lock failed", e)
+        }
     }
 
     /**
@@ -462,6 +506,7 @@ internal class FramePipeline(
             if (dropFrame) {
                 tracker.reset()
                 smoother.reset()
+                lockKeeper.onReset()
                 trackedFrameNewest = false
             }
             val base = lastState
@@ -481,26 +526,15 @@ internal class FramePipeline(
     }
 
     /**
-     * Publishes [state], carrying the lock only while its id is among the state's tracks. Every state of the
-     * pipeline goes through here, so a lock that no state can show is cleared at the next one, whichever path made it.
+     * Publishes [state], carrying the lock only while its id is among the state's tracks (a pending lock carries
+     * none). Every state of the pipeline goes through here, so the lock keeper sees every change of the shown tracks,
+     * whichever path made it.
      */
     private fun publish(state: OverlayState) {
-        val locked = resolveLock(state.tracks)
+        val locked = lockKeeper.resolve(state.tracks)
         val out = if (state.lockedId == locked) state else state.copy(lockedId = locked)
         lastState = out
         publisher(out)
-    }
-
-    /**
-     * The locked id if [tracks] still has it, else [OverlayState.NO_LOCK] after clearing the lock (only if it still
-     * holds the id that was checked, so a request made meanwhile on the UI thread is kept). Allocation-free.
-     */
-    private fun resolveLock(tracks: TrackSnapshot): Int {
-        val id = lockedId.get()
-        if (id == OverlayState.NO_LOCK) return OverlayState.NO_LOCK
-        if (tracks.indexOfId(id) >= 0) return id
-        lockedId.compareAndSet(id, OverlayState.NO_LOCK)
-        return OverlayState.NO_LOCK
     }
 
     private fun publishSafely(state: OverlayState) {

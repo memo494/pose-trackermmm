@@ -158,4 +158,31 @@ class CaptureStatsHolderTest {
         assertThat(stats.trackRecoveries).isEqualTo(0)
         assertThat(stats.trackRemovals).isEqualTo(0)
     }
+
+    @Test
+    fun publish_beforeAnyFrame_hasZeroLockCounters() {
+        CaptureStatsHolder.publish(OverlayState(), pipelineWithDetector(), null)
+
+        val stats = CaptureStatsHolder.latest!!
+        assertThat(stats.locks).isEqualTo(0)
+        assertThat(stats.lockRelocks).isEqualTo(0)
+        assertThat(stats.lockRelockRejects).isEqualTo(0)
+        assertThat(stats.lockExpired).isEqualTo(0)
+    }
+
+    @Test
+    fun publish_afterALockedFrame_carriesTheLockCountOfThePipeline() {
+        val pipeline = pipelineWithOnePerson()
+        for (k in 0 until 3) pipeline.onFrame(SolidImage(TRACK_WIDTH, TRACK_HEIGHT, 0L), NOW_NS + k * FRAME_GAP_NS)
+        pipeline.requestLock(1)
+        pipeline.onFrame(SolidImage(TRACK_WIDTH, TRACK_HEIGHT, 0L), NOW_NS + 3 * FRAME_GAP_NS)
+
+        CaptureStatsHolder.publish(OverlayState(), pipeline, null)
+
+        val stats = CaptureStatsHolder.latest!!
+        assertThat(stats.locks).isEqualTo(1)
+        assertThat(stats.lockRelocks).isEqualTo(0)
+        assertThat(stats.lockRelockRejects).isEqualTo(0)
+        assertThat(stats.lockExpired).isEqualTo(0)
+    }
 }

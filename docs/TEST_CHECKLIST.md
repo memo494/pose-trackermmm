@@ -147,7 +147,7 @@ model line says **yolo26n-pose_640.tflite (640, imported)**.
 
 ### 3. Run the imported model
 1. Press **Start** (allow the screen recording again) and play the video.
-2. In the corner text, read the line that starts with `det`, for example `det 1/1 max 0.84 in 640 imp`, and
+2. In the corner text, read the line that starts with `det`, for example `det 1/1 trk 1 max 0.84 in 640 imp`, and
    the line above it (`GPU 51.0 ms 19 fps ...`). Write down `ms`, `fps` and the `max` number for the same
    person.
 
@@ -253,10 +253,83 @@ in them (`n/a` is allowed only where the phone cannot tell, for example `thermal
 
 ---
 
+## M3 — marks from tracks
+
+Do M0c first (the app must already work). This section is about what the marks do over time: the rings and
+corner marks now come from the tracker, which keeps one number per person. Blocks 1 to 4 and 6 use one video
+with a few people walking (two of them should pass each other once); play it from the same point every time.
+
+### 1. Rings and brackets from tracks
+1. Install the newest build from the `latest` release. Press **Start** (allow the screen recording again) and
+   play the video.
+2. Look at the people and at the line that starts with `det`, for example `det 2/3 trk 2 max 0.89 in 640 imp`.
+
+**Pass:** a **ring** sits on each person's head and **short corner marks** sit on each person; the `det` line has
+a `trk` number (the number of people the app is tracking, for example `trk 2`) that matches the people with marks.
+A person's marks appear a moment (about a tenth of a second) after the person does, not at the first frame.
+**If it fails:** no `trk` in the `det` line, no marks although people are visible, or the marks sit far from the
+heads: Share diagnostics and say how many people were on the screen.
+
+### 2. A short miss does not blink
+1. In the same video, watch a person the model loses for a moment (partly hidden, far away, or turning).
+
+**Pass:** the ring stays with the person and does not blink off and on; if the
+person is gone for good it disappears after under one second (up to 0.8 s).
+**If it fails:** the ring blinks off for a fraction of a second although the person is still there, or it stays
+long after the person left: Share diagnostics and say what the person did.
+
+### 3. Two people keep their own marks
+1. Switch **Debug marks (box and body points)** **on**, press **Stop** and **Start** again (it is used from the next
+   Start). Play the part of the video where two people walk past each other.
+2. Look at the small number above each person's marks and at the full boxes (those come from the raw detections).
+
+**Pass:** each person keeps **the same number** while they cross and after; the numbers are not swapped. (With the
+switch on you also see the full box and the dots; the ring and corner marks are still from the tracker.)
+**If it fails:** the numbers swap or a person gets a new number for no reason: Share diagnostics, say at which
+second of the video, and which two people. A slow crossing in one row can swap numbers; say if it did.
+
+### 4. Pause and resume
+1. With the video playing and rings showing, **pause** it. Wait 5 seconds. Then resume.
+
+**Pass:** while paused the rings **stay** where they were and the first line of the corner text shows **0 fps**;
+after resume the **same** rings (and, with Debug marks on, the same numbers) go on with the people.
+**If it fails:** the rings vanish on pause, the fps stays high on a still picture, or the numbers restart after
+resume: Share diagnostics.
+
+### 5. A still picture
+1. Open a **photo with a person** (or a paused frame opened from elsewhere) so that nothing on the screen
+   moves, and wait.
+
+**Pass:** the ring and corner marks appear **within about a second** (0.4 to 0.9 s) after the picture is on the
+screen, and the `det` line says `trk 1` (or the number of people). Before this version they came at once.
+**If it fails:** no marks after 3 seconds on a picture where the model finds the person (`det 1/1` or more):
+Share diagnostics.
+
+### 6. Rotate the phone
+1. With the video playing and rings showing, turn the phone to the other orientation (portrait to landscape or
+   back).
+
+**Pass:** for a moment there are no marks, then the rings and corner marks come back in the **new** orientation,
+on the heads. The numbers (Debug marks on) go on counting and are **higher** than before.
+**If it fails:** the rings come back in the wrong place (as if the phone were still turned), or never come back:
+Share diagnostics and say which way you turned.
+
+### 7. The tracker lines in the report
+1. After a run of a minute or more with people, press **Share diagnostics** and open `summary.txt` in the zip
+   (or send it to the agent).
+
+**Pass:** `summary.txt` has the lines `tracksShown`, `tracksMostAtOnce`, `trackBirths`, `trackConfirmations`,
+`trackIdlePromotions`, `trackRecoveries` and `trackRemovals`, with numbers (not `n/a`); `tracksMostAtOnce` is at
+least the number of people you saw together.
+**If it fails:** the lines are missing, or all of them are 0 after a run with people: tell the agent.
+
+---
+
 ## What to send back
 1. The **diagnostics zip** (press **Share diagnostics** right after the problem, not hours later).
 2. **One sentence** about what was on the screen (which app, how many people, what you did).
-3. The **block number** of this checklist that failed (for example "block 5"; for the M0c section say "M0c block 5", for this one "M1a block 3").
+3. The **block number** of this checklist that failed (for example "block 5"; for the M0c section say "M0c block 5",
+   for M1a "M1a block 3", for M3 "M3 block 3").
 4. A **screenshot** if the corner text or a warning looked strange.
 5. If everything passed: say "all blocks passed" and the build id from the top of the app.
 
@@ -276,3 +349,8 @@ These checks need a cable and `adb`, or the benchmark screen of M1b, and are not
   newest `timingWindowFrames` (512) processed frames. `n/a` = no sample or not readable, never a guess. Compare
   `inferMsP50` with the HUD `ms` of the same run; `frameMsP95` and `resultAgeMsP95` show how bad the slow frames
   and the result delay are. `modelInputSize` is `640`, `832x384` or `0` (no model).
+- `summary.txt` tracker fields (M3b), after `headYImg` and before the model fields: `tracksShown` (now),
+  `tracksMostAtOnce`, `trackBirths`, `trackConfirmations`, `trackIdlePromotions`, `trackRecoveries`,
+  `trackRemovals` (cumulative since Start; 0 before the first frame). `trackIdlePromotions` counts people who got
+  their marks from the HUD tick on a still picture (M3 block 5); `trackRecoveries` counts lost tracks that were
+  matched again (M3 block 2). Expected rate of marks on a still picture: 0.4 to 0.9 s after the last frame.

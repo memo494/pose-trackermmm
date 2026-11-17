@@ -6,6 +6,7 @@ import com.memo494.posetracker.core.model.DetectionFrame
 import com.memo494.posetracker.core.model.PoseDetection
 import com.memo494.posetracker.core.model.TimestampSource
 import com.memo494.posetracker.core.overlay.OverlayWarning
+import com.memo494.posetracker.core.tracking.TrackSnapshot
 import com.memo494.posetracker.detector.Accelerator
 import org.junit.Test
 
@@ -34,9 +35,11 @@ class OverlayStateHolderTest {
         shiftX: Float = 0f,
         captureFps: Float = 30f,
         inferenceMs: Float = 10f,
+        trackShiftX: Float? = shiftX,
     ): OverlayState =
         OverlayState(
             frame = DetectionFrame(1L, TimestampSource.IMAGE, 610, 1356, listOf(person(shiftX))),
+            tracks = if (trackShiftX == null) TrackSnapshot.EMPTY else TrackSnapshot.of(FakeTracks(1, 1, trackShiftX), 610, 1356),
             accelerator = Accelerator.GPU,
             captureFps = captureFps,
             inferenceMs = inferenceMs,
@@ -257,5 +260,55 @@ class OverlayStateHolderTest {
         assertThat(OverlayState.EMPTY.modelInputWidth).isEqualTo(0)
         assertThat(OverlayState.EMPTY.modelInputHeight).isEqualTo(0)
         assertThat(OverlayState.EMPTY.modelImported).isFalse()
+    }
+
+    @Test
+    fun tracksThatMovedMoreThanTheDeadband_requestARedraw() {
+        holder.publish(state(trackShiftX = 0f))
+
+        holder.publish(state(trackShiftX = 0.6f))
+
+        assertThat(redraws).isEqualTo(2)
+    }
+
+    @Test
+    fun detectionsThatMoveWhileTheTracksDoNot_requestNoRedrawWithoutDebugMarks() {
+        holder.publish(state(shiftX = 0f, trackShiftX = 0f))
+
+        holder.publish(state(shiftX = 20f, trackShiftX = 0f))
+
+        assertThat(redraws).isEqualTo(1)
+    }
+
+    @Test
+    fun detectionsThatMoveWhileTheTracksDoNot_requestARedrawWithDebugMarks() {
+        val debugHolder = OverlayStateHolder(TrackerConfig(debugMarks = true)) { nowNs }
+        debugHolder.redrawRequester = Runnable { redraws++ }
+        debugHolder.publish(state(shiftX = 0f, trackShiftX = 0f))
+
+        debugHolder.publish(state(shiftX = 20f, trackShiftX = 0f))
+
+        assertThat(redraws).isEqualTo(2)
+    }
+
+    @Test
+    fun aTrackAppearing_requestsARedrawEvenWhenTheDetectionsStayPut() {
+        holder.publish(state(trackShiftX = null))
+        assertThat(redraws).isEqualTo(1)
+
+        holder.publish(state(trackShiftX = 0f))
+
+        assertThat(redraws).isEqualTo(2)
+    }
+
+    @Test
+    fun tracksThatMoveWhileHidden_requestNoRedraw() {
+        holder.publish(state())
+        holder.publish(state().copy(dotsVisible = false))
+        assertThat(redraws).isEqualTo(2)
+
+        holder.publish(state(trackShiftX = 40f).copy(dotsVisible = false))
+
+        assertThat(redraws).isEqualTo(2)
     }
 }

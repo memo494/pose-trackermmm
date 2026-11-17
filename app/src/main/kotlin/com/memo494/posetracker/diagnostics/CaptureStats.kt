@@ -34,6 +34,13 @@ import com.memo494.posetracker.overlay.OverlayState
  * @property nanRawRows model output rows of the newest frame with a NaN score, count; negative = not measured.
  * @property headXImg head point of the first person of the newest frame with people, Img pixels; NaN = none yet.
  * @property headYImg see [headXImg].
+ * @property tracksShown tracks shown in the newest published state, count.
+ * @property tracksMostAtOnce most tracks shown at once since Start, count.
+ * @property trackBirths tracks started since Start, count.
+ * @property trackConfirmations tentative tracks that became shown after enough hits since Start, count.
+ * @property trackIdlePromotions tentative tracks promoted on a still picture since Start, count.
+ * @property trackRecoveries lost tracks that were matched again since Start, count.
+ * @property trackRemovals shown tracks that were removed since Start, count.
  * @property model the model of the session (source, file, fallback, input size); `null` = not known.
  * @property timing percentiles of the per-frame timings over the newest frames; [TimingSummary.EMPTY] = none yet.
  * @property thermalStatus name of the device's thermal status (`NONE` to `SHUTDOWN`); `n/a` = not known.
@@ -63,6 +70,13 @@ internal data class CaptureStats(
     val nanRawRows: Int = OverlayState.NOT_MEASURED_COUNT,
     val headXImg: Float = Float.NaN,
     val headYImg: Float = Float.NaN,
+    val tracksShown: Int = 0,
+    val tracksMostAtOnce: Int = 0,
+    val trackBirths: Int = 0,
+    val trackConfirmations: Int = 0,
+    val trackIdlePromotions: Int = 0,
+    val trackRecoveries: Int = 0,
+    val trackRemovals: Int = 0,
     val model: ModelStatus? = null,
     val timing: TimingSummary = TimingSummary.EMPTY,
     val thermalStatus: String = ThermalStatusText.NOT_AVAILABLE,

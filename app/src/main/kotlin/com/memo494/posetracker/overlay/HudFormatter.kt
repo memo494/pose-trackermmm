@@ -21,6 +21,7 @@ object HudFormatter {
     private const val WARNING_DETECTOR_UNAVAILABLE = "Model not loaded: no detection"
     private const val WARNING_NOT_VISIBLE = "Content not visible: dots hidden"
     private const val WARNING_IMPORTED_NOT_USED = "Imported model not used: built-in model"
+    private const val TRACKS_PREFIX = " trk "
     private const val MODEL_SIZE_PREFIX = " in "
     private const val IMPORTED_MARK = " imp"
 
@@ -61,12 +62,13 @@ object HudFormatter {
     }
 
     /**
-     * Writes the detection line, e.g. `det 2/3 max 0.89 in 416` (built-in model), `det 2/3 max 0.89 in 640 imp`
-     * or `det 2/3 max 0.89 in 832x384 imp` (imported model): people in the newest frame after filtering, model
-     * output rows whose raw score passed the threshold, the highest raw score (two decimals), then the model's
-     * input size (one number when square, else width x height, see `ModelInputText`) and the mark ` imp` when
-     * the model is imported. Unknown values print as `--`; without a model (a side of 0) the ` in ...` part is
-     * left out. Returns the number of characters written to [out].
+     * Writes the detection line, e.g. `det 2/3 trk 2 max 0.89 in 416` (built-in model), `det 2/3 trk 2 max 0.89 in
+     * 640 imp` or `det 2/3 trk 2 max 0.89 in 832x384 imp` (imported model): people in the newest frame after
+     * filtering, model output rows whose raw score passed the threshold, the number of shown tracks (always a
+     * known number, 0 when nobody is tracked), the highest raw score (two decimals), then the model's input size
+     * (one number when square, else width x height, see `ModelInputText`) and the mark ` imp` when the model is
+     * imported. Unknown values print as `--`; without a model (a side of 0) the ` in ...` part is left out.
+     * Returns the number of characters written to [out].
      */
     fun formatDetections(
         state: OverlayState,
@@ -76,6 +78,8 @@ object HudFormatter {
         pos = putWhole(out, pos, detectionCount(state))
         pos = putText(out, pos, "/")
         pos = putWhole(out, pos, state.rawRowsAboveThreshold)
+        pos = putText(out, pos, TRACKS_PREFIX)
+        pos = putWhole(out, pos, state.tracks.count)
         pos = putText(out, pos, " max ")
         pos = putHundredths(out, pos, quantize(state.maxRawScore, HUNDREDTHS_PER_UNIT))
         if (state.modelInputWidth <= 0 || state.modelInputHeight <= 0) return pos
@@ -123,6 +127,7 @@ object HudFormatter {
         if (before.modelInputHeight != after.modelInputHeight) return true
         if (before.modelImported != after.modelImported) return true
         if (detectionCount(before) != detectionCount(after)) return true
+        if (before.tracks.count != after.tracks.count) return true
         if (shownFps(before, idleFps) != shownFps(after, idleFps)) return true
         if (isIdle(after, idleFps)) return false
         return quantize(before.inferenceMs, TENTHS_PER_UNIT) != quantize(after.inferenceMs, TENTHS_PER_UNIT)
@@ -185,8 +190,11 @@ object HudFormatter {
         return next
     }
 
-    /** Writes a non-negative whole number in decimal; [NOT_AVAILABLE] or less prints [UNKNOWN]. */
-    private fun putWhole(
+    /**
+     * Writes a non-negative whole number in decimal; [NOT_AVAILABLE] or less prints [UNKNOWN]. Internal: the
+     * overlay writes the track id of the debug marks with it (allocation-free, cut at the end of [out]).
+     */
+    internal fun putWhole(
         out: CharArray,
         pos: Int,
         value: Int,

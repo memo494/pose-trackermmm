@@ -224,6 +224,80 @@ class DiagnosticsReportTest {
         assertThat(lines).containsAtLeastElementsIn(expected)
     }
 
+    // ---- tracker counters (M3b T4) ----
+
+    private val trackKeys =
+        listOf(
+            "tracksShown",
+            "tracksMostAtOnce",
+            "trackBirths",
+            "trackConfirmations",
+            "trackIdlePromotions",
+            "trackRecoveries",
+            "trackRemovals",
+        )
+
+    @Test
+    fun summary_trackLines_showTheNumbersInTheDocumentedOrder() {
+        val tracked =
+            stats.copy(
+                tracksShown = 2,
+                tracksMostAtOnce = 4,
+                trackBirths = 9,
+                trackConfirmations = 6,
+                trackIdlePromotions = 1,
+                trackRecoveries = 3,
+                trackRemovals = 5,
+            )
+
+        val lines = build(stats = tracked).text("summary.txt").trimEnd('\n').split("\n")
+        val first = lines.indexOf("tracksShown=2")
+
+        assertThat(lines.subList(first, first + trackKeys.size))
+            .containsExactly(
+                "tracksShown=2",
+                "tracksMostAtOnce=4",
+                "trackBirths=9",
+                "trackConfirmations=6",
+                "trackIdlePromotions=1",
+                "trackRecoveries=3",
+                "trackRemovals=5",
+            ).inOrder()
+    }
+
+    @Test
+    fun summary_trackLines_areZeroBeforeTheFirstFrame() {
+        val lines = summaryLines(stats)
+
+        val values = trackKeys.map { key -> lines.first { it.startsWith("$key=") } }
+
+        assertThat(values)
+            .containsExactly(
+                "tracksShown=0",
+                "tracksMostAtOnce=0",
+                "trackBirths=0",
+                "trackConfirmations=0",
+                "trackIdlePromotions=0",
+                "trackRecoveries=0",
+                "trackRemovals=0",
+            ).inOrder()
+    }
+
+    @Test
+    fun summary_trackLines_followTheDetectionCountersAndComeBeforeTheModelBlock() {
+        val lines = summaryLines(stats)
+
+        assertThat(lines.indexOf("tracksShown=0")).isEqualTo(lines.indexOf("headYImg=NaN") + 1)
+        assertThat(lines.indexOf("trackRemovals=0")).isLessThan(lines.indexOf("modelSource=unknown"))
+    }
+
+    @Test
+    fun summary_withoutStats_hasNoTrackLines() {
+        val lines = summaryLines(null)
+
+        assertThat(lines.none { it.startsWith("track") }).isTrue()
+    }
+
     // ---- timing and thermal (M1a T5) ----
 
     private val timedStats =

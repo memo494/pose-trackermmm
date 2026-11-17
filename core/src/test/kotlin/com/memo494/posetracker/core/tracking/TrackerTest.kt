@@ -304,11 +304,80 @@ class TrackerTest {
         feed(tracker, 3)
         val headX = tracker.onIdle(0L).headXImg(0)
 
-        val list = tracker.onIdle(config.trackIdlePromoteNs * 10L)
+        val list = tracker.onIdle(config.trackIdlePromoteNs)
 
         assertThat(list.state(0)).isEqualTo(TrackState.LOST)
         assertThat(list.headXImg(0)).isEqualTo(headX)
         assertThat(list.lostMs(0)).isWithin(0.5f).of(STEP_MS)
+    }
+
+    @Test
+    fun onIdle_removesALostTrackOnceItsLostTimePlusTheIdleTimeExceedsTheLimit() {
+        for (k in 0 until 3) feed(tracker, k, person(600f))
+        feed(tracker, 3)
+        val lastIdleNsToKeep = ((config.trackMaxLostMs - STEP_MS) * NANOS_PER_MS).toLong()
+
+        val kept = tracker.onIdle(lastIdleNsToKeep)
+        assertThat(kept.size).isEqualTo(1)
+        assertThat(kept.state(0)).isEqualTo(TrackState.LOST)
+        assertThat(tracker.removeCount).isEqualTo(0)
+
+        val gone = tracker.onIdle(lastIdleNsToKeep + NANOS_PER_MS.toLong() * 2L)
+        assertThat(gone.size).isEqualTo(0)
+        assertThat(tracker.removeCount).isEqualTo(1)
+    }
+
+    @Test
+    fun onIdle_doesNotChangeLostMs_soRepeatedCallsWithGrowingIdleTimeStayConsistent() {
+        for (k in 0 until 3) feed(tracker, k, person(600f))
+        feed(tracker, 3)
+
+        tracker.onIdle(config.trackIdlePromoteNs / 2L)
+        val list = tracker.onIdle(config.trackIdlePromoteNs * 3L / 2L)
+
+        assertThat(list.size).isEqualTo(1)
+        assertThat(list.lostMs(0)).isWithin(0.5f).of(STEP_MS)
+        assertThat(feed(tracker, 4, person(600f)).state(0)).isEqualTo(TrackState.CONFIRMED)
+        assertThat(tracker.recoverCount).isEqualTo(1)
+    }
+
+    @Test
+    fun onIdle_keepsAConfirmedTrackThatIsNotLost_evenAfterTenSeconds() {
+        for (k in 0 until 3) feed(tracker, k, person(600f))
+
+        val list = tracker.onIdle(10L * NANOS_PER_S)
+
+        assertThat(list.size).isEqualTo(1)
+        assertThat(list.state(0)).isEqualTo(TrackState.CONFIRMED)
+        assertThat(tracker.removeCount).isEqualTo(0)
+    }
+
+    @Test
+    fun onIdle_removesOnlyTheLostTrack_andKeepsTheConfirmedOne() {
+        for (k in 0 until 3) feed(tracker, k, person(300f), person(900f))
+        feed(tracker, 3, person(900f))
+
+        val list = tracker.onIdle(10L * NANOS_PER_S)
+
+        assertThat(list.size).isEqualTo(1)
+        assertThat(list.headXImg(0)).isWithin(HEAD_X_TOLERANCE_IMG).of(900f)
+        assertThat(list.state(0)).isEqualTo(TrackState.CONFIRMED)
+        assertThat(tracker.removeCount).isEqualTo(1)
+    }
+
+    @Test
+    fun onIdle_removesALostTrackAndPromotesATentativeOneInTheSameCall() {
+        for (k in 0 until 3) feed(tracker, k, person(300f))
+        feed(tracker, 3, person(900f))
+        val idleNs = ((config.trackMaxLostMs - STEP_MS) * NANOS_PER_MS).toLong() + NANOS_PER_MS.toLong() * 2L
+        assertThat(idleNs).isAtLeast(config.trackIdlePromoteNs)
+
+        val list = tracker.onIdle(idleNs)
+
+        assertThat(list.size).isEqualTo(1)
+        assertThat(list.state(0)).isEqualTo(TrackState.CONFIRMED)
+        assertThat(tracker.removeCount).isEqualTo(1)
+        assertThat(tracker.idlePromoteCount).isEqualTo(1)
     }
 
     @Test
@@ -356,17 +425,23 @@ class TrackerTest {
         assertThat(tracker.birthCount).isEqualTo(2)
     }
 
+    /**
+     * Was "a matched detection with a zero variance is a miss". With `minBoxHeightImg` the variance of a usable box
+     * is at least `(0.005 * 0.5)^2 / 1` (never zero), and a box so high that the variance overflows is forbidden
+     * by the association cost, so no construction through the public API reaches the zero-variance guard of
+     * `applyHit` any more (the guard stays in the code). The purpose, a degenerate detection never corrupts a
+     * track, is kept: the sub-pixel box is ignored, the track misses the frame and stays finite.
+     */
     @Test
-    fun aMatchedDetectionWithAZeroVariance_isAMissAndTheTrackStaysFinite() {
+    fun aDegenerateDetectionNextToATrack_isIgnoredAndTheTrackMissesTheFrameAndStaysFinite() {
         for (k in 0 until 3) feed(tracker, k, person(600f))
         val control = Tracker(config)
         for (k in 0 until 3) feed(control, k, person(600f))
-        val tiny = zeroVarianceDetection()
+        val tiny = tinyDetection()
         val head = HeadPoint()
         HeadMeasurement.of(tiny, config, head)
-        // Precondition: the box is usable, yet the variance underflowed to zero, and the pair is matched (cost 0.5).
-        assertThat(head.valid).isTrue()
-        assertThat(head.varianceImg2).isEqualTo(0f)
+        // Precondition: the box is unusable, so the detection never reaches association.
+        assertThat(head.valid).isFalse()
 
         val list = feed(tracker, 3, tiny)
         val expected = feed(control, 3)
@@ -381,6 +456,28 @@ class TrackerTest {
         assertThat(list.headYImg(0)).isEqualTo(expected.headYImg(0))
         assertThat(list.boxLeftImg(0)).isEqualTo(expected.boxLeftImg(0))
         assertThat(tracker.recoverCount).isEqualTo(0)
+        assertThat(tracker.birthCount).isEqualTo(1)
+    }
+
+    @Test
+    fun aDetectionOnePixelHigh_isIgnored_theTrackMissesTheFrameAndNoTrackIsBorn() {
+        for (k in 0 until 3) feed(tracker, k, person(600f))
+
+        val list = feed(tracker, 3, person(900f, heightImg = 1f))
+
+        assertThat(list.size).isEqualTo(1)
+        assertThat(list.state(0)).isEqualTo(TrackState.LOST)
+        assertThat(tracker.birthCount).isEqualTo(1)
+    }
+
+    @Test
+    fun theSameDetectionOnePixelHigh_startsATrack_whenTheMinimumBoxHeightIsLowEnough() {
+        val lenient = Tracker(TrackerConfig(minBoxHeightImg = TrackerConfig.MIN_MIN_BOX_HEIGHT_IMG))
+        for (k in 0 until 3) feed(lenient, k, person(600f))
+
+        feed(lenient, 3, person(900f, heightImg = 1f))
+
+        assertThat(lenient.birthCount).isEqualTo(2)
     }
 
     @Test
@@ -502,7 +599,7 @@ class TrackerTest {
     ) = HeadTestDetections.person(xImg, yImg, HEIGHT)
 
     /** A box 1e-25 px high at the top of the image whose five head keypoints sit on the head of [person]: variance 0 in float. */
-    private fun zeroVarianceDetection(): PoseDetection {
+    private fun tinyDetection(): PoseDetection {
         val keypointsXyImg = FloatArray(TrackerConfig.POSE_KEYPOINT_COUNT * 2) { if (it % 2 == 0) 600f else ROW_Y }
         return PoseDetection(590f, 0f, 610f, TINY_HEIGHT, 0.9f, keypointsXyImg, HeadTestDetections.allHead(0.9f))
     }
@@ -550,6 +647,7 @@ class TrackerTest {
         const val STEP_NS = 50_000_000L
         const val STEP_MS = 50f
         const val ROUNDING_MS = 0.01
+        const val HEAD_X_TOLERANCE_IMG = 20f
         const val GAP_NS = 5_000_000_000L
         const val IMAGE_WIDTH = 1356
         const val IMAGE_HEIGHT = 610

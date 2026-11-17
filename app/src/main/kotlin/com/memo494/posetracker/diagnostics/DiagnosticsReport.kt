@@ -120,6 +120,13 @@ internal object DiagnosticsReport {
         line(out, "nanRawRows", stats.nanRawRows)
         line(out, "headXImg", stats.headXImg)
         line(out, "headYImg", stats.headYImg)
+        line(out, "tracksShown", stats.tracksShown)
+        line(out, "tracksMostAtOnce", stats.tracksMostAtOnce)
+        line(out, "trackBirths", stats.trackBirths)
+        line(out, "trackConfirmations", stats.trackConfirmations)
+        line(out, "trackIdlePromotions", stats.trackIdlePromotions)
+        line(out, "trackRecoveries", stats.trackRecoveries)
+        line(out, "trackRemovals", stats.trackRemovals)
         appendModel(out, stats.model)
         appendTiming(out, stats)
     }

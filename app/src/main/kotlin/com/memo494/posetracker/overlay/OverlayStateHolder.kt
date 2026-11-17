@@ -69,16 +69,18 @@ class OverlayStateHolder(
         }
         val drawn = drawnState
         val redraw =
-            RedrawPolicy.shouldRedraw(
-                previous = drawn.frame,
-                current = state.frame,
+            RedrawPolicy.shouldRedrawMarks(
+                previousTracks = drawn.tracks,
+                currentTracks = state.tracks,
+                previousFrame = drawn.frame,
+                currentFrame = state.frame,
                 previousShown = drawn.detectionsShown,
                 currentShown = state.detectionsShown,
                 previousWarning = drawn.warning,
                 currentWarning = state.warning,
                 deadbandImg = deadbandImg(),
                 keypointMinScore = config.keypointMinScore,
-                keypointsDrawn = config.debugMarks,
+                debugMarks = config.debugMarks,
                 hudDue = hudDue,
             )
         if (redraw) {

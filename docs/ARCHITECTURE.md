@@ -1,4 +1,4 @@
-# pose-tracker-android — Architecture (v0.8)
+# pose-tracker-android — Architecture (v0.9)
 
 Real-time Android app: a screen-capture overlay that draws a stable, low-latency dot on each person's head
 over any other app (video, stream, game), using YOLO26n-pose on-device. Built and modified by AI coding agents (Claude Code, Codex); built only
@@ -189,9 +189,14 @@ Dependencies: `app → detector → core`, `app → core`. Nothing else.
 [capture HandlerThread — ONE dedicated thread = the analysis thread, owns CompiledModel + tracker]
   ImageReader listener → acquireLatestImage → FrameTimestamp → RowCopy into a reused exact-width buffer
      → image.close()  → PoseDetector.detect → DetectionFrame(Img)
-     → Tracker.update → publish immutable snapshot (AtomicReference / StateFlow)
+     → Tracker.update → TrackSnapshot.of (immutable copy of the shown tracks, taken at once)
+     → OverlayState(detections, tracks, …) → OverlayStateHolder (AtomicReference)
+  HUD tick (2 Hz) → Tracker.onIdle(now − arrival of the newest tracked frame) → new snapshot if the shown
+     tracks changed → same state path
+  geometry change (capture or display size) → Tracker.reset() → state with TrackSnapshot.EMPTY
 [main thread — overlay View]
-  on a new snapshot → invalidate → onDraw: Img→View (FitCenter) → draw (OneEuro/Predictor from M4)
+  RedrawPolicy.shouldRedrawMarks says changed → invalidate → onDraw: Img→View (FitCenter) → brackets and
+     ring per track (OneEuro/Predictor from M4)
 ```
 
 | Object | Owner thread | Rule |
@@ -199,14 +204,15 @@ Dependencies: `app → detector → core`, `app → core`. Nothing else.
 | LiteRT `Environment` | process | created once, shared |
 | `CompiledModel` + its `TensorBuffer`s | capture (= analysis) | create, warm up, run, close on this thread only; never on main; buffers allocated **once** and reused; buffers closed before the model |
 | `MediaProjection` callbacks, `ImageReader` listener | capture | `registerCallback(…, captureHandler)` |
-| Tracker | capture | sole writer |
+| `Tracker` and its reused `TrackList` | capture | one per `FramePipeline` (so per Start); sole writer and reader; the overlay never sees the `TrackList`: it is only valid until the next tracker call |
+| `TrackSnapshot` (in `OverlayState.tracks`) | made on capture, read on main | immutable copy of the shown tracks, taken right after each `update` / `onIdle`; `TrackSnapshot.EMPTY` is shared, so nothing is allocated while nobody is tracked |
 | Probe `CompiledModel` (`ModelProbe`, M0c import) | IO worker, CPU only | created and closed inside one call; never on main, never GPU, never kept |
 | `ImportedModelStore` | any worker thread | one process-wide lock serialises every call; refuses the main thread (`IllegalStateException`) |
 | Import single-flight flag (`ModelImporter`) | any thread | process-wide `AtomicBoolean`, set before `import.tflite` is created and cleared in `finally`; a second import answers `Failed(BUSY)`; a recreated screen seeds `importing` from it |
 | `ModelStatusHolder` | any thread | one `AtomicReference`, immutable values; written by the capture thread, read by the screen |
 | Imported model file (hash check) | capture | the capture thread hashes `model-<sha16>.tflite` against its meta before loading it |
 | Imported model file (hash check after a probe trip) | IO worker / capture | `ImportedModelStore.storedFileMatches` reads the file once, only for a probe trip with a meta and a file: on `Dispatchers.IO` for the control screen and on the capture thread at Start; refuses the main thread |
-| Snapshot | any | immutable |
+| `OverlayState` | made on capture, read on main | immutable; one new per processed frame, per HUD tick and per geometry change |
 | Overlay `View`, `WindowManager` calls, Predictor / OneEuro state | main | plain classes, preallocated; no work except drawing |
 | TrackerConfig | DataStore → StateFlow | applied at next frame boundary |
 
@@ -221,7 +227,12 @@ Dependencies: `app → detector → core`, `app → core`. Nothing else.
   thread, stop the service). Each hop is a `Handler.post`; nothing joins or waits. The projection's `onStop` (lock
   screen, system "stop sharing") triggers it. A restart always asks for new consent.
 - **HUD tick:** a static screen delivers no frames, so the capture handler republishes the last state at the HUD
-  rate (`hudRateHz`) and the shown capture fps decays to 0.
+  rate (`hudRateHz`) and the shown capture fps decays to 0. The same tick tells the tracker how long ago the newest
+  tracked frame arrived (`Tracker.onIdle`), so a still picture gets its marks (§6.5).
+- **Tracker and gaps in the data:** only a frame the detector saw goes to `Tracker.update`. A frame without a
+  detector, while the capture is not display-sized, with a size mismatch or a failed copy is not given to it (no
+  information is not "nobody there"). A new capture or display size resets the tracker and publishes a state
+  without tracks, so positions of the old geometry are never mapped with the new one; ids go on (§6.3).
 - A detector that cannot be created does not stop the session: frames are still drained and closed and the HUD
   shows `DETECTOR_UNAVAILABLE`.
 
@@ -367,6 +378,12 @@ The overlay is a plain `View` (not `ComposeView`) in a `TYPE_APPLICATION_OVERLAY
   (`postInvalidateOnAnimation`) would create redraw → new frame → inference → redraw. Therefore: **no
   free-running loop**; call `invalidate()` only when a new snapshot differs from the drawn one by more than a
   sub-pixel deadband (a pure function, unit tested); HUD text updates at most 2 Hz (`TrackerConfig`).
+  Since M3b the decision is `RedrawPolicy.shouldRedrawMarks` (`OverlayStateHolder.publish`), in this order: HUD
+  due → warning changed → tracks (`RedrawPolicy.tracksChanged`: the count or an id differs at an index, or a head
+  coordinate or a box edge moved by more than the deadband; `isLost` and `isHeadEstimated` change no pixel and
+  are not compared; an unshown side counts as empty) → only with `debugMarks` also the detection comparison of
+  `shouldRedraw` (rectangles and keypoints). Detections that move while the tracks do not never redraw without
+  `debugMarks`.
   A paused video must show capture fps ≈ 0.
   **HUD idle rule:** the HUD's own refresh causes up to `hudRateHz + 1` frames per second, so a capture rate below
   `TrackerConfig.hudIdleFps` (`hudRateHz` + 2) prints as 0 fps and its fps and inference-time changes do not
@@ -376,13 +393,25 @@ The overlay is a plain `View` (not `ComposeView`) in a `TYPE_APPLICATION_OVERLAY
   display size is **not** read from the view (`onSizeChanged` can still hold the previous rotation): since PR #5
   the Img→View mapping uses the display size that the capture plan published in `OverlayState`
   (`OverlayMapping.forState` → `FitCenter`, §4.2). While that size or the capture size is unknown, nothing is drawn.
+  The debug track id is written from a reused `CharArray` (`LabelPlacement` keeps it inside the view).
+- **What the owner sees (M3b):** a track is shown from its third consecutive hit, so on a playing video the marks
+  appear from the third frame (about 100 to 150 ms). A still picture sends no further frames, so the HUD tick
+  (`Tracker.onIdle`, §5) promotes a person after `trackIdlePromoteMs` (400 ms) of silence: the marks come
+  **0.4 to 0.9 s after the last frame** (400 ms plus up to one tick of 0.5 s at 2 Hz); before M3b they came at
+  once. A person the model misses for a moment keeps the marks (LOST) for up to `trackMaxLostMs` (800 ms). Below
+  about 2.5 processed frames per second a still picture and a slow stream cannot be told apart, so tentative
+  tracks are then shown.
 - **The overlay is in the capture** — and `FLAG_SECURE` on it would black out the **whole** capture, so it is
   not an option. Mitigation: hollow marks, thin strokes, a corner HUD strip, and the marks rule below.
-- **Marks rule (M0c T7):** by default each person gets a head ring with radius
-  `max(headRingRadiusRatio × box width, minHeadRingRadiusDp)` (`core/overlay/HeadRing`) and short corner brackets
-  (`core/overlay/CornerBrackets`, `boxCornerRatio` of each box side) instead of the full box. The full box and the
-  keypoint dots are drawn only with `debugMarks` (`TrackerConfig`, switch **Debug marks (box and body points)** on
-  the control screen, read when a session starts). Why: the marks are inside the capture, and offline the box and
+- **Marks rule (M0c T7, from M3b on the tracker's tracks):** the marks come from the **shown tracks**
+  (`OverlayState.tracks`, a `TrackSnapshot`), not from the raw detections. Per shown track the overlay draws short
+  corner brackets at the track's box (`core/overlay/CornerBrackets`, `boxCornerRatio` of each box side, instead
+  of the full box) and a head ring at the tracked head point with radius
+  `max(headRingRadiusRatio × box width, minHeadRingRadiusDp)` (`core/overlay/HeadRing`). A LOST track is drawn
+  like a CONFIRMED one until M4 (fading is M4). The raw detections (full box, keypoint dots, no ring) and the
+  track ids (a number above the top-left corner of each track's box) are drawn only with `debugMarks`
+  (`TrackerConfig`, switch **Debug marks (box and body points)** on the control screen, read when a session
+  starts). Why: the marks are inside the capture, and offline the box and
   the dots lowered the model's score of the same person on the next frame (so the marks vanished and the person
   was detected again: blinking); the measured table is in `docs/plans/M0c.md` ("Measured after T1"). The check on
   the phone is in `docs/TEST_CHECKLIST.md` (M0c) and the open item in §13.
@@ -406,9 +435,9 @@ The overlay is a plain `View` (not `ComposeView`) in a `TYPE_APPLICATION_OVERLAY
   statistics, `now − image.timestamp` range), FPS + thermal stats, `model_info.json`, current `TrackerConfig`,
   last 10 s replay JSON, latest benchmark CSV. This zip is what the owner pastes to an agent.
 - **Model in the HUD (M0c):** the detections line ends with the model's input size and, for an imported model,
-  the mark `imp`: `det 2/3 max 0.89 in 416` (built-in) or `det 2/3 max 0.89 in 640 imp`; with no model loaded
-  the ` in …` part is left out (`HudFormatter.formatDetections`). When an imported model was expected but the
-  built-in one runs (`OverlayWarning.IMPORTED_MODEL_NOT_USED`), the warning line says
+  the mark `imp`: `det 2/3 trk 2 max 0.89 in 416` (built-in) or `det 2/3 trk 2 max 0.89 in 640 imp`; with no
+  model loaded the ` in …` part is left out (`HudFormatter.formatDetections`). When an imported model was expected
+  but the built-in one runs (`OverlayWarning.IMPORTED_MODEL_NOT_USED`), the warning line says
   `Imported model not used: built-in model`; it has the lowest priority and does not hide the dots.
 - **Model in `summary.txt` (M0c, `DiagnosticsReport`):** `modelSource` (`builtin` / `imported`; `unknown` before any
   session), `modelFile` (`builtin` for the built-in model), `modelSha256` (first `SHA256_SHORT_CHARS` = 12 hex
@@ -417,7 +446,14 @@ The overlay is a plain `View` (not `ComposeView`) in a `TYPE_APPLICATION_OVERLAY
   only then).
 - **Model size text (M1a):** `modelInputSize=` and the HUD `in …` use one text (`ModelInputText`): `640` for a square
   input, `832x384` for a rectangular one (width x height), `0` when there is no model. Example HUD line:
-  `det 2/3 max 0.89 in 832x384 imp`.
+  `det 2/3 trk 2 max 0.89 in 832x384 imp`.
+- **Tracker in the HUD and in `summary.txt` (M3b).** The detections line carries `trk N` between the row count and
+  `max`: the number of shown tracks in the published state (`TrackSnapshot.count`; always a number, 0 when nobody
+  is tracked); a changed track count refreshes the HUD text like a changed detection count (`hudChanged`). In
+  `summary.txt` seven lines follow `headYImg=` and come before the model fields: `tracksShown` (now),
+  `tracksMostAtOnce`, `trackBirths`, `trackConfirmations`, `trackIdlePromotions`, `trackRecoveries`,
+  `trackRemovals`. The last six are the tracker's cumulative counters since Start (§6.3; `reset()` on a geometry
+  change keeps them); all are 0 before the first frame. They are read on the capture thread at the HUD tick.
 - **Timing in `summary.txt` (M1a).** After the model fields, in this order: `timingSamples`, then `copyMsP50`,
   `copyMsP95`, `preMsP50`, `preMsP95`, `inferMsP50`, `inferMsP95`, `postMsP50`, `postMsP95`, `frameMsP50`,
   `frameMsP95`, `resultAgeMsP50`, `resultAgeMsP95` (twelve keys, milliseconds with one decimal), then
@@ -607,7 +643,7 @@ Agents may not loosen asserted thresholds (protected files).
 | M1a | Rectangular model inputs end to end (import layout v2, meta v2, engine, HUD, diagnostics), rectangular models to download (`640x288`, `832x384`, `960x448`), timing statistics (p50/p95 per stage, result age, thermal state) in `summary.txt`; plan `docs/plans/M1.md`. Done in this PR; the one-thread LiteRT item is already true since M0b | import `832x384`, HUD `in 832x384 imp`; real ms / fps per model on one video; timing lines in the diagnostics |
 | M1b | Later: raw-output goldens and the golden decode test, allocation-free pure-Kotlin decoder (D2), benchmark screen with CSV and soak mode, a bundled landscape model with a per-geometry choice | real numbers for fps / ms / heat; no per-frame allocation in the decoder |
 | M2 | Img→View hardening: `FitCenter` extended and checked on the phone across rotation, cutout and resize events (no camera) | green dots exactly on heads in portrait and landscape |
-| M3 | **M3a** (done): tracker + Kalman in `core`, scenario tests S1-S14 (20/30/60 fps, idle gaps); **M3b**: the tracker in the app, IDs; plan `docs/plans/M3.md` | M3a nothing; M3b rings and brackets from tracks, IDs |
+| M3 | **M3a** (done): tracker + Kalman in `core`, scenario tests S1-S14 (20/30/60 fps, idle gaps); **M3b** (done): the tracker in the app (`FramePipeline` → `TrackSnapshot` → overlay; rings and brackets from tracks, `trk N` in the HUD, track ids with `debugMarks`, tracker counters in `summary.txt`); plan `docs/plans/M3.md` | rings and brackets from tracks that bridge short misses, a ring on a still picture after 0.4 to 0.9 s, `trk N` in the HUD, `track…` lines in the diagnostics |
 | M4 | Forward prediction + OneEuro + handle-window lock + debug sheet | smooth dot, tap-to-lock, tuning sliders |
 | M5 | Thermal policy, perf pass, lifecycle/permission polish, replay mode | stable over 30 min |
 
@@ -631,6 +667,11 @@ One session per milestone; M4 may need a second session for tuning on the phone.
   missing for 0.5 s while moving at 2 h/s gets a new id; a person faster than about 1 h/s whose picture freezes
   without a frozen frame gets a new id afterwards. Score numbers (`trackBirthScore` 0.25, `trackHighScore` 0.5) and
   the other tracker defaults are tuned on the phone in M4.
+- **Per-frame objects of the pipeline (M3b):** `FramePipeline` still allocates one `OverlayState` and the
+  detections of the detector per processed frame, and a `TrackSnapshot` (arrays inside) whenever somebody is
+  shown; `TrackSnapshot.EMPTY` is shared, so nothing is allocated for that part while nobody is tracked. The
+  `Tracker` itself allocates nothing after construction (§6.3). Making the state objects reusable is not done;
+  decide it with the allocation numbers of the M1b benchmark.
 - **Unmerged branch `fix-export-model-deps`** holds a stricter export script (self-check against `predict()`,
   raw-output goldens, public-domain fixture); its raw-output goldens are needed for M1b.
 - **M1b:** raw-output goldens (script on `fix-export-model-deps`), pure decoder + golden test, benchmark screen, a
@@ -651,6 +692,16 @@ answers hard questions. Each change is verified in the session with `scripts/ver
 and always by GitHub Actions, which is the source of truth. The owner's laptop is not used for builds.
 
 ## 15. Changes
+- **v0.9 (M3b, 2026-11-17):** the tracker in the app, documented as built (plan `docs/plans/M3.md`). (A) §5: data
+  flow and thread table: `Tracker` per `FramePipeline` on the capture thread, `TrackSnapshot` (immutable copy of
+  the shown tracks, shared `EMPTY`) inside `OverlayState`, HUD tick → `Tracker.onIdle`, a geometry change →
+  `Tracker.reset()`; a frame the detector did not see is not given to the tracker. (B) §6.5: the marks come from
+  the shown tracks (brackets at the track box, ring at the tracked head, LOST drawn like CONFIRMED until M4);
+  raw detections and track ids only with `debugMarks`; redraw decided by `RedrawPolicy.shouldRedrawMarks`
+  (`tracksChanged`); a still picture gets its marks 0.4 to 0.9 s after the last frame (was: at once), a playing
+  video from the third frame. (C) §6.7: HUD `det 2/3 trk 2 max 0.89 in 640 imp` and the seven tracker lines of
+  `summary.txt` (`tracksShown`, `tracksMostAtOnce`, `trackBirths`, `trackConfirmations`, `trackIdlePromotions`,
+  `trackRecoveries`, `trackRemovals`). (D) §12: M3b done; §13: per-frame objects of the pipeline.
 - **v0.8 (M3a, 2026-11-16):** the tracker in `core`, documented as built (plan `docs/plans/M3.md`, Consults C1 to
   C3). (A) §6.2: `HeadMeasurement` (stateless) and `HeadPointEstimator` (per track); offset EMA α 0.2 (was 0.1);
   offsets learned against the plain mean of the five keypoints when all are visible; the fallback box point is

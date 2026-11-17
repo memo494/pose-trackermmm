@@ -6,6 +6,7 @@ import com.memo494.posetracker.core.model.DetectionFrame
 import com.memo494.posetracker.core.model.PoseDetection
 import com.memo494.posetracker.core.model.TimestampSource
 import com.memo494.posetracker.core.overlay.OverlayWarning
+import com.memo494.posetracker.core.tracking.TrackSnapshot
 import com.memo494.posetracker.detector.Accelerator
 import org.junit.Test
 
@@ -28,6 +29,11 @@ class HudFormatterTest {
         val person = PoseDetection(0f, 0f, 1f, 1f, 0.9f, FloatArray(0), FloatArray(0))
         return DetectionFrame(0L, TimestampSource.IMAGE, 610, 1356, List(people) { person })
     }
+
+    private fun snapshotOf(
+        count: Int,
+        shiftXImg: Float = 0f,
+    ): TrackSnapshot = TrackSnapshot.of(FakeTracks(count, 1, shiftXImg), 320, 240)
 
     private fun warning(state: OverlayState): String {
         val length = HudFormatter.formatWarning(state, buffer)
@@ -242,19 +248,19 @@ class HudFormatterTest {
     fun detections_writesPeopleRawRowsAndTheMaxRawScore() {
         val state = sample.copy(frame = frameWith(2), rawRowsAboveThreshold = 3, maxRawScore = 0.8921f)
 
-        assertThat(detections(state)).isEqualTo("det 2/3 max 0.89")
+        assertThat(detections(state)).isEqualTo("det 2/3 trk 0 max 0.89")
     }
 
     @Test
     fun detections_unknownValuesPrintAsDashes() {
-        assertThat(detections(sample)).isEqualTo("det --/-- max --")
+        assertThat(detections(sample)).isEqualTo("det --/-- trk 0 max --")
     }
 
     @Test
     fun detections_lowScoresKeepTheirLeadingZeroDigit() {
         val state = sample.copy(frame = frameWith(0), rawRowsAboveThreshold = 0, maxRawScore = 0.034f)
 
-        assertThat(detections(state)).isEqualTo("det 0/0 max 0.03")
+        assertThat(detections(state)).isEqualTo("det 0/0 trk 0 max 0.03")
     }
 
     @Test
@@ -276,7 +282,7 @@ class HudFormatterTest {
                 modelInputHeight = 416,
             )
 
-        assertThat(detections(state)).isEqualTo("det 1/1 max 0.84 in 416")
+        assertThat(detections(state)).isEqualTo("det 1/1 trk 0 max 0.84 in 416")
     }
 
     @Test
@@ -291,7 +297,7 @@ class HudFormatterTest {
                 modelImported = true,
             )
 
-        assertThat(detections(state)).isEqualTo("det 1/1 max 0.84 in 640 imp")
+        assertThat(detections(state)).isEqualTo("det 1/1 trk 0 max 0.84 in 640 imp")
     }
 
     @Test
@@ -306,7 +312,7 @@ class HudFormatterTest {
                 modelImported = true,
             )
 
-        assertThat(detections(state)).isEqualTo("det 2/3 max 0.89 in 832x384 imp")
+        assertThat(detections(state)).isEqualTo("det 2/3 trk 0 max 0.89 in 832x384 imp")
     }
 
     @Test
@@ -320,14 +326,14 @@ class HudFormatterTest {
                 modelInputHeight = 832,
             )
 
-        assertThat(detections(state)).isEqualTo("det 1/1 max 0.50 in 384x832")
+        assertThat(detections(state)).isEqualTo("det 1/1 trk 0 max 0.50 in 384x832")
     }
 
     @Test
     fun detections_oneUnknownSideLeavesTheSizeOut() {
         val state = sample.copy(modelInputWidth = 832, modelInputHeight = 0, modelImported = true)
 
-        assertThat(detections(state)).isEqualTo("det --/-- max --")
+        assertThat(detections(state)).isEqualTo("det --/-- trk 0 max --")
     }
 
     @Test
@@ -335,6 +341,7 @@ class HudFormatterTest {
         val longest =
             sample.copy(
                 frame = frameWith(9999),
+                tracks = snapshotOf(9999),
                 rawRowsAboveThreshold = 9999,
                 maxRawScore = 99.99f,
                 modelInputWidth = TrackerConfig.MAX_IMPORT_INPUT_SIZE_LIMIT,
@@ -345,7 +352,7 @@ class HudFormatterTest {
 
         val length = HudFormatter.formatDetections(longest, roomy)
 
-        assertThat(String(roomy, 0, length)).isEqualTo("det 9999/9999 max 99.99 in 4096x4064 imp")
+        assertThat(String(roomy, 0, length)).isEqualTo("det 9999/9999 trk 9999 max 99.99 in 4096x4064 imp")
         assertThat(length).isAtMost(TrackerConfig.HUD_LINE_CAPACITY_CHARS)
     }
 
@@ -362,7 +369,7 @@ class HudFormatterTest {
     fun detections_withoutAModelTheSizeIsLeftOut() {
         val state = sample.copy(modelInputWidth = 0, modelInputHeight = 0, modelImported = false)
 
-        assertThat(detections(state)).isEqualTo("det --/-- max --")
+        assertThat(detections(state)).isEqualTo("det --/-- trk 0 max --")
     }
 
     @Test
@@ -370,6 +377,7 @@ class HudFormatterTest {
         val worst =
             sample.copy(
                 frame = frameWith(9999),
+                tracks = snapshotOf(9999),
                 rawRowsAboveThreshold = 9999,
                 maxRawScore = 99.99f,
                 modelInputWidth = 4096,
@@ -381,7 +389,7 @@ class HudFormatterTest {
         val length = HudFormatter.formatDetections(worst, roomy)
 
         assertThat(length).isAtMost(TrackerConfig.HUD_LINE_CAPACITY_CHARS)
-        assertThat(String(roomy, 0, length)).isEqualTo("det 9999/9999 max 99.99 in 4096x1024 imp")
+        assertThat(String(roomy, 0, length)).isEqualTo("det 9999/9999 trk 9999 max 99.99 in 4096x1024 imp")
     }
 
     @Test
@@ -437,5 +445,97 @@ class HudFormatterTest {
 
         assertThat(HudFormatter.hudChanged(idle, idle.copy(modelInputWidth = 640, modelInputHeight = 640), idleFps)).isTrue()
         assertThat(HudFormatter.hudChanged(idle, idle.copy(modelImported = true), idleFps)).isTrue()
+    }
+
+    @Test
+    fun detections_theTrackCountIsWrittenApartFromThePeopleCount() {
+        val state = sample.copy(frame = frameWith(2), tracks = snapshotOf(3), rawRowsAboveThreshold = 3, maxRawScore = 0.8921f)
+
+        assertThat(detections(state)).isEqualTo("det 2/3 trk 3 max 0.89")
+    }
+
+    @Test
+    fun detections_theTrackCountComesBeforeTheModelSize() {
+        val state =
+            sample.copy(
+                frame = frameWith(2),
+                tracks = snapshotOf(2),
+                rawRowsAboveThreshold = 3,
+                maxRawScore = 0.89f,
+                modelInputWidth = 640,
+                modelInputHeight = 640,
+                modelImported = true,
+            )
+
+        assertThat(detections(state)).isEqualTo("det 2/3 trk 2 max 0.89 in 640 imp")
+    }
+
+    @Test
+    fun detections_aStateWithoutAFrameKeepsDashesForThePeopleAndWritesTheTrackCount() {
+        assertThat(detections(sample)).isEqualTo("det --/-- trk 0 max --")
+        assertThat(detections(sample.copy(tracks = snapshotOf(2)))).isEqualTo("det --/-- trk 2 max --")
+    }
+
+    @Test
+    fun detections_theLargestRealisticLineFitsTheHudLine() {
+        val busy =
+            sample.copy(
+                frame = frameWith(TrackerConfig.MAX_DETECTIONS_PER_FRAME),
+                tracks = snapshotOf(TrackerConfig.DEFAULT_MAX_TRACKS),
+                rawRowsAboveThreshold = 300,
+                maxRawScore = 0.99f,
+                modelInputWidth = 1280,
+                modelInputHeight = 1280,
+                modelImported = true,
+            )
+        val roomy = CharArray(TrackerConfig.HUD_LINE_CAPACITY_CHARS * 2)
+
+        val length = HudFormatter.formatDetections(busy, roomy)
+
+        assertThat(String(roomy, 0, length)).isEqualTo("det 30/300 trk 32 max 0.99 in 1280 imp")
+        assertThat(length).isAtMost(TrackerConfig.HUD_LINE_CAPACITY_CHARS)
+    }
+
+    @Test
+    fun detections_theWidestRectangularModelWithTheMostTracksFitsTheHudLine() {
+        val busy =
+            sample.copy(
+                frame = frameWith(TrackerConfig.MAX_DETECTIONS_PER_FRAME),
+                tracks = snapshotOf(TrackerConfig.MAX_MAX_TRACKS),
+                rawRowsAboveThreshold = 300,
+                maxRawScore = 0.99f,
+                modelInputWidth = TrackerConfig.MAX_IMPORT_INPUT_SIZE_LIMIT,
+                modelInputHeight = TrackerConfig.MAX_IMPORT_INPUT_SIZE_LIMIT - TrackerConfig.IMPORT_INPUT_SIZE_STEP,
+                modelImported = true,
+            )
+        val roomy = CharArray(TrackerConfig.HUD_LINE_CAPACITY_CHARS * 2)
+
+        val length = HudFormatter.formatDetections(busy, roomy)
+
+        assertThat(String(roomy, 0, length)).isEqualTo("det 30/300 trk 128 max 0.99 in 4096x4064 imp")
+        assertThat(length).isAtMost(TrackerConfig.HUD_LINE_CAPACITY_CHARS)
+    }
+
+    @Test
+    fun hudChanged_whenTheTrackCountChanges() {
+        val before = sample.copy(frame = frameWith(1), tracks = snapshotOf(1))
+
+        assertThat(HudFormatter.hudChanged(before, before.copy(tracks = snapshotOf(2)), idleFps)).isTrue()
+        assertThat(HudFormatter.hudChanged(before, before.copy(tracks = TrackSnapshot.EMPTY), idleFps)).isTrue()
+    }
+
+    @Test
+    fun hudChanged_whenTheTrackCountChangesWhileIdle() {
+        val idle = sample.copy(captureFps = 0f, tracks = snapshotOf(1))
+
+        assertThat(HudFormatter.hudChanged(idle, idle.copy(tracks = snapshotOf(0)), idleFps)).isTrue()
+    }
+
+    @Test
+    fun hudChanged_notWhenOnlyTheTrackPositionsChange() {
+        val before = sample.copy(frame = frameWith(2), tracks = snapshotOf(2))
+        val moved = before.copy(tracks = snapshotOf(2, shiftXImg = 40f))
+
+        assertThat(HudFormatter.hudChanged(before, moved, idleFps)).isFalse()
     }
 }

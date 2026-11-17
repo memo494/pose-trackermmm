@@ -12,8 +12,8 @@ import kotlin.math.max
  * [HeadMeasurement.of] or [HeadPointEstimator.update]; every call overwrites all five fields, so the object
  * can be reused for the next detection without any allocation and without stale values.
  *
- * Read [valid] first: when it is `false` the box was unusable (height not positive, or a box edge not
- * finite), the position and variance are `NaN`, and the caller must not use the detection for a head point.
+ * Read [valid] first: when it is `false` the box was unusable (height below `TrackerConfig.minBoxHeightImg` or not
+ * finite, or a box edge not finite), the position and variance are `NaN`, and the caller must not use the detection for a head point.
  */
 class HeadPoint {
     /** X of the head point, Img pixels; `NaN` when [valid] is `false`. */
@@ -35,7 +35,7 @@ class HeadPoint {
     var estimated: Boolean = true
         private set
 
-    /** `false` when the detection's box cannot give a head point (height not positive, a non-finite edge). */
+    /** `false` when the detection's box cannot give a head point (height too low, a non-finite edge). */
     var valid: Boolean = false
         private set
 
@@ -64,13 +64,17 @@ class HeadPoint {
 /** Height of the detection's box, Img pixels (`boxBottomImg - boxTopImg`); not checked here. */
 internal fun boxHeightImg(detection: PoseDetection): Float = detection.boxBottomImg - detection.boxTopImg
 
-/** True when the box has a positive finite height [heightImg] and finite left, right and top edges. */
+/**
+ * True when the box has a finite height [heightImg] of at least [TrackerConfig.minBoxHeightImg] and finite left,
+ * right and top edges. A sub-pixel box is refused because head offsets are learned in units of the box height.
+ */
 internal fun isUsableBox(
     detection: PoseDetection,
     heightImg: Float,
+    config: TrackerConfig,
 ): Boolean {
     val edgesFinite = detection.boxLeftImg.isFinite() && detection.boxRightImg.isFinite() && detection.boxTopImg.isFinite()
-    return heightImg > 0f && heightImg.isFinite() && edgesFinite
+    return heightImg >= config.minBoxHeightImg && heightImg.isFinite() && edgesFinite
 }
 
 /** True when keypoint [index] of [detection] has a finite position and a finite score. */

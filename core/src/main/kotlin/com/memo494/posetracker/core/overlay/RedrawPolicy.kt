@@ -2,6 +2,7 @@ package com.memo494.posetracker.core.overlay
 
 import com.memo494.posetracker.core.model.DetectionFrame
 import com.memo494.posetracker.core.model.PoseDetection
+import com.memo494.posetracker.core.tracking.TrackSnapshot
 import kotlin.math.abs
 
 /**
@@ -61,6 +62,84 @@ object RedrawPolicy {
         if (previous.widthImg != current.widthImg || previous.heightImg != current.heightImg) return true
         for (i in 0 until previousCount) {
             if (personChanged(previous.detections[i], current.detections[i], deadbandImg, keypointMinScore, keypointsDrawn)) return true
+        }
+        return false
+    }
+
+    /**
+     * Whether the overlay must be redrawn when it draws tracks (ARCHITECTURE §6.5, M3b): the decision
+     * `OverlayStateHolder` uses. Order: [hudDue], a changed warning, a change of the tracks ([tracksChanged]),
+     * and, with [debugMarks], the raw detections as in [shouldRedraw] (with every keypoint drawn). Without
+     * [debugMarks] the detections are never looked at. A side that is not shown counts as having no tracks
+     * (and no detections), so shown to hidden with tracks redraws and hidden to hidden never does (apart from
+     * [hudDue] and the warning).
+     *
+     * @param previousTracks tracks the overlay last drew.
+     * @param currentTracks newest tracks.
+     * @param previousFrame frame the overlay last drew (only used with [debugMarks]), Img space; `null` = none.
+     * @param currentFrame newest frame (only used with [debugMarks]), Img space; `null` = none.
+     * @param previousShown whether the previous state was drawn (marks visible and no warning).
+     * @param currentShown whether the new state would be drawn.
+     * @param previousWarning warning that was shown, if any.
+     * @param currentWarning warning to show, if any.
+     * @param deadbandImg smallest movement that counts, Img pixels (`redrawDeadbandPx / scale`).
+     * @param keypointMinScore keypoints below this confidence are not drawn, unitless in [0, 1].
+     * @param debugMarks whether the raw detections are drawn as well (`config.debugMarks`).
+     * @param hudDue result of [hudDue] for this update.
+     */
+    fun shouldRedrawMarks(
+        previousTracks: TrackSnapshot,
+        currentTracks: TrackSnapshot,
+        previousFrame: DetectionFrame?,
+        currentFrame: DetectionFrame?,
+        previousShown: Boolean,
+        currentShown: Boolean,
+        previousWarning: OverlayWarning?,
+        currentWarning: OverlayWarning?,
+        deadbandImg: Float,
+        keypointMinScore: Float,
+        debugMarks: Boolean,
+        hudDue: Boolean,
+    ): Boolean {
+        if (hudDue) return true
+        if (previousWarning != currentWarning) return true
+        val previousDrawn = if (previousShown) previousTracks else TrackSnapshot.EMPTY
+        val currentDrawn = if (currentShown) currentTracks else TrackSnapshot.EMPTY
+        if (tracksChanged(previousDrawn, currentDrawn, deadbandImg)) return true
+        if (!debugMarks) return false
+        return shouldRedraw(
+            previous = previousFrame,
+            current = currentFrame,
+            previousShown = previousShown,
+            currentShown = currentShown,
+            previousWarning = previousWarning,
+            currentWarning = currentWarning,
+            deadbandImg = deadbandImg,
+            keypointMinScore = keypointMinScore,
+            keypointsDrawn = true,
+            hudDue = false,
+        )
+    }
+
+    /**
+     * Whether the tracks drawn in [previous] and those in [current] differ on screen: the counts differ, an id
+     * differs at an index, or a head coordinate or a box edge moved by more than [deadbandImg] (Img pixels,
+     * along an axis). `isLost` and `isHeadEstimated` are not compared (they change no pixel in M3b). Allocation-free.
+     */
+    fun tracksChanged(
+        previous: TrackSnapshot,
+        current: TrackSnapshot,
+        deadbandImg: Float,
+    ): Boolean {
+        if (previous.count != current.count) return true
+        for (i in 0 until previous.count) {
+            if (previous.id(i) != current.id(i)) return true
+            if (moved(previous.headXImg(i), current.headXImg(i), deadbandImg)) return true
+            if (moved(previous.headYImg(i), current.headYImg(i), deadbandImg)) return true
+            if (moved(previous.boxLeftImg(i), current.boxLeftImg(i), deadbandImg)) return true
+            if (moved(previous.boxTopImg(i), current.boxTopImg(i), deadbandImg)) return true
+            if (moved(previous.boxRightImg(i), current.boxRightImg(i), deadbandImg)) return true
+            if (moved(previous.boxBottomImg(i), current.boxBottomImg(i), deadbandImg)) return true
         }
         return false
     }

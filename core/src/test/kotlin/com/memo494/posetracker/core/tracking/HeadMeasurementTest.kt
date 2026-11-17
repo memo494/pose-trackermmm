@@ -104,6 +104,33 @@ class HeadMeasurementTest {
     }
 
     @Test
+    fun aBoxLowerThanTheMinimumHeight_isInvalid_andOneAtTheMinimumIsValid() {
+        val minImg = config.minBoxHeightImg
+        for (height in listOf(1e-25f, 0.5f, minImg - 0.01f)) {
+            HeadMeasurement.of(person(300f, 200f, height), config, out)
+
+            assertThat(out.valid).isFalse()
+            assertThat(out.varianceImg2.isNaN()).isTrue()
+        }
+
+        HeadMeasurement.of(person(300f, 200f, minImg), config, out)
+
+        assertThat(out.valid).isTrue()
+        assertThat(out.varianceImg2 > 0f).isTrue()
+    }
+
+    @Test
+    fun theMinimumBoxHeight_comesFromTheConfig() {
+        val strict = TrackerConfig(minBoxHeightImg = 10f)
+
+        HeadMeasurement.of(person(300f, 200f, 9.9f), strict, out)
+        assertThat(out.valid).isFalse()
+
+        HeadMeasurement.of(person(300f, 200f, 9.9f), config, out)
+        assertThat(out.valid).isTrue()
+    }
+
+    @Test
     fun nonFiniteBoxEdge_isInvalid() {
         val box = person(300f, 200f, 100f)
         val detection =

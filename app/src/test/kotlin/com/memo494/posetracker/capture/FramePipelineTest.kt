@@ -25,6 +25,12 @@ private const val PIXEL_PATTERN_PERIOD = 251
 private const val DISPLAY_WIDTH_PX = 8
 private const val DISPLAY_HEIGHT_PX = 4
 private const val HEAD_KEYPOINTS = TrackerConfig.HEAD_KEYPOINT_COUNT
+private const val TRACK_WIDTH = 320
+private const val TRACK_HEIGHT = 240
+private const val FRAME_STEP_MS = 50L
+private const val SLOW_DETECT_MS = 300L
+private const val NEW_PERSON_SHIFT_X_IMG = 150f
+private const val HEAD_TOLERANCE_IMG = 3f
 
 /** An image that records its reads and closes in [events]. */
 private class FakeFrameImage(
@@ -963,5 +969,353 @@ class FramePipelineTest {
         // 20 samples, 2 of them slow (53 ms): rank ceil(0.95 * 20) = 19 is a slow one
         assertThat(pipeline.timingSummary().frameMs.p95).isWithin(0.001f).of(53f)
         assertThat(pipeline.timingSummary().frameMs.p50).isWithin(0.001f).of(13f)
+    }
+
+    // ---- the tracker (M3b T2) ----
+
+    /** A pipeline expecting [TRACK_WIDTH] x [TRACK_HEIGHT] frames; the states of the set-up are forgotten. */
+    private fun trackingPipeline(): FramePipeline {
+        val pipeline = pipeline()
+        pipeline.setExpectedSize(CaptureSize(TRACK_WIDTH, TRACK_HEIGHT))
+        states.clear()
+        return pipeline
+    }
+
+    private val headXsImg = floatArrayOf(130f, 124f, 136f, 118f, 142f)
+    private val headYsImg = floatArrayOf(40f, 36f, 36f, 40f, 40f)
+
+    /** A person 200 px high whose five head keypoints (confidence 0.9) scatter around a known mean, [shiftXImg] to the right. */
+    private fun walker(
+        boxTopImg: Float = 20f,
+        shiftXImg: Float = 0f,
+    ): PoseDetection {
+        val xy = FloatArray(HEAD_KEYPOINTS * 2)
+        for (k in 0 until HEAD_KEYPOINTS) {
+            xy[k * 2] = headXsImg[k] + shiftXImg
+            xy[k * 2 + 1] = headYsImg[k]
+        }
+        return PoseDetection(100f + shiftXImg, boxTopImg, 160f + shiftXImg, 220f, 0.9f, xy, FloatArray(HEAD_KEYPOINTS) { 0.9f })
+    }
+
+    /** Sets the clock to [atMs] after the start and feeds one frame of the given size that arrives then. */
+    private fun frameAt(
+        pipeline: FramePipeline,
+        atMs: Long,
+        widthImg: Int = TRACK_WIDTH,
+        heightImg: Int = TRACK_HEIGHT,
+    ) {
+        clock.currentNs = NOW_NS + atMs * MS_NS
+        pipeline.onFrame(image(widthImg = widthImg, heightImg = heightImg, timestampNs = clock.currentNs - 2 * MS_NS), clock.currentNs)
+    }
+
+    private fun tickAt(
+        pipeline: FramePipeline,
+        atMs: Long,
+    ) {
+        clock.currentNs = NOW_NS + atMs * MS_NS
+        pipeline.onHudTick()
+    }
+
+    /** Feeds [count] frames [FRAME_STEP_MS] apart from [startMs]; returns the time of the last one. */
+    private fun framesFrom(
+        pipeline: FramePipeline,
+        startMs: Long,
+        count: Int,
+        widthImg: Int = TRACK_WIDTH,
+        heightImg: Int = TRACK_HEIGHT,
+    ): Long {
+        var atMs = startMs
+        for (i in 0 until count) {
+            frameAt(pipeline, atMs, widthImg, heightImg)
+            if (i < count - 1) atMs += FRAME_STEP_MS
+        }
+        return atMs
+    }
+
+    @Test
+    fun threeFramesOfOnePerson_giveATrackOnlyInTheThirdState() {
+        val pipeline = trackingPipeline()
+        detector.people = listOf(walker())
+
+        frameAt(pipeline, 0)
+        assertThat(states.last().tracks.count).isEqualTo(0)
+        frameAt(pipeline, FRAME_STEP_MS)
+        assertThat(states.last().tracks.count).isEqualTo(0)
+        frameAt(pipeline, 2 * FRAME_STEP_MS)
+
+        val tracks = states.last().tracks
+        assertThat(tracks.count).isEqualTo(1)
+        assertThat(tracks.headXImg(0)).isWithin(HEAD_TOLERANCE_IMG).of(headXsImg.average().toFloat())
+        assertThat(tracks.headYImg(0)).isWithin(HEAD_TOLERANCE_IMG).of(headYsImg.average().toFloat())
+        assertThat(pipeline.failures).isEqualTo(0L)
+    }
+
+    @Test
+    fun trackCounters_areZeroBeforeTheFirstFrame() {
+        val pipeline = trackingPipeline()
+
+        assertThat(pipeline.trackBirths).isEqualTo(0)
+        assertThat(pipeline.trackConfirmations).isEqualTo(0)
+        assertThat(pipeline.trackIdlePromotions).isEqualTo(0)
+        assertThat(pipeline.trackRecoveries).isEqualTo(0)
+        assertThat(pipeline.trackRemovals).isEqualTo(0)
+        assertThat(pipeline.tracksMostAtOnce).isEqualTo(0)
+    }
+
+    @Test
+    fun threeFramesOfOnePerson_countOneBirthAndOneConfirmation() {
+        val pipeline = trackingPipeline()
+        detector.people = listOf(walker())
+
+        framesFrom(pipeline, 0, 3)
+
+        assertThat(pipeline.trackBirths).isEqualTo(1)
+        assertThat(pipeline.trackConfirmations).isEqualTo(1)
+        assertThat(pipeline.tracksMostAtOnce).isEqualTo(1)
+        assertThat(pipeline.trackIdlePromotions).isEqualTo(0)
+        assertThat(pipeline.trackRecoveries).isEqualTo(0)
+        assertThat(pipeline.trackRemovals).isEqualTo(0)
+        assertThat(states.last().tracks.count).isEqualTo(1)
+    }
+
+    @Test
+    fun trackCounters_surviveTheResetOfANewSize() {
+        val pipeline = trackingPipeline()
+        detector.people = listOf(walker())
+        framesFrom(pipeline, 0, 3)
+
+        pipeline.setExpectedSize(CaptureSize(TRACK_WIDTH + 2, TRACK_HEIGHT))
+
+        assertThat(pipeline.trackBirths).isEqualTo(1)
+        assertThat(pipeline.trackConfirmations).isEqualTo(1)
+    }
+
+    @Test
+    fun aNewExpectedSize_emptiesTheTracksAndTheNextTrackGetsAHigherId() {
+        val pipeline = trackingPipeline()
+        detector.people = listOf(walker())
+        val lastMs = framesFrom(pipeline, 0, 3)
+        val oldId = states.last().tracks.id(0)
+
+        pipeline.setExpectedSize(CaptureSize(TRACK_HEIGHT, TRACK_WIDTH))
+
+        assertThat(states.last().frame).isNull()
+        assertThat(states.last().tracks.count).isEqualTo(0)
+        framesFrom(pipeline, lastMs + FRAME_STEP_MS, 3, widthImg = TRACK_HEIGHT, heightImg = TRACK_WIDTH)
+        assertThat(states.last().tracks.count).isEqualTo(1)
+        assertThat(states.last().tracks.id(0)).isGreaterThan(oldId)
+    }
+
+    @Test
+    fun aNewDisplaySize_emptiesTheTracksAndTheNextTrackGetsAHigherId() {
+        val pipeline = trackingPipeline()
+        pipeline.setDisplaySizePx(DISPLAY_WIDTH_PX, DISPLAY_HEIGHT_PX)
+        detector.people = listOf(walker())
+        val lastMs = framesFrom(pipeline, 0, 3)
+        val oldId = states.last().tracks.id(0)
+
+        pipeline.setDisplaySizePx(DISPLAY_HEIGHT_PX, DISPLAY_WIDTH_PX)
+
+        assertThat(states.last().frame).isNull()
+        assertThat(states.last().tracks.count).isEqualTo(0)
+        framesFrom(pipeline, lastMs + FRAME_STEP_MS, 3)
+        assertThat(states.last().tracks.id(0)).isGreaterThan(oldId)
+    }
+
+    @Test
+    fun aChangeOfDisplaySized_emptiesTheTracksAndTheNextTrackGetsAHigherId() {
+        val pipeline = trackingPipeline()
+        detector.people = listOf(walker())
+        val lastMs = framesFrom(pipeline, 0, 3)
+        val oldId = states.last().tracks.id(0)
+
+        pipeline.setDisplaySized(false)
+
+        assertThat(states.last().frame).isNull()
+        assertThat(states.last().tracks.count).isEqualTo(0)
+        pipeline.setDisplaySized(true)
+        framesFrom(pipeline, lastMs + FRAME_STEP_MS, 3)
+        assertThat(states.last().tracks.id(0)).isGreaterThan(oldId)
+    }
+
+    @Test
+    fun aFrameWhileNotDisplaySized_publishesNoTracksAndLeavesTheTrackerAlone() {
+        val pipeline = trackingPipeline()
+        detector.people = listOf(walker())
+        pipeline.setDisplaySized(false)
+        val calls = detector.calls
+
+        val lastMs = framesFrom(pipeline, 0, 4)
+        tickAt(pipeline, lastMs + 2 * TrackerConfig().trackIdlePromoteMs)
+
+        assertThat(detector.calls).isEqualTo(calls)
+        assertThat(states.last().tracks.count).isEqualTo(0)
+        assertThat(states.last().warning).isEqualTo(OverlayWarning.CAPTURE_NOT_DISPLAY_SIZED)
+    }
+
+    @Test
+    fun hudTick_before400msOfIdleTime_promotesNothing() {
+        val pipeline = trackingPipeline()
+        detector.people = listOf(walker())
+        frameAt(pipeline, 0)
+
+        tickAt(pipeline, 399)
+
+        assertThat(states.last().tracks.count).isEqualTo(0)
+    }
+
+    @Test
+    fun hudTick_at400msOfIdleTime_publishesTheTrackAndASecondTickChangesNothing() {
+        val pipeline = trackingPipeline()
+        detector.people = listOf(walker())
+        frameAt(pipeline, 0)
+
+        tickAt(pipeline, 400)
+
+        val promoted = states.last().tracks
+        assertThat(promoted.count).isEqualTo(1)
+        assertThat(promoted.headXImg(0)).isWithin(HEAD_TOLERANCE_IMG).of(headXsImg.average().toFloat())
+        val statesBefore = states.size
+        tickAt(pipeline, 1000)
+        assertThat(states).hasSize(statesBefore + 1)
+        assertThat(states.last().tracks).isSameInstanceAs(promoted)
+        assertThat(pipeline.trackIdlePromotions).isEqualTo(1)
+        assertThat(pipeline.failures).isEqualTo(0L)
+    }
+
+    @Test
+    fun hudTick_countsTheIdleTimeFromTheEndOfProcessing_notFromTheArrival() {
+        val pipeline = trackingPipeline()
+        detector.people = listOf(walker())
+        detector.onDetect = { clock.currentNs += SLOW_DETECT_MS * MS_NS }
+        clock.currentNs = NOW_NS
+        pipeline.onFrame(image(widthImg = TRACK_WIDTH, heightImg = TRACK_HEIGHT), NOW_NS)
+        val endMs = SLOW_DETECT_MS
+
+        tickAt(pipeline, endMs + 399)
+        assertThat(states.last().tracks.count).isEqualTo(0)
+        assertThat(pipeline.trackIdlePromotions).isEqualTo(0)
+
+        tickAt(pipeline, endMs + 400)
+        assertThat(states.last().tracks.count).isEqualTo(1)
+        assertThat(pipeline.trackIdlePromotions).isEqualTo(1)
+    }
+
+    @Test
+    fun hudTick_afterOnePromotionAndOneRemoval_publishesTheNewTrackAlthoughTheCountStaysOne() {
+        val pipeline = trackingPipeline()
+        detector.people = listOf(walker())
+        val confirmedAtMs = framesFrom(pipeline, 0, 3)
+        assertThat(states.last().tracks.count).isEqualTo(1)
+        val leftHeadXImg = states.last().tracks.headXImg(0)
+        detector.people = listOf(walker(shiftXImg = NEW_PERSON_SHIFT_X_IMG))
+        val newestMs = confirmedAtMs + FRAME_STEP_MS
+        frameAt(pipeline, newestMs)
+        assertThat(states.last().tracks.headXImg(0)).isWithin(HEAD_TOLERANCE_IMG).of(leftHeadXImg)
+
+        tickAt(pipeline, newestMs + TrackerConfig().trackMaxLostMs.toLong() + 1)
+
+        val tracks = states.last().tracks
+        assertThat(tracks.count).isEqualTo(1)
+        assertThat(tracks.headXImg(0)).isWithin(HEAD_TOLERANCE_IMG).of(headXsImg.average().toFloat() + NEW_PERSON_SHIFT_X_IMG)
+        assertThat(pipeline.trackRemovals).isEqualTo(1)
+        assertThat(pipeline.trackIdlePromotions).isEqualTo(1)
+    }
+
+    @Test
+    fun aTrackedFrame_publishesTracksWithTheSizeOfTheFrame() {
+        val pipeline = trackingPipeline()
+        detector.people = listOf(walker())
+
+        framesFrom(pipeline, 0, 3)
+
+        val state = states.last()
+        assertThat(state.tracks.count).isEqualTo(1)
+        assertThat(state.tracks.widthImg).isEqualTo(TRACK_WIDTH)
+        assertThat(state.tracks.heightImg).isEqualTo(TRACK_HEIGHT)
+        assertThat(state.tracksMatchCapture).isTrue()
+    }
+
+    @Test
+    fun aPromotionByIdleTime_publishesTracksWithTheSizeOfTheFrame() {
+        val pipeline = trackingPipeline()
+        detector.people = listOf(walker())
+        frameAt(pipeline, 0)
+
+        tickAt(pipeline, TrackerConfig().trackIdlePromoteMs)
+
+        val state = states.last()
+        assertThat(state.tracks.count).isEqualTo(1)
+        assertThat(state.tracks.widthImg).isEqualTo(TRACK_WIDTH)
+        assertThat(state.tracks.heightImg).isEqualTo(TRACK_HEIGHT)
+        assertThat(state.tracksMatchCapture).isTrue()
+    }
+
+    @Test
+    fun hudTick_beforeAnyFrame_publishesNoTrackAndDoesNotFail() {
+        val pipeline = trackingPipeline()
+
+        tickAt(pipeline, 5_000)
+
+        assertThat(states.single().tracks.count).isEqualTo(0)
+        assertThat(logs).isEmpty()
+    }
+
+    @Test
+    fun hudTick_afterAReset_publishesNoTrackAndDoesNotFail() {
+        val pipeline = trackingPipeline()
+        detector.people = listOf(walker())
+        frameAt(pipeline, 0)
+        pipeline.setExpectedSize(CaptureSize(TRACK_HEIGHT, TRACK_WIDTH))
+
+        tickAt(pipeline, 1_000)
+
+        assertThat(states.last().tracks.count).isEqualTo(0)
+        assertThat(logs).isEmpty()
+    }
+
+    @Test
+    fun framesTheTrackerNeverSaw_doNotDisturbIt() {
+        val pipeline = trackingPipeline()
+        detector.people = listOf(walker())
+        framesFrom(pipeline, 0, 3)
+        val id = states.last().tracks.id(0)
+
+        frameAt(pipeline, 3 * FRAME_STEP_MS, widthImg = WIDTH, heightImg = HEIGHT)
+        detector.failure = IllegalStateException("test")
+        frameAt(pipeline, 4 * FRAME_STEP_MS)
+        detector.failure = null
+        frameAt(pipeline, 5 * FRAME_STEP_MS)
+
+        assertThat(pipeline.droppedSizeMismatch).isEqualTo(1L)
+        assertThat(pipeline.failures).isEqualTo(1L)
+        assertThat(states.last().tracks.count).isEqualTo(1)
+        assertThat(states.last().tracks.id(0)).isEqualTo(id)
+    }
+
+    @Test
+    fun aDetectionWithANanBox_doesNotCrashAndGivesNoTrack() {
+        val pipeline = trackingPipeline()
+        detector.people = listOf(walker(boxTopImg = Float.NaN))
+
+        framesFrom(pipeline, 0, 4)
+
+        assertThat(pipeline.failures).isEqualTo(0L)
+        assertThat(pipeline.frames).isEqualTo(4L)
+        assertThat(states.last().tracks.count).isEqualTo(0)
+    }
+
+    @Test
+    fun setContentVisible_false_keepsTheTracksInTheStateAndHidesThemWithTheFlag() {
+        val pipeline = trackingPipeline()
+        detector.people = listOf(walker())
+        framesFrom(pipeline, 0, 3)
+        val tracks = states.last().tracks
+
+        pipeline.setContentVisible(false)
+
+        assertThat(states.last().tracks).isSameInstanceAs(tracks)
+        assertThat(states.last().tracks.count).isEqualTo(1)
+        assertThat(states.last().detectionsShown).isFalse()
     }
 }

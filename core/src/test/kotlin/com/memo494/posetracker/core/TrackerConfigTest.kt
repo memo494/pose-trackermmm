@@ -737,6 +737,41 @@ class TrackerConfigTest {
         }
     }
 
+    @Test
+    fun minBoxHeightImg_hasTheDocumentedDefault_withinItsBounds() {
+        val config = TrackerConfig()
+
+        assertThat(config.minBoxHeightImg).isEqualTo(2.0f)
+        assertWithin(config.minBoxHeightImg, TrackerConfig.MIN_MIN_BOX_HEIGHT_IMG, TrackerConfig.MAX_MIN_BOX_HEIGHT_IMG)
+    }
+
+    @Test
+    fun minBoxHeightImg_atItsBounds_isAccepted() {
+        val low = TrackerConfig(minBoxHeightImg = TrackerConfig.MIN_MIN_BOX_HEIGHT_IMG)
+        val high = TrackerConfig(minBoxHeightImg = TrackerConfig.MAX_MIN_BOX_HEIGHT_IMG)
+
+        assertThat(low.minBoxHeightImg).isEqualTo(TrackerConfig.MIN_MIN_BOX_HEIGHT_IMG)
+        assertThat(high.minBoxHeightImg).isEqualTo(TrackerConfig.MAX_MIN_BOX_HEIGHT_IMG)
+    }
+
+    @Test
+    fun minBoxHeightImg_outsideItsBounds_orNotFinite_isRejected() {
+        val rejected =
+            listOf(
+                TrackerConfig.MIN_MIN_BOX_HEIGHT_IMG - 0.01f,
+                TrackerConfig.MAX_MIN_BOX_HEIGHT_IMG + 0.01f,
+                0f,
+                -1f,
+                Float.NaN,
+                Float.POSITIVE_INFINITY,
+                Float.NEGATIVE_INFINITY,
+            )
+
+        for (value in rejected) {
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(minBoxHeightImg = value) }
+        }
+    }
+
     private fun assertWithin(
         value: Float,
         min: Float,

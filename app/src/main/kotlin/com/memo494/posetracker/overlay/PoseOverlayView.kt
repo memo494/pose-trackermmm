@@ -12,16 +12,20 @@ import com.memo494.posetracker.core.geometry.FitCenter
 import com.memo494.posetracker.core.model.PoseDetection
 import com.memo494.posetracker.core.overlay.CornerBrackets
 import com.memo494.posetracker.core.overlay.HeadRing
+import com.memo494.posetracker.core.overlay.LabelPlacement
+import com.memo494.posetracker.core.tracking.TrackSnapshot
 import com.memo494.posetracker.detector.Accelerator
 import kotlin.math.max
 
 /**
  * The overlay: a plain `View` (no Compose) that draws the newest [OverlayState] over other apps
- * (ARCHITECTURE §6.5). By default a hollow head ring (never smaller than `minHeadRingRadiusDp`) and
- * short corner brackets per person: the overlay is part of the capture, so every other mark lowers the
- * model's score of the person on the next frame and makes the marks blink. With `config.debugMarks` the
- * full box and the keypoint dots are drawn too. A corner HUD strip and a red banner when the detector
- * runs on the CPU are always drawn.
+ * (ARCHITECTURE §6.5). The marks come from the tracker, not from the raw detections: per shown track a
+ * hollow head ring at the tracked head point (never smaller than `minHeadRingRadiusDp`) and short corner
+ * brackets at the track's box. The overlay is part of the capture, so every other mark lowers the model's
+ * score of the person on the next frame and makes the marks blink. With `config.debugMarks` the raw
+ * detections are drawn too (full box and keypoint dots, no ring) and each track's id is written above its
+ * box, so raw and tracked marks can be compared. A corner HUD strip and a red banner when the detector runs
+ * on the CPU are always drawn.
  *
  * It never schedules its own redraw: [OverlayStateHolder] calls `postInvalidateOnAnimation()` only when
  * the picture changed (Consult C1-B; the overlay is part of the capture, so a redraw loop would feed
@@ -30,8 +34,8 @@ import kotlin.math.max
  *
  * Img -> View ([OverlayMapping.forState]) is recomputed only when the capture size, the display size of
  * the capture plan (carried by the state, never read by the view itself), or the view's position on screen
- * change. Detections are fail-closed: a frame whose size is not the capture size, or a mapping that cannot
- * be built, draws nothing.
+ * change. Marks are fail-closed: a mapping that cannot be built draws nothing, and raw detections of a frame
+ * whose size is not the capture size are not drawn.
  *
  * @param holder source of the state; this view registers itself as its redraw requester while attached.
  * @param config strokes, thresholds and text size.
@@ -90,7 +94,9 @@ class PoseOverlayView(
     private val statsLine = CharArray(TrackerConfig.HUD_LINE_CAPACITY_CHARS)
     private val detectionsLine = CharArray(TrackerConfig.HUD_LINE_CAPACITY_CHARS)
     private val warningLine = CharArray(TrackerConfig.HUD_LINE_CAPACITY_CHARS)
+    private val idLabel = CharArray(TrackerConfig.HUD_LINE_CAPACITY_CHARS)
     private val ascentPx: Float
+    private val descentPx: Float
     private val lineHeightPx: Float
 
     private val locationOnScreen = IntArray(2)
@@ -109,6 +115,7 @@ class PoseOverlayView(
         val metrics = Paint.FontMetrics()
         hudTextPaint.getFontMetrics(metrics)
         ascentPx = -metrics.ascent
+        descentPx = metrics.descent
         lineHeightPx = metrics.descent - metrics.ascent + metrics.leading
     }
 
@@ -124,49 +131,58 @@ class PoseOverlayView(
     }
 
     override fun onDraw(canvas: Canvas) {
-        drawDetections(canvas, holder.latest())
+        drawMarks(canvas, holder.latest())
         drawHud(canvas, holder.hud())
     }
 
-    private fun drawDetections(
+    /**
+     * The marks of [state]: per track the corner brackets and the head ring; with `debugMarks` also, first,
+     * every raw detection (full box and keypoints) and, with each track, its id. Nothing is drawn while the
+     * detections are hidden or no Img -> View mapping can be built; tracks only when their image size is the
+     * capture size ([OverlayState.tracksMatchCapture]).
+     */
+    private fun drawMarks(
         canvas: Canvas,
         state: OverlayState,
     ) {
-        val frame = state.frame ?: return
         if (!state.detectionsShown) return
-        if (frame.widthImg != state.captureWidthImg || frame.heightImg != state.captureHeightImg) return
         val fit = mappingFor(state) ?: return
-        val detections = frame.detections
-        for (i in 0 until detections.size) {
-            drawPerson(canvas, fit, detections[i])
+        if (config.debugMarks) drawRawDetections(canvas, fit, state)
+        if (!state.tracksMatchCapture) return
+        val tracks = state.tracks
+        for (i in 0 until tracks.count) {
+            drawTrack(canvas, fit, tracks, i)
         }
     }
 
-    private fun drawPerson(
+    /** Debug only: every detection of the newest frame, if that frame belongs to the capture size. */
+    private fun drawRawDetections(
+        canvas: Canvas,
+        fit: FitCenter,
+        state: OverlayState,
+    ) {
+        val frame = state.frame ?: return
+        if (frame.widthImg != state.captureWidthImg || frame.heightImg != state.captureHeightImg) return
+        val detections = frame.detections
+        for (i in 0 until detections.size) {
+            drawRawDetection(canvas, fit, detections[i])
+        }
+    }
+
+    /** One raw detection, debug only: the full box and the keypoint dots; the head ring belongs to the track. */
+    private fun drawRawDetection(
         canvas: Canvas,
         fit: FitCenter,
         person: PoseDetection,
     ) {
-        val leftView = fit.imgToViewX(person.boxLeftImg)
-        val rightView = fit.imgToViewX(person.boxRightImg)
-        val topView = fit.imgToViewY(person.boxTopImg)
-        val bottomView = fit.imgToViewY(person.boxBottomImg)
-        if (config.debugMarks) {
-            canvas.drawRect(leftView, topView, rightView, bottomView, boxPaint)
-        } else {
-            drawCornerBrackets(canvas, leftView, topView, rightView, bottomView)
-        }
-
-        val minScore = config.keypointMinScore
-        val ringRadiusView = HeadRing.radius(rightView - leftView, config.headRingRadiusRatio, minHeadRingRadiusPx)
-        canvas.drawCircle(
-            fit.imgToViewX(person.headXImg(minScore)),
-            fit.imgToViewY(person.headYImg(minScore)),
-            ringRadiusView,
-            ringPaint,
+        canvas.drawRect(
+            fit.imgToViewX(person.boxLeftImg),
+            fit.imgToViewY(person.boxTopImg),
+            fit.imgToViewX(person.boxRightImg),
+            fit.imgToViewY(person.boxBottomImg),
+            boxPaint,
         )
-
-        if (!config.debugMarks) return
+        val minScore = config.keypointMinScore
         for (k in 0 until person.keypointCount) {
             if (person.keypointScores[k] >= minScore) {
                 canvas.drawCircle(
@@ -177,6 +193,45 @@ class PoseOverlayView(
                 )
             }
         }
+    }
+
+    /** Track [index] of [tracks]: corner brackets at its box, the ring at its head point and, in debug, its id. */
+    private fun drawTrack(
+        canvas: Canvas,
+        fit: FitCenter,
+        tracks: TrackSnapshot,
+        index: Int,
+    ) {
+        val leftView = fit.imgToViewX(tracks.boxLeftImg(index))
+        val rightView = fit.imgToViewX(tracks.boxRightImg(index))
+        val topView = fit.imgToViewY(tracks.boxTopImg(index))
+        val bottomView = fit.imgToViewY(tracks.boxBottomImg(index))
+        drawCornerBrackets(canvas, leftView, topView, rightView, bottomView)
+
+        val ringRadiusView = HeadRing.radius(rightView - leftView, config.headRingRadiusRatio, minHeadRingRadiusPx)
+        canvas.drawCircle(
+            fit.imgToViewX(tracks.headXImg(index)),
+            fit.imgToViewY(tracks.headYImg(index)),
+            ringRadiusView,
+            ringPaint,
+        )
+
+        if (config.debugMarks) drawTrackId(canvas, tracks.id(index), leftView, topView)
+    }
+
+    /** Debug only: the [trackId] as a number above the top-left corner of its box, kept inside the view. */
+    private fun drawTrackId(
+        canvas: Canvas,
+        trackId: Int,
+        leftView: Float,
+        topView: Float,
+    ) {
+        val length = HudFormatter.putWhole(idLabel, 0, trackId)
+        val labelWidth = hudTextPaint.measureText(idLabel, 0, length)
+        val xView = LabelPlacement.leftX(leftView, labelWidth, width.toFloat())
+        val baselineView = LabelPlacement.baselineY(topView, ascentPx, descentPx, paddingPx, height.toFloat())
+        if (xView.isNaN() || baselineView.isNaN()) return
+        canvas.drawText(idLabel, 0, length, xView, baselineView, hudTextPaint)
     }
 
     /** Two strokes along the box edges at each of the four corners, each `boxCornerRatio` of its side long. */

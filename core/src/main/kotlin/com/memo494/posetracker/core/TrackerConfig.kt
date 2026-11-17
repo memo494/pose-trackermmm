@@ -137,6 +137,45 @@ package com.memo494.posetracker.core
  * @property lockRingStrokeDp stroke width of the locked person's rings, in dp, in [[MIN_STROKE_DP], [MAX_STROKE_DP]].
  * @property lockOuterRingRatio radius of the second ring around the locked person's head ring, as a multiple of the
  *   head ring's radius (unitless), in [[MIN_LOCK_OUTER_RING_RATIO], [MAX_LOCK_OUTER_RING_RATIO]].
+ * @property relockHueBins hue bins of the appearance signature (re-locking a person by clothing colours), in
+ *   [[MIN_RELOCK_HUE_BINS], [MAX_RELOCK_HUE_BINS]].
+ * @property relockSatBins saturation bins per hue bin, in [[MIN_RELOCK_SAT_BINS], [MAX_RELOCK_SAT_BINS]]; they split
+ *   the saturation range from [relockMinSaturation] to 1.
+ * @property relockGreyBins value bins for the pixels that are too dark or too grey to have a hue, in
+ *   [[MIN_RELOCK_GREY_BINS], [MAX_RELOCK_GREY_BINS]].
+ * @property relockMinValue a pixel whose value (brightness, unitless 0..1) is below this counts as grey, in
+ *   [[MIN_RELOCK_COLOUR_LIMIT], [MAX_RELOCK_COLOUR_LIMIT]].
+ * @property relockMinSaturation a pixel whose saturation (unitless 0..1) is below this counts as grey, in
+ *   [[MIN_RELOCK_COLOUR_LIMIT], [MAX_RELOCK_COLOUR_LIMIT]].
+ * @property relockMaxSamplePixels most pixels one signature sample reads (a grid over the torso), count, in
+ *   [[MIN_RELOCK_SAMPLE_PIXELS], [MAX_RELOCK_SAMPLE_PIXELS]].
+ * @property relockSignatureAlpha weight of a new sample in the exponential average of the locked person's signature,
+ *   unitless, in [[MIN_RELOCK_SIGNATURE_ALPHA], [MAX_RELOCK_SIGNATURE_ALPHA]]; 1 = the newest sample replaces it.
+ * @property relockTorsoShrink fraction of the torso rectangle's width and of its height cut from every side before
+ *   sampling (edges hold background), unitless, in [0, [MAX_RELOCK_TORSO_SHRINK]].
+ * @property relockBoxTopRatio top of the torso, as a fraction of the person box's height from its top, used when the
+ *   shoulder and hip keypoints are not all confident, in [0, [MAX_RELOCK_BOX_TOP_RATIO]]; below [relockBoxBottomRatio].
+ * @property relockBoxBottomRatio bottom of that torso, same unit, in [[MIN_RELOCK_BOX_BOTTOM_RATIO], 1].
+ * @property relockBoxWidthRatio width of that torso as a fraction of the person box's width (centred), in
+ *   [[MIN_RELOCK_BOX_WIDTH_RATIO], 1].
+ * @property relockKeypointMinScore least confidence, unitless, of each of the four shoulder and hip keypoints for
+ *   the torso to be taken from them, in [[MIN_KEYPOINT_MIN_SCORE], [MAX_KEYPOINT_MIN_SCORE]].
+ * @property relockMemoryMs how long, in milliseconds of frame time, a lock whose track was removed waits for the
+ *   person to come back, in [[MIN_RELOCK_MEMORY_MS], [MAX_RELOCK_MEMORY_MS]]; see [relockMemoryNs].
+ * @property relockMaxDistance largest Bhattacharyya distance (unitless, 0 = same colours, 1 = nothing in common)
+ *   between a new track and the remembered signature for the lock to move to it, in
+ *   [[MIN_RELOCK_MAX_DISTANCE], [MAX_RELOCK_MAX_DISTANCE]].
+ * @property relockMinMargin how much farther every other shown track must be than the candidate, in the same
+ *   distance unit, in [0, [MAX_RELOCK_MIN_MARGIN]]; closer than that = doubt = no re-lock.
+ * @property relockMinSamplePixels fewest pixels a torso sample must read, count, in
+ *   [[MIN_RELOCK_MIN_SAMPLE_PIXELS], [MAX_RELOCK_MIN_SAMPLE_PIXELS]], not above [relockMaxSamplePixels]; fewer = no torso
+ *   (too small to tell colours).
+ * @property relockFullBodyMinAspect least height-to-width ratio (unitless) of a person box for its fixed torso part to be
+ *   used when the keypoints are not all confident, in [[MIN_RELOCK_FULL_BODY_ASPECT], [MAX_RELOCK_FULL_BODY_ASPECT]]; a
+ *   wider box (a half-visible or sitting person) gives no torso.
+ * @property relockJudgeFrames how many of its first matched frames, count, a new track is compared with a pending lock
+ *   (each frame is judged until one is accepted), in [[MIN_RELOCK_JUDGE_FRAMES], [MAX_RELOCK_JUDGE_FRAMES]]; one reject
+ *   is counted and logged when the window ends without an acceptance.
  */
 data class TrackerConfig(
     val scoreThreshold: Float = DEFAULT_SCORE_THRESHOLD,
@@ -202,6 +241,24 @@ data class TrackerConfig(
     val lockArmTimeoutMs: Long = DEFAULT_LOCK_ARM_TIMEOUT_MS,
     val lockRingStrokeDp: Float = DEFAULT_LOCK_RING_STROKE_DP,
     val lockOuterRingRatio: Float = DEFAULT_LOCK_OUTER_RING_RATIO,
+    val relockHueBins: Int = DEFAULT_RELOCK_HUE_BINS,
+    val relockSatBins: Int = DEFAULT_RELOCK_SAT_BINS,
+    val relockGreyBins: Int = DEFAULT_RELOCK_GREY_BINS,
+    val relockMinValue: Float = DEFAULT_RELOCK_MIN_VALUE,
+    val relockMinSaturation: Float = DEFAULT_RELOCK_MIN_SATURATION,
+    val relockMaxSamplePixels: Int = DEFAULT_RELOCK_SAMPLE_PIXELS,
+    val relockSignatureAlpha: Float = DEFAULT_RELOCK_SIGNATURE_ALPHA,
+    val relockTorsoShrink: Float = DEFAULT_RELOCK_TORSO_SHRINK,
+    val relockBoxTopRatio: Float = DEFAULT_RELOCK_BOX_TOP_RATIO,
+    val relockBoxBottomRatio: Float = DEFAULT_RELOCK_BOX_BOTTOM_RATIO,
+    val relockBoxWidthRatio: Float = DEFAULT_RELOCK_BOX_WIDTH_RATIO,
+    val relockKeypointMinScore: Float = DEFAULT_RELOCK_KEYPOINT_MIN_SCORE,
+    val relockMemoryMs: Long = DEFAULT_RELOCK_MEMORY_MS,
+    val relockMaxDistance: Float = DEFAULT_RELOCK_MAX_DISTANCE,
+    val relockMinMargin: Float = DEFAULT_RELOCK_MIN_MARGIN,
+    val relockMinSamplePixels: Int = DEFAULT_RELOCK_MIN_SAMPLE_PIXELS,
+    val relockFullBodyMinAspect: Float = DEFAULT_RELOCK_FULL_BODY_ASPECT,
+    val relockJudgeFrames: Int = DEFAULT_RELOCK_JUDGE_FRAMES,
 ) {
     init {
         require(scoreThreshold in MIN_SCORE_THRESHOLD..MAX_SCORE_THRESHOLD) {
@@ -413,6 +470,67 @@ data class TrackerConfig(
         require(lockOuterRingRatio in MIN_LOCK_OUTER_RING_RATIO..MAX_LOCK_OUTER_RING_RATIO) {
             "lockOuterRingRatio $lockOuterRingRatio outside [$MIN_LOCK_OUTER_RING_RATIO, $MAX_LOCK_OUTER_RING_RATIO]"
         }
+        require(relockHueBins in MIN_RELOCK_HUE_BINS..MAX_RELOCK_HUE_BINS) {
+            "relockHueBins $relockHueBins outside [$MIN_RELOCK_HUE_BINS, $MAX_RELOCK_HUE_BINS]"
+        }
+        require(relockSatBins in MIN_RELOCK_SAT_BINS..MAX_RELOCK_SAT_BINS) {
+            "relockSatBins $relockSatBins outside [$MIN_RELOCK_SAT_BINS, $MAX_RELOCK_SAT_BINS]"
+        }
+        require(relockGreyBins in MIN_RELOCK_GREY_BINS..MAX_RELOCK_GREY_BINS) {
+            "relockGreyBins $relockGreyBins outside [$MIN_RELOCK_GREY_BINS, $MAX_RELOCK_GREY_BINS]"
+        }
+        require(relockMinValue in MIN_RELOCK_COLOUR_LIMIT..MAX_RELOCK_COLOUR_LIMIT) {
+            "relockMinValue $relockMinValue outside [$MIN_RELOCK_COLOUR_LIMIT, $MAX_RELOCK_COLOUR_LIMIT]"
+        }
+        require(relockMinSaturation in MIN_RELOCK_COLOUR_LIMIT..MAX_RELOCK_COLOUR_LIMIT) {
+            "relockMinSaturation $relockMinSaturation outside [$MIN_RELOCK_COLOUR_LIMIT, $MAX_RELOCK_COLOUR_LIMIT]"
+        }
+        require(relockMaxSamplePixels in MIN_RELOCK_SAMPLE_PIXELS..MAX_RELOCK_SAMPLE_PIXELS) {
+            "relockMaxSamplePixels $relockMaxSamplePixels outside [$MIN_RELOCK_SAMPLE_PIXELS, $MAX_RELOCK_SAMPLE_PIXELS]"
+        }
+        require(relockSignatureAlpha in MIN_RELOCK_SIGNATURE_ALPHA..MAX_RELOCK_SIGNATURE_ALPHA) {
+            "relockSignatureAlpha $relockSignatureAlpha outside [$MIN_RELOCK_SIGNATURE_ALPHA, $MAX_RELOCK_SIGNATURE_ALPHA]"
+        }
+        require(relockTorsoShrink in 0f..MAX_RELOCK_TORSO_SHRINK) {
+            "relockTorsoShrink $relockTorsoShrink outside [0, $MAX_RELOCK_TORSO_SHRINK]"
+        }
+        require(relockBoxTopRatio in 0f..MAX_RELOCK_BOX_TOP_RATIO) {
+            "relockBoxTopRatio $relockBoxTopRatio outside [0, $MAX_RELOCK_BOX_TOP_RATIO]"
+        }
+        require(relockBoxBottomRatio in MIN_RELOCK_BOX_BOTTOM_RATIO..1f) {
+            "relockBoxBottomRatio $relockBoxBottomRatio outside [$MIN_RELOCK_BOX_BOTTOM_RATIO, 1]"
+        }
+        require(relockBoxTopRatio < relockBoxBottomRatio) {
+            "relockBoxTopRatio $relockBoxTopRatio must be below relockBoxBottomRatio $relockBoxBottomRatio"
+        }
+        require(relockBoxWidthRatio in MIN_RELOCK_BOX_WIDTH_RATIO..1f) {
+            "relockBoxWidthRatio $relockBoxWidthRatio outside [$MIN_RELOCK_BOX_WIDTH_RATIO, 1]"
+        }
+        require(relockKeypointMinScore in MIN_KEYPOINT_MIN_SCORE..MAX_KEYPOINT_MIN_SCORE) {
+            "relockKeypointMinScore $relockKeypointMinScore outside [$MIN_KEYPOINT_MIN_SCORE, $MAX_KEYPOINT_MIN_SCORE]"
+        }
+        require(relockMemoryMs in MIN_RELOCK_MEMORY_MS..MAX_RELOCK_MEMORY_MS) {
+            "relockMemoryMs $relockMemoryMs outside [$MIN_RELOCK_MEMORY_MS, $MAX_RELOCK_MEMORY_MS]"
+        }
+        require(relockMaxDistance in MIN_RELOCK_MAX_DISTANCE..MAX_RELOCK_MAX_DISTANCE) {
+            "relockMaxDistance $relockMaxDistance outside [$MIN_RELOCK_MAX_DISTANCE, $MAX_RELOCK_MAX_DISTANCE]"
+        }
+        require(relockMinMargin in 0f..MAX_RELOCK_MIN_MARGIN) {
+            "relockMinMargin $relockMinMargin outside [0, $MAX_RELOCK_MIN_MARGIN]"
+        }
+        require(relockMinSamplePixels in MIN_RELOCK_MIN_SAMPLE_PIXELS..MAX_RELOCK_MIN_SAMPLE_PIXELS) {
+            "relockMinSamplePixels $relockMinSamplePixels outside [$MIN_RELOCK_MIN_SAMPLE_PIXELS, $MAX_RELOCK_MIN_SAMPLE_PIXELS]"
+        }
+        require(relockMinSamplePixels <= relockMaxSamplePixels) {
+            "relockMinSamplePixels $relockMinSamplePixels above relockMaxSamplePixels $relockMaxSamplePixels"
+        }
+        require(relockFullBodyMinAspect in MIN_RELOCK_FULL_BODY_ASPECT..MAX_RELOCK_FULL_BODY_ASPECT) {
+            "relockFullBodyMinAspect $relockFullBodyMinAspect outside " +
+                "[$MIN_RELOCK_FULL_BODY_ASPECT, $MAX_RELOCK_FULL_BODY_ASPECT]"
+        }
+        require(relockJudgeFrames in MIN_RELOCK_JUDGE_FRAMES..MAX_RELOCK_JUDGE_FRAMES) {
+            "relockJudgeFrames $relockJudgeFrames outside [$MIN_RELOCK_JUDGE_FRAMES, $MAX_RELOCK_JUDGE_FRAMES]"
+        }
     }
 
     /** Minimum time between two HUD text updates, in nanoseconds (duration, not a timestamp). */
@@ -426,6 +544,10 @@ data class TrackerConfig(
     /** How long the overlay stays touchable after the lock handle was tapped, in nanoseconds (a duration). */
     val lockArmTimeoutNs: Long
         get() = lockArmTimeoutMs * NANOS_PER_MILLI
+
+    /** How long a lock whose track was removed waits for the person, in nanoseconds of frame time (a duration). */
+    val relockMemoryNs: Long
+        get() = relockMemoryMs * NANOS_PER_MILLI
 
     /** Idle time at which tentative tracks are promoted, in nanoseconds (duration, not a timestamp). */
     val trackIdlePromoteNs: Long
@@ -934,6 +1056,153 @@ data class TrackerConfig(
 
         /** Highest accepted [lockOuterRingRatio]. */
         const val MAX_LOCK_OUTER_RING_RATIO = 2.0f
+
+        /** Default [relockHueBins]. */
+        const val DEFAULT_RELOCK_HUE_BINS = 16
+
+        /** Lowest accepted [relockHueBins]. */
+        const val MIN_RELOCK_HUE_BINS = 4
+
+        /** Highest accepted [relockHueBins]. */
+        const val MAX_RELOCK_HUE_BINS = 64
+
+        /** Default [relockSatBins]. */
+        const val DEFAULT_RELOCK_SAT_BINS = 4
+
+        /** Lowest accepted [relockSatBins]. */
+        const val MIN_RELOCK_SAT_BINS = 1
+
+        /** Highest accepted [relockSatBins]. */
+        const val MAX_RELOCK_SAT_BINS = 16
+
+        /** Default [relockGreyBins]. */
+        const val DEFAULT_RELOCK_GREY_BINS = 4
+
+        /** Lowest accepted [relockGreyBins]. */
+        const val MIN_RELOCK_GREY_BINS = 1
+
+        /** Highest accepted [relockGreyBins]. */
+        const val MAX_RELOCK_GREY_BINS = 16
+
+        /** Default [relockMinValue], unitless. */
+        const val DEFAULT_RELOCK_MIN_VALUE = 0.15f
+
+        /** Default [relockMinSaturation], unitless. */
+        const val DEFAULT_RELOCK_MIN_SATURATION = 0.15f
+
+        /** Lowest accepted [relockMinValue] / [relockMinSaturation]. */
+        const val MIN_RELOCK_COLOUR_LIMIT = 0.01f
+
+        /** Highest accepted [relockMinValue] / [relockMinSaturation]. */
+        const val MAX_RELOCK_COLOUR_LIMIT = 0.5f
+
+        /** Default [relockMaxSamplePixels], count. */
+        const val DEFAULT_RELOCK_SAMPLE_PIXELS = 2000
+
+        /** Lowest accepted [relockMaxSamplePixels]. */
+        const val MIN_RELOCK_SAMPLE_PIXELS = 100
+
+        /** Highest accepted [relockMaxSamplePixels]. */
+        const val MAX_RELOCK_SAMPLE_PIXELS = 20_000
+
+        /** Default [relockSignatureAlpha], unitless. */
+        const val DEFAULT_RELOCK_SIGNATURE_ALPHA = 0.1f
+
+        /** Lowest accepted [relockSignatureAlpha]. */
+        const val MIN_RELOCK_SIGNATURE_ALPHA = 0.01f
+
+        /** Highest accepted [relockSignatureAlpha]. */
+        const val MAX_RELOCK_SIGNATURE_ALPHA = 1f
+
+        /** Default [relockTorsoShrink], unitless. */
+        const val DEFAULT_RELOCK_TORSO_SHRINK = 0.1f
+
+        /** Highest accepted [relockTorsoShrink]: less than half, so something is left. */
+        const val MAX_RELOCK_TORSO_SHRINK = 0.4f
+
+        /** Default [relockBoxTopRatio], unitless. */
+        const val DEFAULT_RELOCK_BOX_TOP_RATIO = 0.25f
+
+        /** Highest accepted [relockBoxTopRatio]. */
+        const val MAX_RELOCK_BOX_TOP_RATIO = 0.9f
+
+        /** Default [relockBoxBottomRatio], unitless. */
+        const val DEFAULT_RELOCK_BOX_BOTTOM_RATIO = 0.6f
+
+        /** Lowest accepted [relockBoxBottomRatio]. */
+        const val MIN_RELOCK_BOX_BOTTOM_RATIO = 0.1f
+
+        /** Default [relockBoxWidthRatio], unitless. */
+        const val DEFAULT_RELOCK_BOX_WIDTH_RATIO = 0.6f
+
+        /** Lowest accepted [relockBoxWidthRatio]. */
+        const val MIN_RELOCK_BOX_WIDTH_RATIO = 0.1f
+
+        /** Default [relockKeypointMinScore], unitless. */
+        const val DEFAULT_RELOCK_KEYPOINT_MIN_SCORE = 0.5f
+
+        /** Default [relockMemoryMs], in milliseconds: one minute. */
+        const val DEFAULT_RELOCK_MEMORY_MS = 60_000L
+
+        /** Lowest accepted [relockMemoryMs], in milliseconds. */
+        const val MIN_RELOCK_MEMORY_MS = 1000L
+
+        /** Highest accepted [relockMemoryMs], in milliseconds: ten minutes. */
+        const val MAX_RELOCK_MEMORY_MS = 600_000L
+
+        /** Default [relockMaxDistance], unitless; a guess until there is phone data (the `lock:` log lines tune it). */
+        const val DEFAULT_RELOCK_MAX_DISTANCE = 0.30f
+
+        /** Lowest accepted [relockMaxDistance]. */
+        const val MIN_RELOCK_MAX_DISTANCE = 0.01f
+
+        /** Highest accepted [relockMaxDistance]. */
+        const val MAX_RELOCK_MAX_DISTANCE = 1f
+
+        /** Default [relockMinMargin], unitless; a guess like [DEFAULT_RELOCK_MAX_DISTANCE]. */
+        const val DEFAULT_RELOCK_MIN_MARGIN = 0.10f
+
+        /** Highest accepted [relockMinMargin]. */
+        const val MAX_RELOCK_MIN_MARGIN = 1f
+
+        /** Default [relockMinSamplePixels], count. */
+        const val DEFAULT_RELOCK_MIN_SAMPLE_PIXELS = 150
+
+        /** Lowest accepted [relockMinSamplePixels]. */
+        const val MIN_RELOCK_MIN_SAMPLE_PIXELS = 10
+
+        /** Highest accepted [relockMinSamplePixels]. */
+        const val MAX_RELOCK_MIN_SAMPLE_PIXELS = 5000
+
+        /** Default [relockFullBodyMinAspect], unitless. */
+        const val DEFAULT_RELOCK_FULL_BODY_ASPECT = 1.8f
+
+        /** Lowest accepted [relockFullBodyMinAspect]. */
+        const val MIN_RELOCK_FULL_BODY_ASPECT = 1f
+
+        /** Highest accepted [relockFullBodyMinAspect]. */
+        const val MAX_RELOCK_FULL_BODY_ASPECT = 4f
+
+        /** Default [relockJudgeFrames], count. */
+        const val DEFAULT_RELOCK_JUDGE_FRAMES = 10
+
+        /** Lowest accepted [relockJudgeFrames]. */
+        const val MIN_RELOCK_JUDGE_FRAMES = 1
+
+        /** Highest accepted [relockJudgeFrames]. */
+        const val MAX_RELOCK_JUDGE_FRAMES = 100
+
+        /** COCO keypoint index of the left shoulder. */
+        const val KEYPOINT_LEFT_SHOULDER = 5
+
+        /** COCO keypoint index of the right shoulder. */
+        const val KEYPOINT_RIGHT_SHOULDER = 6
+
+        /** COCO keypoint index of the left hip. */
+        const val KEYPOINT_LEFT_HIP = 11
+
+        /** COCO keypoint index of the right hip. */
+        const val KEYPOINT_RIGHT_HIP = 12
 
         /** How far ahead, in seconds, the thermal headroom is forecast; 0 = the current headroom. */
         const val THERMAL_HEADROOM_FORECAST_SECONDS = 0

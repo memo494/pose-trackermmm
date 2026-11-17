@@ -127,6 +127,10 @@ internal object DiagnosticsReport {
         line(out, "trackIdlePromotions", stats.trackIdlePromotions)
         line(out, "trackRecoveries", stats.trackRecoveries)
         line(out, "trackRemovals", stats.trackRemovals)
+        line(out, "locks", stats.locks)
+        line(out, "lockRelocks", stats.lockRelocks)
+        line(out, "lockRelockRejects", stats.lockRelockRejects)
+        line(out, "lockExpired", stats.lockExpired)
         appendModel(out, stats.model)
         appendTiming(out, stats)
     }

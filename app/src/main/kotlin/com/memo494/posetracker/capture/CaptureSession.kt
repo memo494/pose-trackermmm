@@ -181,6 +181,7 @@ internal class CaptureSession(
             onCapture =
                 listOf(
                     TeardownStep("stop HUD tick") { captureHandler?.removeCallbacks(hudTick) },
+                    TeardownStep("end the lock") { pipeline?.onStop() },
                     TeardownStep("unregister display listener") {
                         displayManager?.unregisterDisplayListener(displayListener)
                     },

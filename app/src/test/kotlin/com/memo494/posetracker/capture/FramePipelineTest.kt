@@ -41,6 +41,32 @@ private const val SMALL_IDLE_STEP_MS = 10L
 private const val BIG_IDLE_STEP_MS = 150L
 private const val REMOVAL_IDLE_MS = 2000L
 private const val LOST_MS_TOLERANCE = 1f
+private const val RED_SHIRT = 0xC81E1E
+private const val BLUE_SHIRT = 0x1E1EC8
+private const val OPAQUE_BYTE: Byte = -1
+private const val BYTE_MASK = 0xFF
+private const val RED_SHIFT = 16
+private const val GREEN_SHIFT = 8
+private const val DEPARTURE_STEP_MS = 300L
+private const val MEMORY_STEP_MS = 5000L
+private const val RIGHT_GROUP_MIN_X_IMG = 200f
+private const val STEPS_BEYOND_THE_MEMORY = 13
+private const val STEPS_INSIDE_THE_MEMORY = 11
+private const val HUD_TICK_AFTER_LONG_IDLE_MS = 200_000L
+
+/** Three frames to be shown and ten judged frames: a new track's judge window ends with the twelfth frame. */
+private const val WINDOW_END_FRAMES = 12
+private const val ENTRY_START_SHIFT_X_IMG = -140
+private const val ENTRY_STEP_X_IMG = 5
+private const val ENTRY_CLIPPED_FRAMES = 5
+private const val ENTRY_FRAMES = 10
+private const val EDGE_SHIFT_X_IMG = -130f
+private const val EDGE_WALK_STEP_X_IMG = 10f
+private const val EDGE_WALK_STEPS = 12
+private const val EDGE_CLIPPED_SHIFT_X_IMG = -120f
+private const val EDGE_STAY_FRAMES = 11
+private const val FRAMES_WHILE_HIDDEN = 2
+private const val FRAMES_UNTIL_REMOVED = 22
 
 /** An image that records its reads and closes in [events]. */
 private class FakeFrameImage(
@@ -52,6 +78,7 @@ private class FakeFrameImage(
     private val pixelsError: Throwable?,
     private val closeError: Throwable?,
     private val onPixelsRead: (() -> Unit)? = null,
+    paint: ((ByteBuffer) -> Unit)? = null,
 ) : FrameImage {
     override val pixelStride: Int = BYTES_PER_PIXEL
     val buffer: ByteBuffer = ByteBuffer.allocate(rowStride * heightImg)
@@ -59,6 +86,7 @@ private class FakeFrameImage(
 
     init {
         for (i in 0 until buffer.capacity()) buffer.put(i, (i % PIXEL_PATTERN_PERIOD).toByte())
+        paint?.invoke(buffer)
     }
 
     override val pixels: ByteBuffer
@@ -177,7 +205,8 @@ class FramePipelineTest {
         pixelsError: Throwable? = null,
         closeError: Throwable? = null,
         onPixelsRead: (() -> Unit)? = null,
-    ): FakeFrameImage = FakeFrameImage(events, widthImg, heightImg, timestampNs, rowStride, pixelsError, closeError, onPixelsRead)
+        paint: ((ByteBuffer) -> Unit)? = null,
+    ): FakeFrameImage = FakeFrameImage(events, widthImg, heightImg, timestampNs, rowStride, pixelsError, closeError, onPixelsRead, paint)
 
     private fun acquireNs(): Long = NOW_NS - MS_NS
 
@@ -1653,5 +1682,502 @@ class FramePipelineTest {
         pipeline.requestLock(OverlayState.NO_LOCK)
 
         assertThat(pipeline.hasLock).isFalse()
+    }
+
+    // ---- re-lock by clothing colours (M4c T2) ----
+
+    /** A person and the colour of the pixels of their whole box (0xRRGGBB); the rest of the frame keeps the test pattern. */
+    private class Look(
+        val person: PoseDetection,
+        val colour: Int,
+    )
+
+    /** Feeds one frame at [atMs] in which each look's box is painted in its colour and the detector reports the people. */
+    private fun lookFrameAt(
+        pipeline: FramePipeline,
+        atMs: Long,
+        vararg looks: Look,
+    ) {
+        detector.people = looks.map { it.person }
+        clock.currentNs = NOW_NS + atMs * MS_NS
+        val paint = { buffer: ByteBuffer ->
+            for (look in looks) paintBox(buffer, look.person, look.colour)
+        }
+        pipeline.onFrame(
+            image(widthImg = TRACK_WIDTH, heightImg = TRACK_HEIGHT, timestampNs = clock.currentNs - 2 * MS_NS, paint = paint),
+            clock.currentNs,
+        )
+    }
+
+    private fun paintBox(
+        buffer: ByteBuffer,
+        person: PoseDetection,
+        colour: Int,
+    ) {
+        for (y in person.boxTopImg.toInt().coerceAtLeast(0) until person.boxBottomImg.toInt().coerceAtMost(TRACK_HEIGHT)) {
+            for (x in person.boxLeftImg.toInt().coerceAtLeast(0) until person.boxRightImg.toInt().coerceAtMost(TRACK_WIDTH)) {
+                val index = (y * TRACK_WIDTH + x) * BYTES_PER_PIXEL
+                buffer.put(index, ((colour shr RED_SHIFT) and BYTE_MASK).toByte())
+                buffer.put(index + 1, ((colour shr GREEN_SHIFT) and BYTE_MASK).toByte())
+                buffer.put(index + 2, (colour and BYTE_MASK).toByte())
+                buffer.put(index + 3, OPAQUE_BYTE)
+            }
+        }
+    }
+
+    /** Frames [FRAME_STEP_MS] apart of [looks], from [startMs]; returns the time of the last one. */
+    private fun lookFramesFrom(
+        pipeline: FramePipeline,
+        startMs: Long,
+        count: Int,
+        vararg looks: Look,
+    ): Long {
+        var atMs = startMs
+        for (i in 0 until count) {
+            lookFrameAt(pipeline, atMs, *looks)
+            if (i < count - 1) atMs += FRAME_STEP_MS
+        }
+        return atMs
+    }
+
+    /** The lock messages of the log, in order. */
+    private fun lockLogs(): List<String> = logs.filter { it.startsWith("lock:") }
+
+    /**
+     * One person in [colour] stands in the left of the picture for three frames and is locked; three more frames
+     * build the signature; then the picture has nobody for four frames [DEPARTURE_STEP_MS] apart, so the track is
+     * removed and the lock waits. Returns the time of the last frame; the person's id is 1.
+     */
+    private fun lockedPersonWhoLeaves(
+        pipeline: FramePipeline,
+        colour: Int,
+    ): Long {
+        val first = Look(walker(), colour)
+        lookFramesFrom(pipeline, 0, 3, first)
+        assertThat(states.last().tracks.id(0)).isEqualTo(1)
+        pipeline.requestLock(1)
+        var atMs = lookFramesFrom(pipeline, 3 * FRAME_STEP_MS, 3, first)
+        assertThat(states.last().lockedId).isEqualTo(1)
+        for (i in 0 until 4) {
+            atMs += DEPARTURE_STEP_MS
+            lookFrameAt(pipeline, atMs)
+        }
+        assertThat(states.last().tracks.count).isEqualTo(0)
+        return atMs
+    }
+
+    /** The id of the shown track of the newest state whose head is right of [xImg] (the new, right-hand person). */
+    private fun idOfTheTrackRightOf(xImg: Float): Int {
+        val tracks = states.last().tracks
+        for (i in 0 until tracks.count) {
+            if (tracks.headXImg(i) > xImg) return tracks.id(i)
+        }
+        return -1
+    }
+
+    /** The id of the shown track of the newest state whose head is left of [xImg]. */
+    private fun idOfTheTrackLeftOf(xImg: Float): Int {
+        val tracks = states.last().tracks
+        for (i in 0 until tracks.count) {
+            if (tracks.headXImg(i) < xImg) return tracks.id(i)
+        }
+        return -1
+    }
+
+    @Test
+    fun relock_aPersonWhoLeavesAndComesBackInTheSameColours_getsTheLockAgain() {
+        val pipeline = trackingPipeline()
+        val leftAtMs = lockedPersonWhoLeaves(pipeline, RED_SHIRT)
+        assertThat(states.last().lockedId).isEqualTo(OverlayState.NO_LOCK)
+        assertThat(pipeline.hasLock).isTrue()
+
+        lookFramesFrom(pipeline, leftAtMs + FRAME_STEP_MS, 3, Look(walker(shiftXImg = NEW_PERSON_SHIFT_X_IMG), RED_SHIRT))
+
+        assertThat(states.last().tracks.count).isEqualTo(1)
+        assertThat(states.last().tracks.id(0)).isEqualTo(2)
+        assertThat(states.last().lockedId).isEqualTo(2)
+        assertThat(pipeline.hasLock).isTrue()
+        assertThat(pipeline.lockRelockCount).isEqualTo(1)
+        assertThat(pipeline.lockRelockRejectCount).isEqualTo(0)
+        assertThat(pipeline.lockCount).isEqualTo(1)
+    }
+
+    @Test
+    fun relock_logsEachStepOfTheLock() {
+        val pipeline = trackingPipeline()
+        val leftAtMs = lockedPersonWhoLeaves(pipeline, RED_SHIRT)
+
+        lookFramesFrom(pipeline, leftAtMs + FRAME_STEP_MS, 3, Look(walker(shiftXImg = NEW_PERSON_SHIFT_X_IMG), RED_SHIRT))
+
+        assertThat(lockLogs())
+            .containsExactly("lock: set id=1", "lock: pending id=1", "lock: relocked id=1 -> 2 d=0.00 next=none")
+            .inOrder()
+    }
+
+    @Test
+    fun relock_aPendingLock_drawsNoRingButStillCountsAsALock() {
+        val pipeline = trackingPipeline()
+        val leftAtMs = lockedPersonWhoLeaves(pipeline, RED_SHIRT)
+
+        lookFrameAt(pipeline, leftAtMs + FRAME_STEP_MS)
+        tickAt(pipeline, leftAtMs + 2 * FRAME_STEP_MS)
+
+        assertThat(states.takeLast(2).map { it.lockedId }).containsExactly(OverlayState.NO_LOCK, OverlayState.NO_LOCK)
+        assertThat(pipeline.hasLock).isTrue()
+    }
+
+    @Test
+    fun relock_aDifferentlyColouredPerson_doesNotGetTheLock() {
+        val pipeline = trackingPipeline()
+        val leftAtMs = lockedPersonWhoLeaves(pipeline, RED_SHIRT)
+
+        lookFramesFrom(pipeline, leftAtMs + FRAME_STEP_MS, WINDOW_END_FRAMES, Look(walker(shiftXImg = NEW_PERSON_SHIFT_X_IMG), BLUE_SHIRT))
+
+        assertThat(states.last().tracks.count).isEqualTo(1)
+        assertThat(states.last().lockedId).isEqualTo(OverlayState.NO_LOCK)
+        assertThat(pipeline.hasLock).isTrue()
+        assertThat(pipeline.lockRelockCount).isEqualTo(0)
+        assertThat(pipeline.lockRelockRejectCount).isEqualTo(1)
+        assertThat(lockLogs().last()).isEqualTo("lock: candidate id=2 d=1.00 rejected (too far)")
+    }
+
+    @Test
+    fun relock_twoNewPeopleInTheSameColours_getNoLockBecauseItIsAmbiguous() {
+        val pipeline = trackingPipeline()
+        val leftAtMs = lockedPersonWhoLeaves(pipeline, RED_SHIRT)
+
+        lookFramesFrom(
+            pipeline,
+            leftAtMs + FRAME_STEP_MS,
+            WINDOW_END_FRAMES,
+            Look(walker(shiftXImg = NEW_PERSON_SHIFT_X_IMG), RED_SHIRT),
+            Look(walker(), RED_SHIRT),
+        )
+
+        assertThat(states.last().tracks.count).isEqualTo(2)
+        assertThat(states.last().lockedId).isEqualTo(OverlayState.NO_LOCK)
+        assertThat(pipeline.lockRelockCount).isEqualTo(0)
+        assertThat(pipeline.lockRelockRejectCount).isEqualTo(2)
+        assertThat(lockLogs().last()).contains("rejected (ambiguous, next=0.00)")
+    }
+
+    @Test
+    fun relock_amongTwoNewPeople_goesToTheOneInTheRememberedColours() {
+        val pipeline = trackingPipeline()
+        val leftAtMs = lockedPersonWhoLeaves(pipeline, RED_SHIRT)
+
+        lookFramesFrom(
+            pipeline,
+            leftAtMs + FRAME_STEP_MS,
+            3,
+            Look(walker(), BLUE_SHIRT),
+            Look(walker(shiftXImg = NEW_PERSON_SHIFT_X_IMG), RED_SHIRT),
+        )
+
+        assertThat(states.last().tracks.count).isEqualTo(2)
+        assertThat(states.last().lockedId).isEqualTo(idOfTheTrackRightOf(RIGHT_GROUP_MIN_X_IMG))
+        assertThat(states.last().lockedId).isNotEqualTo(OverlayState.NO_LOCK)
+        assertThat(pipeline.lockRelockCount).isEqualTo(1)
+        // The blue one is judged at most once before the red one is accepted: its window never ends.
+        assertThat(pipeline.lockRelockRejectCount).isEqualTo(0)
+    }
+
+    @Test
+    fun relock_aBystanderInTheSameColours_makesTheReturnAmbiguous() {
+        val pipeline = trackingPipeline()
+        val bystander = Look(walker(shiftXImg = NEW_PERSON_SHIFT_X_IMG), RED_SHIRT)
+        val locked = Look(walker(), RED_SHIRT)
+        lookFramesFrom(pipeline, 0, 3, locked, bystander)
+        val lockedId = idOfTheTrackLeftOf(RIGHT_GROUP_MIN_X_IMG)
+        pipeline.requestLock(lockedId)
+        var atMs = lookFramesFrom(pipeline, 3 * FRAME_STEP_MS, 3, locked, bystander)
+        for (i in 0 until 4) {
+            atMs += DEPARTURE_STEP_MS
+            lookFrameAt(pipeline, atMs, bystander)
+        }
+        assertThat(states.last().tracks.count).isEqualTo(1)
+        assertThat(lockLogs().last()).isEqualTo("lock: pending id=$lockedId")
+
+        lookFramesFrom(pipeline, atMs + FRAME_STEP_MS, WINDOW_END_FRAMES, bystander, Look(walker(), RED_SHIRT))
+
+        assertThat(states.last().tracks.count).isEqualTo(2)
+        assertThat(states.last().lockedId).isEqualTo(OverlayState.NO_LOCK)
+        assertThat(pipeline.lockRelockCount).isEqualTo(0)
+        assertThat(pipeline.lockRelockRejectCount).isEqualTo(1)
+    }
+
+    @Test
+    fun relock_aLockOnATrackThatWasNeverMatched_endsWithoutWaiting() {
+        val pipeline = trackingPipeline()
+        val missAtMs = lostAfterOneMiss(pipeline)
+        val id = states.last().tracks.id(0)
+        pipeline.requestLock(id)
+        tickAt(pipeline, missAtMs + IDLE_MS)
+
+        tickAt(pipeline, missAtMs + REMOVAL_IDLE_MS)
+
+        assertThat(pipeline.hasLock).isFalse()
+        assertThat(lockLogs()).containsExactly("lock: set id=$id", "lock: cleared (track removed)").inOrder()
+    }
+
+    @Test
+    fun relock_returningInsideTheMemory_stillGetsTheLock() {
+        val pipeline = trackingPipeline()
+        var atMs = lockedPersonWhoLeaves(pipeline, RED_SHIRT)
+        for (i in 0 until STEPS_INSIDE_THE_MEMORY) {
+            atMs += MEMORY_STEP_MS
+            lookFrameAt(pipeline, atMs)
+        }
+        assertThat(pipeline.hasLock).isTrue()
+
+        lookFramesFrom(pipeline, atMs + FRAME_STEP_MS, 3, Look(walker(shiftXImg = NEW_PERSON_SHIFT_X_IMG), RED_SHIRT))
+
+        assertThat(states.last().lockedId).isNotEqualTo(OverlayState.NO_LOCK)
+        assertThat(pipeline.lockRelockCount).isEqualTo(1)
+    }
+
+    @Test
+    fun relock_afterTheMemory_theLockIsGoneAndAReturnIsNotRecognised() {
+        val pipeline = trackingPipeline()
+        var atMs = lockedPersonWhoLeaves(pipeline, RED_SHIRT)
+        for (i in 0 until STEPS_BEYOND_THE_MEMORY) {
+            atMs += MEMORY_STEP_MS
+            lookFrameAt(pipeline, atMs)
+        }
+        assertThat(pipeline.hasLock).isFalse()
+        assertThat(pipeline.lockExpiredCount).isEqualTo(1)
+        assertThat(lockLogs().last()).isEqualTo("lock: expired")
+
+        lookFramesFrom(pipeline, atMs + FRAME_STEP_MS, 3, Look(walker(shiftXImg = NEW_PERSON_SHIFT_X_IMG), RED_SHIRT))
+
+        assertThat(states.last().tracks.count).isEqualTo(1)
+        assertThat(states.last().lockedId).isEqualTo(OverlayState.NO_LOCK)
+        assertThat(pipeline.lockRelockCount).isEqualTo(0)
+        assertThat(pipeline.lockRelockRejectCount).isEqualTo(0)
+    }
+
+    @Test
+    fun relock_hudTicksWithoutFrames_doNotUseUpTheMemory() {
+        val pipeline = trackingPipeline()
+        val leftAtMs = lockedPersonWhoLeaves(pipeline, RED_SHIRT)
+
+        tickAt(pipeline, leftAtMs + HUD_TICK_AFTER_LONG_IDLE_MS)
+
+        assertThat(pipeline.hasLock).isTrue()
+        assertThat(pipeline.lockExpiredCount).isEqualTo(0)
+    }
+
+    @Test
+    fun relock_aResetEndsTheWaiting() {
+        val pipeline = trackingPipeline()
+        lockedPersonWhoLeaves(pipeline, RED_SHIRT)
+
+        pipeline.setExpectedSize(CaptureSize(TRACK_HEIGHT, TRACK_WIDTH))
+
+        assertThat(pipeline.hasLock).isFalse()
+        assertThat(states.last().lockedId).isEqualTo(OverlayState.NO_LOCK)
+        assertThat(lockLogs().last()).isEqualTo("lock: cleared (reset)")
+    }
+
+    @Test
+    fun relock_afterAReset_aPersonInTheOldColoursIsNotRelocked() {
+        val pipeline = trackingPipeline()
+        val leftAtMs = lockedPersonWhoLeaves(pipeline, RED_SHIRT)
+        pipeline.setExpectedSize(CaptureSize(TRACK_HEIGHT, TRACK_WIDTH))
+        pipeline.setExpectedSize(CaptureSize(TRACK_WIDTH, TRACK_HEIGHT))
+
+        lookFramesFrom(pipeline, leftAtMs + FRAME_STEP_MS, 3, Look(walker(), RED_SHIRT))
+
+        assertThat(states.last().tracks.count).isEqualTo(1)
+        assertThat(states.last().lockedId).isEqualTo(OverlayState.NO_LOCK)
+        assertThat(pipeline.lockRelockCount).isEqualTo(0)
+        assertThat(pipeline.lockRelockRejectCount).isEqualTo(0)
+    }
+
+    @Test
+    fun relock_aTapOnTheHandle_endsTheWaiting() {
+        val pipeline = trackingPipeline()
+        val leftAtMs = lockedPersonWhoLeaves(pipeline, RED_SHIRT)
+
+        pipeline.clearLock()
+        assertThat(pipeline.hasLock).isFalse()
+        lookFramesFrom(pipeline, leftAtMs + FRAME_STEP_MS, 3, Look(walker(shiftXImg = NEW_PERSON_SHIFT_X_IMG), RED_SHIRT))
+
+        assertThat(states.last().lockedId).isEqualTo(OverlayState.NO_LOCK)
+        assertThat(pipeline.lockRelockCount).isEqualTo(0)
+        assertThat(pipeline.lockRelockRejectCount).isEqualTo(0)
+        assertThat(lockLogs()).contains("lock: cleared (handle)")
+    }
+
+    @Test
+    fun relock_endingTheSession_endsTheWaiting() {
+        val pipeline = trackingPipeline()
+        lockedPersonWhoLeaves(pipeline, RED_SHIRT)
+
+        pipeline.onStop()
+
+        assertThat(pipeline.hasLock).isFalse()
+        assertThat(lockLogs().last()).isEqualTo("lock: cleared (stop)")
+    }
+
+    @Test
+    fun relock_endingTheSessionWithoutALock_logsNothing() {
+        val pipeline = trackingPipeline()
+        shownTrack(pipeline)
+
+        pipeline.onStop()
+
+        assertThat(lockLogs()).isEmpty()
+    }
+
+    @Test
+    fun relock_aSecondLockRequest_replacesTheFirstAndStartsANewSignature() {
+        val pipeline = trackingPipeline()
+        val first = Look(walker(), RED_SHIRT)
+        val second = Look(walker(shiftXImg = NEW_PERSON_SHIFT_X_IMG), BLUE_SHIRT)
+        lookFramesFrom(pipeline, 0, 3, first, second)
+        val firstId = idOfTheTrackLeftOf(RIGHT_GROUP_MIN_X_IMG)
+        val secondId = idOfTheTrackRightOf(RIGHT_GROUP_MIN_X_IMG)
+        pipeline.requestLock(firstId)
+        lookFrameAt(pipeline, 3 * FRAME_STEP_MS, first, second)
+
+        pipeline.requestLock(secondId)
+        lookFrameAt(pipeline, 4 * FRAME_STEP_MS, first, second)
+
+        assertThat(states.last().lockedId).isEqualTo(secondId)
+        assertThat(pipeline.lockCount).isEqualTo(2)
+        assertThat(lockLogs()).containsExactly("lock: set id=$firstId", "lock: cleared (handle)", "lock: set id=$secondId").inOrder()
+    }
+
+    @Test
+    fun relock_aFailingLogger_doesNotStopTheLock() {
+        val pipeline = trackingPipeline()
+        loggerError = RuntimeException("log failed")
+
+        lockedPersonWhoLeaves(pipeline, RED_SHIRT)
+
+        assertThat(pipeline.hasLock).isTrue()
+        assertThat(states.last().tracks.count).isEqualTo(0)
+    }
+
+    @Test
+    fun relock_aPersonBornUnderANewIdWhileTheOldTrackIsStillLost_isFoundOnceTheOldOneIsRemoved() {
+        val pipeline = trackingPipeline()
+        val first = Look(walker(), RED_SHIRT)
+        lookFramesFrom(pipeline, 0, 3, first)
+        pipeline.requestLock(1)
+        var atMs = lookFramesFrom(pipeline, 3 * FRAME_STEP_MS, 3, first)
+        for (i in 0 until FRAMES_WHILE_HIDDEN) {
+            atMs += FRAME_STEP_MS
+            lookFrameAt(pipeline, atMs)
+        }
+        val returned = Look(walker(shiftXImg = NEW_PERSON_SHIFT_X_IMG), RED_SHIRT)
+
+        lookFramesFrom(pipeline, atMs + FRAME_STEP_MS, 4, returned)
+        assertThat(states.last().tracks.count).isEqualTo(2)
+        assertThat(states.last().tracks.isLost(0)).isTrue()
+        assertThat(states.last().lockedId).isEqualTo(1)
+        lookFramesFrom(pipeline, atMs + 5 * FRAME_STEP_MS, FRAMES_UNTIL_REMOVED, returned)
+
+        assertThat(states.last().tracks.count).isEqualTo(1)
+        assertThat(states.last().tracks.id(0)).isEqualTo(2)
+        assertThat(states.last().lockedId).isEqualTo(2)
+        assertThat(pipeline.lockRelockCount).isEqualTo(1)
+    }
+
+    @Test
+    fun relock_aCandidateJudgedOnSeveralFrames_isAcceptedWhenItsFirstFramesWereHalfOutOfThePicture() {
+        val pipeline = trackingPipeline()
+        val leftAtMs = lockedPersonWhoLeaves(pipeline, RED_SHIRT)
+
+        for (k in 0 until ENTRY_FRAMES) {
+            val shift = (ENTRY_START_SHIFT_X_IMG + ENTRY_STEP_X_IMG * k).toFloat()
+            val colour = if (k < ENTRY_CLIPPED_FRAMES) BLUE_SHIRT else RED_SHIRT
+            lookFrameAt(pipeline, leftAtMs + (k + 1) * FRAME_STEP_MS, Look(walker(shiftXImg = shift), colour))
+        }
+
+        assertThat(states.last().tracks.count).isEqualTo(1)
+        assertThat(states.last().lockedId).isEqualTo(states.last().tracks.id(0))
+        assertThat(pipeline.lockRelockCount).isEqualTo(1)
+        assertThat(pipeline.lockRelockRejectCount).isEqualTo(0)
+    }
+
+    @Test
+    fun relock_aCandidateThatStaysHalfOutOfThePicture_isRejectedOnceWithNoTorso() {
+        val pipeline = trackingPipeline()
+        val leftAtMs = lockedPersonWhoLeaves(pipeline, RED_SHIRT)
+
+        lookFramesFrom(pipeline, leftAtMs + FRAME_STEP_MS, WINDOW_END_FRAMES, Look(walker(shiftXImg = EDGE_SHIFT_X_IMG), RED_SHIRT))
+
+        assertThat(states.last().lockedId).isEqualTo(OverlayState.NO_LOCK)
+        assertThat(pipeline.lockRelockRejectCount).isEqualTo(1)
+        assertThat(lockLogs().last()).isEqualTo("lock: candidate id=2 rejected (no torso)")
+    }
+
+    @Test
+    fun relock_aClippedFrameOfTheLockedPerson_isNotAddedToTheirSignature() {
+        val pipeline = trackingPipeline()
+        val standing = Look(walker(), RED_SHIRT)
+        lookFramesFrom(pipeline, 0, 3, standing)
+        pipeline.requestLock(1)
+        var atMs = lookFramesFrom(pipeline, 3 * FRAME_STEP_MS, 3, standing)
+        // The person walks to the left edge in steps of 10 px and stays there in blue: what the edge leaves of them
+        // is not their torso, and a signature that took it in would not match the red person who comes back.
+        val shifts = (1..EDGE_WALK_STEPS).map { -EDGE_WALK_STEP_X_IMG * it } + List(EDGE_STAY_FRAMES) { EDGE_SHIFT_X_IMG }
+        for (shift in shifts) {
+            atMs += FRAME_STEP_MS
+            lookFrameAt(pipeline, atMs, Look(walker(shiftXImg = shift), if (shift <= EDGE_CLIPPED_SHIFT_X_IMG) BLUE_SHIRT else RED_SHIRT))
+        }
+        assertThat(states.last().tracks.count).isEqualTo(1)
+        for (i in 0 until 4) {
+            atMs += DEPARTURE_STEP_MS
+            lookFrameAt(pipeline, atMs)
+        }
+        assertThat(states.last().tracks.count).isEqualTo(0)
+
+        lookFramesFrom(pipeline, atMs + FRAME_STEP_MS, 3, Look(walker(shiftXImg = NEW_PERSON_SHIFT_X_IMG), RED_SHIRT))
+
+        assertThat(states.last().lockedId).isEqualTo(states.last().tracks.id(0))
+        assertThat(pipeline.lockRelockCount).isEqualTo(1)
+    }
+
+    @Test
+    fun relock_anotherTrackThatCannotBeSampled_makesTheCandidateAmbiguous() {
+        val pipeline = trackingPipeline()
+        val atTheEdge = Look(walker(shiftXImg = EDGE_SHIFT_X_IMG), RED_SHIRT)
+        val locked = Look(walker(shiftXImg = NEW_PERSON_SHIFT_X_IMG), RED_SHIRT)
+        lookFramesFrom(pipeline, 0, 3, atTheEdge, locked)
+        val lockedId = idOfTheTrackRightOf(RIGHT_GROUP_MIN_X_IMG)
+        pipeline.requestLock(lockedId)
+        var atMs = lookFramesFrom(pipeline, 3 * FRAME_STEP_MS, 3, atTheEdge, locked)
+        for (i in 0 until 4) {
+            atMs += DEPARTURE_STEP_MS
+            lookFrameAt(pipeline, atMs, atTheEdge)
+        }
+        assertThat(lockLogs().last()).isEqualTo("lock: pending id=$lockedId")
+
+        lookFramesFrom(pipeline, atMs + FRAME_STEP_MS, WINDOW_END_FRAMES, atTheEdge, Look(walker(), RED_SHIRT))
+
+        assertThat(states.last().lockedId).isEqualTo(OverlayState.NO_LOCK)
+        assertThat(pipeline.lockRelockCount).isEqualTo(0)
+        assertThat(pipeline.lockRelockRejectCount).isEqualTo(1)
+        assertThat(lockLogs().last()).endsWith("d=0.00 rejected (ambiguous, next=unsampled)")
+    }
+
+    @Test
+    fun relock_aTapOnAnotherPersonWhilePending_replacesTheWaitingLock() {
+        val pipeline = trackingPipeline()
+        val leftAtMs = lockedPersonWhoLeaves(pipeline, RED_SHIRT)
+        val other = Look(walker(shiftXImg = NEW_PERSON_SHIFT_X_IMG), BLUE_SHIRT)
+        val shownAtMs = lookFramesFrom(pipeline, leftAtMs + FRAME_STEP_MS, 3, other)
+        val otherId = states.last().tracks.id(0)
+
+        pipeline.requestLock(otherId)
+        lookFrameAt(pipeline, shownAtMs + FRAME_STEP_MS, other)
+
+        assertThat(states.last().lockedId).isEqualTo(otherId)
+        val expected = listOf("lock: pending id=1", "lock: cleared (replaced)", "lock: set id=$otherId")
+        assertThat(lockLogs().takeLast(expected.size)).containsExactlyElementsIn(expected).inOrder()
+        assertThat(pipeline.lockCount).isEqualTo(2)
     }
 }

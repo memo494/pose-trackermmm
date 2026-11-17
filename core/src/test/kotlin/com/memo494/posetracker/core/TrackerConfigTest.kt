@@ -680,6 +680,81 @@ class TrackerConfigTest {
     }
 
     @Test
+    fun lockFields_haveTheDocumentedDefaults() {
+        val config = TrackerConfig()
+
+        assertThat(config.lockHandleSizeDp).isEqualTo(40f)
+        assertThat(config.lockMaxTapDistanceRatio).isEqualTo(1f)
+        assertThat(config.lockArmTimeoutMs).isEqualTo(5000L)
+        assertThat(config.lockRingStrokeDp).isEqualTo(3f)
+        assertThat(config.lockOuterRingRatio).isEqualTo(1.3f)
+    }
+
+    @Test
+    fun lockArmTimeoutNs_isTheTimeoutInNanoseconds() {
+        assertThat(TrackerConfig().lockArmTimeoutNs).isEqualTo(5_000_000_000L)
+        assertThat(TrackerConfig(lockArmTimeoutMs = 1500L).lockArmTimeoutNs).isEqualTo(1_500_000_000L)
+    }
+
+    @Test
+    fun lockFields_defaultsLieInsideTheirBounds() {
+        val config = TrackerConfig()
+
+        assertWithin(config.lockHandleSizeDp, TrackerConfig.MIN_LOCK_HANDLE_SIZE_DP, TrackerConfig.MAX_LOCK_HANDLE_SIZE_DP)
+        assertWithin(config.lockMaxTapDistanceRatio, TrackerConfig.MIN_LOCK_MAX_TAP_DISTANCE_RATIO, TrackerConfig.MAX_LOCK_MAX_TAP_DISTANCE_RATIO)
+        assertThat(config.lockArmTimeoutMs).isAtLeast(TrackerConfig.MIN_LOCK_ARM_TIMEOUT_MS)
+        assertThat(config.lockArmTimeoutMs).isAtMost(TrackerConfig.MAX_LOCK_ARM_TIMEOUT_MS)
+        assertWithin(config.lockRingStrokeDp, TrackerConfig.MIN_STROKE_DP, TrackerConfig.MAX_STROKE_DP)
+        assertWithin(config.lockOuterRingRatio, TrackerConfig.MIN_LOCK_OUTER_RING_RATIO, TrackerConfig.MAX_LOCK_OUTER_RING_RATIO)
+    }
+
+    @Test
+    fun lockFields_acceptTheirBounds() {
+        TrackerConfig(
+            lockHandleSizeDp = TrackerConfig.MIN_LOCK_HANDLE_SIZE_DP,
+            lockMaxTapDistanceRatio = TrackerConfig.MIN_LOCK_MAX_TAP_DISTANCE_RATIO,
+            lockArmTimeoutMs = TrackerConfig.MIN_LOCK_ARM_TIMEOUT_MS,
+            lockRingStrokeDp = TrackerConfig.MIN_STROKE_DP,
+            lockOuterRingRatio = TrackerConfig.MIN_LOCK_OUTER_RING_RATIO,
+        )
+        TrackerConfig(
+            lockHandleSizeDp = TrackerConfig.MAX_LOCK_HANDLE_SIZE_DP,
+            lockMaxTapDistanceRatio = TrackerConfig.MAX_LOCK_MAX_TAP_DISTANCE_RATIO,
+            lockArmTimeoutMs = TrackerConfig.MAX_LOCK_ARM_TIMEOUT_MS,
+            lockRingStrokeDp = TrackerConfig.MAX_STROKE_DP,
+            lockOuterRingRatio = TrackerConfig.MAX_LOCK_OUTER_RING_RATIO,
+        )
+    }
+
+    @Test
+    fun lockFields_outsideTheirBounds_areRejected() {
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(lockHandleSizeDp = TrackerConfig.MIN_LOCK_HANDLE_SIZE_DP - 1f) }
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(lockHandleSizeDp = TrackerConfig.MAX_LOCK_HANDLE_SIZE_DP + 1f) }
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(lockMaxTapDistanceRatio = 0f) }
+        assertThrows(IllegalArgumentException::class.java) {
+            TrackerConfig(lockMaxTapDistanceRatio = TrackerConfig.MAX_LOCK_MAX_TAP_DISTANCE_RATIO + 0.1f)
+        }
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(lockArmTimeoutMs = TrackerConfig.MIN_LOCK_ARM_TIMEOUT_MS - 1L) }
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(lockArmTimeoutMs = TrackerConfig.MAX_LOCK_ARM_TIMEOUT_MS + 1L) }
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(lockRingStrokeDp = TrackerConfig.MIN_STROKE_DP / 2f) }
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(lockRingStrokeDp = TrackerConfig.MAX_STROKE_DP + 1f) }
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(lockOuterRingRatio = 1f) }
+        assertThrows(IllegalArgumentException::class.java) {
+            TrackerConfig(lockOuterRingRatio = TrackerConfig.MAX_LOCK_OUTER_RING_RATIO + 0.1f)
+        }
+    }
+
+    @Test
+    fun lockFields_nanAndInfinity_areRejected() {
+        for (value in listOf(Float.NaN, Float.POSITIVE_INFINITY, Float.NEGATIVE_INFINITY)) {
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(lockHandleSizeDp = value) }
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(lockMaxTapDistanceRatio = value) }
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(lockRingStrokeDp = value) }
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(lockOuterRingRatio = value) }
+        }
+    }
+
+    @Test
     fun trackLifecycleFields_haveTheDocumentedDefaults() {
         val config = TrackerConfig()
 

@@ -376,6 +376,24 @@ class TrackSnapshotTest {
         }
     }
 
+    @Test
+    fun indexOfId_findsTheIndexOfAShownTrack() {
+        val snapshot = TrackSnapshot.of(FakeTrackList(FakeTrack(5), FakeTrack(9, shown = false), FakeTrack(12)), WIDTH_IMG, HEIGHT_IMG)
+
+        assertThat(snapshot.indexOfId(5)).isEqualTo(0)
+        assertThat(snapshot.indexOfId(12)).isEqualTo(1)
+    }
+
+    @Test
+    fun indexOfId_anIdThatIsNotInTheSnapshot_isMinusOne() {
+        val snapshot = TrackSnapshot.of(FakeTrackList(FakeTrack(5), FakeTrack(9, shown = false)), WIDTH_IMG, HEIGHT_IMG)
+
+        assertThat(snapshot.indexOfId(9)).isEqualTo(-1)
+        assertThat(snapshot.indexOfId(77)).isEqualTo(-1)
+        assertThat(snapshot.indexOfId(-1)).isEqualTo(-1)
+        assertThat(TrackSnapshot.EMPTY.indexOfId(5)).isEqualTo(-1)
+    }
+
     private companion object {
         const val WIDTH_IMG = 1356
         const val HEIGHT_IMG = 610

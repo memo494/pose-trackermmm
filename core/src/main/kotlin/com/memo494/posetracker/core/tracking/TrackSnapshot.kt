@@ -59,6 +59,14 @@ class TrackSnapshot private constructor(
     /** Track box bottom edge, Img pixels. */
     fun boxBottomImg(index: Int): Float = values[VALUES_PER_TRACK * checked(index) + BOX_BOTTOM]
 
+    /** Index of the track with [id] in this snapshot, or -1 when it is not in it. Allocation-free. */
+    fun indexOfId(id: Int): Int {
+        for (i in 0 until count) {
+            if (ids[i] == id) return i
+        }
+        return -1
+    }
+
     private fun checked(index: Int): Int {
         if (index < 0 || index >= count) throw IndexOutOfBoundsException("index $index, count $count")
         return index

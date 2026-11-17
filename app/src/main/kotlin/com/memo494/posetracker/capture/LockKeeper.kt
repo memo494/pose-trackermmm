@@ -33,8 +33,10 @@ import kotlin.math.min
  *   that is too small is not used. On the same frames the highest track id in the tracker's list is noted
  *   (`maxIdAtLastMatch`): every track with a higher id was born after the person was last seen;
  * - **pending**: when the held track is no longer among the shown tracks (it left, or was lost for too long) and a
- *   signature exists, the lock waits ([RelockMatcher]) for `relockMemoryMs` of frame time; without a signature the
- *   lock simply ends. A pending lock draws nothing ([resolve] says [OverlayState.NO_LOCK]) and [hasLock] stays true,
+ *   signature exists, the lock waits ([RelockMatcher]) for `relockMemoryMs` of frame time, and logs once
+ *   `lock: pending id=N frames=K` (K = frames blended into the signature); without a signature (no unclipped torso was
+ *   ever read, though every matched frame of the held track was tried) the lock ends at once, `cleared (no signature)`.
+ *   A pending lock draws nothing ([resolve] says [OverlayState.NO_LOCK]) and [hasLock] stays true,
  *   so a tap on the handle ends it;
  * - **re-lock**: while pending, a candidate is any shown track matched in the frame whose id is above
  *   `maxIdAtLastMatch` (so a person who came back under a new id while the old track was still lost counts too).
@@ -65,6 +67,9 @@ internal class LockKeeper(
     private val signature = AppearanceSignature(config)
     private val sampleSignature = AppearanceSignature(config)
     private var lastFrameNs = 0L
+
+    /** Frames whose torso was blended into [signature] since the lock began; logged when the lock turns pending. */
+    private var signatureFrames = 0
 
     /** Highest track id in the tracker's list the last time the held track was matched; candidates have a higher id. */
     private var maxIdAtLastMatch = 0
@@ -135,9 +140,9 @@ internal class LockKeeper(
         if (matcher.isPending) return OverlayState.NO_LOCK
         if (signature.hasData) {
             matcher.startPending(lastFrameNs)
-            log("lock: pending id=$id")
+            log("lock: pending id=$id frames=$signatureFrames")
         } else {
-            end(REASON_REMOVED)
+            end(REASON_NO_SIGNATURE)
         }
         return OverlayState.NO_LOCK
     }
@@ -179,6 +184,7 @@ internal class LockKeeper(
         matcher.cancel()
         signature.clear()
         sampleSignature.clear()
+        signatureFrames = 0
         candidateCount = 0
         maxIdAtLastMatch = id
         lockCount++
@@ -192,6 +198,7 @@ internal class LockKeeper(
         matcher.cancel()
         signature.clear()
         sampleSignature.clear()
+        signatureFrames = 0
         candidateCount = 0
         maxIdAtLastMatch = 0
         requestedId.compareAndSet(id, OverlayState.NO_LOCK)
@@ -218,7 +225,7 @@ internal class LockKeeper(
         if (index < 0 || list.matchedDetectionIndex(index) < 0) return
         maxIdAtLastMatch = highestId(list)
         if (!torsoOf(list, index, detections, frame) || torso.clipped) return
-        signature.blend(frame.rgba, frame.widthImg, frame.heightImg, torso)
+        if (signature.blend(frame.rgba, frame.widthImg, frame.heightImg, torso)) signatureFrames++
     }
 
     private fun tryRelock(
@@ -431,7 +438,7 @@ internal class LockKeeper(
         const val REASON_HANDLE = "handle"
         const val REASON_RESET = "reset"
         const val REASON_STOP = "stop"
-        const val REASON_REMOVED = "track removed"
+        const val REASON_NO_SIGNATURE = "no signature"
         const val REASON_REPLACED = "replaced"
 
         /** Verdicts of a candidate's newest judged frame. */

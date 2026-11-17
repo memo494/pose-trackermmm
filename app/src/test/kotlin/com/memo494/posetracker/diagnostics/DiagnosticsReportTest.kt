@@ -288,7 +288,7 @@ class DiagnosticsReportTest {
         val lines = summaryLines(stats)
 
         assertThat(lines.indexOf("tracksShown=0")).isEqualTo(lines.indexOf("headYImg=NaN") + 1)
-        assertThat(lines.indexOf("trackRemovals=0")).isLessThan(lines.indexOf("modelSource=builtin"))
+        assertThat(lines.indexOf("trackRemovals=0")).isLessThan(lines.indexOf("modelSource=unknown"))
     }
 
     @Test

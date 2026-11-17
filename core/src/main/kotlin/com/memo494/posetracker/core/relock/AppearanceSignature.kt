@@ -36,9 +36,10 @@ class AppearanceSignature(
     var lastSampleCount: Int = 0
         private set
 
-    /** Forgets everything. */
+    /** Forgets everything, the working histogram too. */
     fun clear() {
         bins.fill(0f)
+        scratch.fill(0f)
         hasData = false
         lastSampleCount = 0
     }
@@ -46,7 +47,7 @@ class AppearanceSignature(
     /**
      * Replaces the signature with the histogram of [rect] in [rgba] (RGBA_8888, [widthImg] x [heightImg]). Returns
      * false and changes nothing when the pixels cannot be read (wrong array size) or [rect], clipped to the image,
-     * is empty.
+     * holds fewer than `relockMinSamplePixels` sample points (too small to tell colours).
      */
     fun set(
         rgba: ByteArray,
@@ -88,7 +89,7 @@ class AppearanceSignature(
         return sqrt(max(0f, 1f - min(coefficient, 1f)))
     }
 
-    /** Fills [scratch] with the normalised histogram of [rect]; false when nothing could be read. */
+    /** Fills [scratch] with the normalised histogram of [rect]; false when too little could be read. */
     private fun histogram(
         rgba: ByteArray,
         widthImg: Int,
@@ -103,6 +104,8 @@ class AppearanceSignature(
         val bottom = min(rect.bottomImg, heightImg)
         if (right <= left || bottom <= top) return false
         val step = gridStep(right - left, bottom - top)
+        val points = cells(right - left, step).toLong() * cells(bottom - top, step)
+        if (points < config.relockMinSamplePixels) return false
         scratch.fill(0f)
         var count = 0
         var y = top

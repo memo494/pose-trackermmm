@@ -167,6 +167,15 @@ package com.memo494.posetracker.core
  *   [[MIN_RELOCK_MAX_DISTANCE], [MAX_RELOCK_MAX_DISTANCE]].
  * @property relockMinMargin how much farther every other shown track must be than the candidate, in the same
  *   distance unit, in [0, [MAX_RELOCK_MIN_MARGIN]]; closer than that = doubt = no re-lock.
+ * @property relockMinSamplePixels fewest pixels a torso sample must read, count, in
+ *   [[MIN_RELOCK_MIN_SAMPLE_PIXELS], [MAX_RELOCK_MIN_SAMPLE_PIXELS]], not above [relockMaxSamplePixels]; fewer = no torso
+ *   (too small to tell colours).
+ * @property relockFullBodyMinAspect least height-to-width ratio (unitless) of a person box for its fixed torso part to be
+ *   used when the keypoints are not all confident, in [[MIN_RELOCK_FULL_BODY_ASPECT], [MAX_RELOCK_FULL_BODY_ASPECT]]; a
+ *   wider box (a half-visible or sitting person) gives no torso.
+ * @property relockJudgeFrames how many of its first matched frames, count, a new track is compared with a pending lock
+ *   (each frame is judged until one is accepted), in [[MIN_RELOCK_JUDGE_FRAMES], [MAX_RELOCK_JUDGE_FRAMES]]; one reject
+ *   is counted and logged when the window ends without an acceptance.
  */
 data class TrackerConfig(
     val scoreThreshold: Float = DEFAULT_SCORE_THRESHOLD,
@@ -247,6 +256,9 @@ data class TrackerConfig(
     val relockMemoryMs: Long = DEFAULT_RELOCK_MEMORY_MS,
     val relockMaxDistance: Float = DEFAULT_RELOCK_MAX_DISTANCE,
     val relockMinMargin: Float = DEFAULT_RELOCK_MIN_MARGIN,
+    val relockMinSamplePixels: Int = DEFAULT_RELOCK_MIN_SAMPLE_PIXELS,
+    val relockFullBodyMinAspect: Float = DEFAULT_RELOCK_FULL_BODY_ASPECT,
+    val relockJudgeFrames: Int = DEFAULT_RELOCK_JUDGE_FRAMES,
 ) {
     init {
         require(scoreThreshold in MIN_SCORE_THRESHOLD..MAX_SCORE_THRESHOLD) {
@@ -505,6 +517,19 @@ data class TrackerConfig(
         }
         require(relockMinMargin in 0f..MAX_RELOCK_MIN_MARGIN) {
             "relockMinMargin $relockMinMargin outside [0, $MAX_RELOCK_MIN_MARGIN]"
+        }
+        require(relockMinSamplePixels in MIN_RELOCK_MIN_SAMPLE_PIXELS..MAX_RELOCK_MIN_SAMPLE_PIXELS) {
+            "relockMinSamplePixels $relockMinSamplePixels outside [$MIN_RELOCK_MIN_SAMPLE_PIXELS, $MAX_RELOCK_MIN_SAMPLE_PIXELS]"
+        }
+        require(relockMinSamplePixels <= relockMaxSamplePixels) {
+            "relockMinSamplePixels $relockMinSamplePixels above relockMaxSamplePixels $relockMaxSamplePixels"
+        }
+        require(relockFullBodyMinAspect in MIN_RELOCK_FULL_BODY_ASPECT..MAX_RELOCK_FULL_BODY_ASPECT) {
+            "relockFullBodyMinAspect $relockFullBodyMinAspect outside " +
+                "[$MIN_RELOCK_FULL_BODY_ASPECT, $MAX_RELOCK_FULL_BODY_ASPECT]"
+        }
+        require(relockJudgeFrames in MIN_RELOCK_JUDGE_FRAMES..MAX_RELOCK_JUDGE_FRAMES) {
+            "relockJudgeFrames $relockJudgeFrames outside [$MIN_RELOCK_JUDGE_FRAMES, $MAX_RELOCK_JUDGE_FRAMES]"
         }
     }
 
@@ -1139,6 +1164,33 @@ data class TrackerConfig(
 
         /** Highest accepted [relockMinMargin]. */
         const val MAX_RELOCK_MIN_MARGIN = 1f
+
+        /** Default [relockMinSamplePixels], count. */
+        const val DEFAULT_RELOCK_MIN_SAMPLE_PIXELS = 150
+
+        /** Lowest accepted [relockMinSamplePixels]. */
+        const val MIN_RELOCK_MIN_SAMPLE_PIXELS = 10
+
+        /** Highest accepted [relockMinSamplePixels]. */
+        const val MAX_RELOCK_MIN_SAMPLE_PIXELS = 5000
+
+        /** Default [relockFullBodyMinAspect], unitless. */
+        const val DEFAULT_RELOCK_FULL_BODY_ASPECT = 1.8f
+
+        /** Lowest accepted [relockFullBodyMinAspect]. */
+        const val MIN_RELOCK_FULL_BODY_ASPECT = 1f
+
+        /** Highest accepted [relockFullBodyMinAspect]. */
+        const val MAX_RELOCK_FULL_BODY_ASPECT = 4f
+
+        /** Default [relockJudgeFrames], count. */
+        const val DEFAULT_RELOCK_JUDGE_FRAMES = 10
+
+        /** Lowest accepted [relockJudgeFrames]. */
+        const val MIN_RELOCK_JUDGE_FRAMES = 1
+
+        /** Highest accepted [relockJudgeFrames]. */
+        const val MAX_RELOCK_JUDGE_FRAMES = 100
 
         /** COCO keypoint index of the left shoulder. */
         const val KEYPOINT_LEFT_SHOULDER = 5

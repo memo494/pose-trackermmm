@@ -118,7 +118,7 @@ class AppearanceSignatureTest {
 
     @Test
     fun aSmallRectangle_isReadPixelByPixel() {
-        val small = TorsoRect().apply { set(2, 3, 12, 13) }
+        val small = TorsoRect().apply { set(2, 3, 17, 18) }
         val signature = signatureOf(solid(RED), area = small)
 
         assertThat(signature.lastSampleCount).isEqualTo(SMALL_PIXELS)
@@ -134,7 +134,7 @@ class AppearanceSignatureTest {
 
     @Test
     fun theSampleLimit_comesFromTheConfig() {
-        val tight = TrackerConfig(relockMaxSamplePixels = TrackerConfig.MIN_RELOCK_SAMPLE_PIXELS)
+        val tight = tightConfig()
 
         val signature = signatureOf(solid(RED), useConfig = tight)
 
@@ -145,8 +145,7 @@ class AppearanceSignatureTest {
     @Test
     fun aGridSample_stillSeesTheColoursOfTheWholeRectangle() {
         val full = signatureOf(halves(ORANGE, TEAL))
-        val tightConfig = TrackerConfig(relockMaxSamplePixels = TrackerConfig.MIN_RELOCK_SAMPLE_PIXELS)
-        val tight = signatureOf(halves(ORANGE, TEAL), useConfig = tightConfig)
+        val tight = signatureOf(halves(ORANGE, TEAL), useConfig = tightConfig())
 
         assertThat(full.distanceTo(tight)).isAtMost(MAX_RELOCK_DISTANCE)
     }
@@ -262,6 +261,42 @@ class AppearanceSignatureTest {
         assertThat(a.distanceTo(b)).isEqualTo(1f)
     }
 
+    /** The smallest sample limit; the least sample count has to come down with it. */
+    private fun tightConfig(): TrackerConfig =
+        TrackerConfig(
+            relockMaxSamplePixels = TrackerConfig.MIN_RELOCK_SAMPLE_PIXELS,
+            relockMinSamplePixels = TrackerConfig.MIN_RELOCK_MIN_SAMPLE_PIXELS,
+        )
+
+    @Test
+    fun aRectangleWithFewerPointsThanTheLeastSample_changesNothing() {
+        val signature = signatureOf(solid(RED))
+        val tiny = TorsoRect().apply { set(2, 3, 12, 13) }
+
+        assertThat(signature.set(solid(BLUE), SIDE, SIDE, tiny)).isFalse()
+        assertThat(signature.blend(solid(BLUE), SIDE, SIDE, tiny)).isFalse()
+        assertThat(AppearanceSignature(config).set(solid(BLUE), SIDE, SIDE, tiny)).isFalse()
+
+        assertThat(signature.distanceTo(signatureOf(solid(RED)))).isWithin(DISTANCE_TOLERANCE).of(0f)
+    }
+
+    @Test
+    fun aRectangleWithExactlyTheLeastSample_isRead() {
+        val exact = TorsoRect().apply { set(0, 0, 10, 15) }
+
+        assertThat(AppearanceSignature(config).set(solid(RED), SIDE, SIDE, exact)).isTrue()
+    }
+
+    @Test
+    fun afterClear_aFailedReadLeavesNothingToBlendWith() {
+        val signature = signatureOf(solid(RED))
+        signature.clear()
+
+        assertThat(signature.blend(solid(BLUE), SIDE, SIDE, rect)).isTrue()
+
+        assertThat(signature.distanceTo(signatureOf(solid(BLUE)))).isWithin(DISTANCE_TOLERANCE).of(0f)
+    }
+
     private fun scaled(
         colour: Int,
         factor: Float,
@@ -292,7 +327,7 @@ class AppearanceSignatureTest {
         const val MIX_TOLERANCE = 0.02f
         const val FAR_DISTANCE = 0.9f
         const val MAX_RELOCK_DISTANCE = 0.3f
-        const val SMALL_PIXELS = 100
+        const val SMALL_PIXELS = 225
         const val MANY_BLENDS = 60
     }
 }

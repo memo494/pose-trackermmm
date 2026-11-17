@@ -9,10 +9,12 @@ import kotlin.math.min
 
 /**
  * Where the torso of a detected person is, for the clothing-colour signature (docs/plans/M4.md, M4c): the rectangle
- * through the shoulder and hip keypoints when all four are confident, else a fixed part of the person box (rows
+ * through the shoulder and hip keypoints when all four are confident, else, only when the box looks like a whole
+ * standing body (height at least `relockFullBodyMinAspect` times its width), a fixed part of it (rows
  * `relockBoxTopRatio..relockBoxBottomRatio` of its height, the middle `relockBoxWidthRatio` of its width); then cut by
  * `relockTorsoShrink` on every side and clipped to the image. It never reaches the head (shoulders are below it, the
- * box rows start under it), which is where the lock ring is drawn.
+ * box rows start under it), which is where the lock ring is drawn. A torso that clipping to the image cut is marked
+ * [TorsoRect.clipped].
  *
  * Allocation-free after construction; the four working floats are fields, so one instance belongs to one thread.
  */
@@ -26,8 +28,9 @@ class TorsoRegion(
 
     /**
      * Writes the torso of [detection] into [out] and returns true, or clears [out] and returns false (fail closed)
-     * when no rectangle of at least one pixel is left: a box or coordinate that is not finite, a box with no size,
-     * or a torso entirely outside the [widthImg] x [heightImg] image.
+     * when no rectangle of at least one pixel is left: a box or coordinate that is not finite, a box with no size or
+     * too wide for a whole body (without confident keypoints), or a torso entirely outside the [widthImg] x
+     * [heightImg] image.
      */
     fun of(
         detection: PoseDetection,
@@ -42,11 +45,16 @@ class TorsoRegion(
         val cutYImg = (bottomImg - topImg) * config.relockTorsoShrink
         val widthLimit = widthImg.toFloat()
         val heightLimit = heightImg.toFloat()
-        val left = floor((leftImg + cutXImg).coerceIn(0f, widthLimit)).toInt()
-        val top = floor((topImg + cutYImg).coerceIn(0f, heightLimit)).toInt()
-        val right = ceil((rightImg - cutXImg).coerceIn(0f, widthLimit)).toInt()
-        val bottom = ceil((bottomImg - cutYImg).coerceIn(0f, heightLimit)).toInt()
-        out.set(left, top, right, bottom)
+        val wholeLeftImg = leftImg + cutXImg
+        val wholeTopImg = topImg + cutYImg
+        val wholeRightImg = rightImg - cutXImg
+        val wholeBottomImg = bottomImg - cutYImg
+        val clipped = wholeLeftImg < 0f || wholeTopImg < 0f || wholeRightImg > widthLimit || wholeBottomImg > heightLimit
+        val left = floor(wholeLeftImg.coerceIn(0f, widthLimit)).toInt()
+        val top = floor(wholeTopImg.coerceIn(0f, heightLimit)).toInt()
+        val right = ceil(wholeRightImg.coerceIn(0f, widthLimit)).toInt()
+        val bottom = ceil(wholeBottomImg.coerceIn(0f, heightLimit)).toInt()
+        out.set(left, top, right, bottom, clipped)
         if (out.isEmpty) {
             out.clear()
             return false
@@ -82,11 +90,12 @@ class TorsoRegion(
             detection.keypointXImg(keypoint).isFinite() &&
             detection.keypointYImg(keypoint).isFinite()
 
-    /** The fixed part of the person box; false when the box has no finite positive size. */
+    /** The fixed part of the person box; false when the box has no finite positive size or is not a whole body's shape. */
     private fun fromBox(detection: PoseDetection): Boolean {
         val boxHeightImg = detection.boxBottomImg - detection.boxTopImg
         val boxWidthImg = detection.boxRightImg - detection.boxLeftImg
         if (!(boxHeightImg.isFinite() && boxHeightImg > 0f && boxWidthImg.isFinite() && boxWidthImg > 0f)) return false
+        if (boxHeightImg < boxWidthImg * config.relockFullBodyMinAspect) return false
         val centerXImg = (detection.boxLeftImg + detection.boxRightImg) / 2f
         val halfWidthImg = boxWidthImg * config.relockBoxWidthRatio / 2f
         leftImg = centerXImg - halfWidthImg

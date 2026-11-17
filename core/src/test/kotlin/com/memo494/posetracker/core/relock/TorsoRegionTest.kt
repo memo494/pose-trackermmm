@@ -123,6 +123,64 @@ class TorsoRegionTest {
         assertThat(torso(detection, clipped, widthImg = 30, heightImg = 100)).isTrue()
 
         assertThat(rect()).containsExactly(0, 60, 30, 100).inOrder()
+        assertThat(out.clipped).isTrue()
+    }
+
+    @Test
+    fun aTorsoInsideTheImage_isNotMarkedClipped() {
+        assertThat(torso(person())).isTrue()
+
+        assertThat(out.clipped).isFalse()
+    }
+
+    @Test
+    fun aBoxTorsoThatTheImageEdgeCuts_isMarkedClipped() {
+        val detection = person(keypointCount = TrackerConfig.HEAD_KEYPOINT_COUNT, boxLeftImg = -30f, boxRightImg = 30f)
+
+        assertThat(torso(detection)).isTrue()
+
+        assertThat(out.clipped).isTrue()
+        assertThat(out.leftImg).isEqualTo(0)
+    }
+
+    @Test
+    fun aTorsoTouchingTheEdgeExactly_isNotMarkedClipped() {
+        val flush = TrackerConfig(relockTorsoShrink = 0f)
+        val detection = person(shoulderXs = floatArrayOf(0f, 40f), hipXs = floatArrayOf(0f, 40f))
+
+        assertThat(torso(detection, flush)).isTrue()
+
+        assertThat(out.clipped).isFalse()
+        assertThat(out.leftImg).isEqualTo(0)
+    }
+
+    @Test
+    fun aFailure_isNotMarkedClipped() {
+        assertThat(torso(person(shoulderXs = floatArrayOf(-50f, -20f), hipXs = floatArrayOf(-50f, -20f)))).isFalse()
+
+        assertThat(out.clipped).isFalse()
+    }
+
+    @Test
+    fun aBoxWiderThanAWholeBody_givesNoTorsoWithoutKeypoints() {
+        val strict = TrackerConfig(relockFullBodyMinAspect = 2f)
+        val noKeypoints = TrackerConfig.HEAD_KEYPOINT_COUNT
+
+        // A box 50 wide: 100 high is exactly the aspect, 99 high is too wide.
+        val exact = person(noKeypoints, boxLeftImg = 100f, boxRightImg = 150f, boxTopImg = 20f, boxBottomImg = 120f)
+        val tooWide = person(noKeypoints, boxLeftImg = 100f, boxRightImg = 150f, boxTopImg = 20f, boxBottomImg = 119f)
+        assertThat(torso(exact, strict)).isTrue()
+        assertThat(torso(tooWide, strict)).isFalse()
+        assertThat(out.isEmpty).isTrue()
+    }
+
+    @Test
+    fun theAspectLimit_doesNotApplyWhenTheKeypointsGiveTheTorso() {
+        val wide = person(boxLeftImg = 90f, boxRightImg = 200f, boxTopImg = 20f, boxBottomImg = 90f)
+
+        assertThat(torso(wide)).isTrue()
+
+        assertThat(rect()).containsExactly(110, 80, 130, 120).inOrder()
     }
 
     @Test

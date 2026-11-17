@@ -24,6 +24,7 @@ class TorsoRegionTest {
     ): PoseDetection {
         val xy = FloatArray(keypointCount * 2)
         val scores = FloatArray(keypointCount)
+
         fun put(
             k: Int,
             xImg: Float,

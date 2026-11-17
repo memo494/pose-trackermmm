@@ -332,8 +332,8 @@ class TrackerTest {
         for (k in 0 until 3) feed(tracker, k, person(600f))
         feed(tracker, 3)
 
-        tracker.onIdle(config.trackIdlePromoteNs)
-        val list = tracker.onIdle(config.trackIdlePromoteNs * 2L)
+        tracker.onIdle(config.trackIdlePromoteNs / 2L)
+        val list = tracker.onIdle(config.trackIdlePromoteNs * 3L / 2L)
 
         assertThat(list.size).isEqualTo(1)
         assertThat(list.lostMs(0)).isWithin(0.5f).of(STEP_MS)

@@ -1,6 +1,7 @@
 package com.memo494.posetracker.core.tracking
 
 import com.google.common.truth.Truth.assertThat
+import com.memo494.posetracker.core.TrackerConfig
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 
@@ -136,8 +137,155 @@ class TrackSnapshotTest {
         assertThrows(IndexOutOfBoundsException::class.java) { TrackSnapshot.EMPTY.headXImg(0) }
     }
 
+    @Test
+    fun ofSmoothed_theFirstFrameOfAnId_equalsThePlainSnapshot() {
+        val list = FakeTrackList(FakeTrack(1, headXImg = 100f, headYImg = 50f), FakeTrack(2, lost = true, headXImg = 300f))
+
+        val smoothed = TrackSnapshot.ofSmoothed(list, WIDTH_IMG, HEIGHT_IMG, HeadSmoother(TrackerConfig()), 0L)
+
+        assertSameContent(smoothed, TrackSnapshot.of(list, WIDTH_IMG, HEIGHT_IMG))
+    }
+
+    @Test
+    fun ofSmoothed_laterFrames_moveTheHeadLessThanTheTrackerAndTheBoxByTheSameDelta() {
+        val smoother = HeadSmoother(TrackerConfig())
+        TrackSnapshot.ofSmoothed(FakeTrackList(FakeTrack(1, headXImg = 100f)), WIDTH_IMG, HEIGHT_IMG, smoother, 0L)
+        val moved = FakeTrack(1, headXImg = 140f, boxLeftImg = 120f, boxRightImg = 160f)
+
+        val snapshot = TrackSnapshot.ofSmoothed(FakeTrackList(moved), WIDTH_IMG, HEIGHT_IMG, smoother, FRAME_NS)
+
+        assertThat(snapshot.headXImg(0)).isGreaterThan(100f)
+        assertThat(snapshot.headXImg(0)).isLessThan(140f)
+        assertThat(snapshot.headYImg(0)).isEqualTo(50f)
+        assertThat(snapshot.boxLeftImg(0) - snapshot.headXImg(0)).isWithin(TOLERANCE_IMG).of(120f - 140f)
+        assertThat(snapshot.boxRightImg(0) - snapshot.headXImg(0)).isWithin(TOLERANCE_IMG).of(160f - 140f)
+        assertThat(snapshot.boxTopImg(0)).isEqualTo(40f)
+        assertThat(snapshot.boxBottomImg(0)).isEqualTo(240f)
+    }
+
+    @Test
+    fun ofSmoothed_keepsIdsFlagsAndOrderAndLeavesTentativeTracksOut() {
+        val smoother = HeadSmoother(TrackerConfig())
+        val list =
+            FakeTrackList(
+                FakeTrack(7, lost = true, headEstimated = true),
+                FakeTrack(3, shown = false),
+                FakeTrack(5),
+            )
+
+        val snapshot = TrackSnapshot.ofSmoothed(list, WIDTH_IMG, HEIGHT_IMG, smoother, 0L)
+
+        assertThat(snapshot.count).isEqualTo(2)
+        assertThat(snapshot.id(0)).isEqualTo(7)
+        assertThat(snapshot.isLost(0)).isTrue()
+        assertThat(snapshot.isHeadEstimated(0)).isTrue()
+        assertThat(snapshot.id(1)).isEqualTo(5)
+        assertThat(snapshot.isLost(1)).isFalse()
+        assertThat(snapshot.widthImg).isEqualTo(WIDTH_IMG)
+        assertThat(smoother.activeCount).isEqualTo(2)
+    }
+
+    @Test
+    fun ofSmoothed_withoutShownTracks_returnsEmptyAndFreesTheSlots() {
+        val smoother = HeadSmoother(TrackerConfig())
+        TrackSnapshot.ofSmoothed(FakeTrackList(FakeTrack(1)), WIDTH_IMG, HEIGHT_IMG, smoother, 0L)
+        assertThat(smoother.activeCount).isEqualTo(1)
+
+        val none = TrackSnapshot.ofSmoothed(FakeTrackList(FakeTrack(1, shown = false)), WIDTH_IMG, HEIGHT_IMG, smoother, FRAME_NS)
+
+        assertThat(none).isSameInstanceAs(TrackSnapshot.EMPTY)
+        assertThat(smoother.activeCount).isEqualTo(0)
+    }
+
+    @Test
+    fun ofSmoothed_withASmootherThatIsOff_equalsThePlainSnapshotOnEveryFrame() {
+        val smoother = HeadSmoother(TrackerConfig(smoothEnabled = false))
+        for (i in 0 until 3) {
+            val list = FakeTrackList(FakeTrack(1, headXImg = 100f + 13f * i, boxLeftImg = 80f + 13f * i))
+
+            val smoothed = TrackSnapshot.ofSmoothed(list, WIDTH_IMG, HEIGHT_IMG, smoother, i * FRAME_NS)
+
+            assertSameContent(smoothed, TrackSnapshot.of(list, WIDTH_IMG, HEIGHT_IMG))
+        }
+    }
+
+    @Test
+    fun ofSmoothed_aNonFiniteHead_leavesTheBoxWhereItIs() {
+        val smoother = HeadSmoother(TrackerConfig())
+        TrackSnapshot.ofSmoothed(FakeTrackList(FakeTrack(1)), WIDTH_IMG, HEIGHT_IMG, smoother, 0L)
+
+        val snapshot =
+            TrackSnapshot.ofSmoothed(FakeTrackList(FakeTrack(1, headXImg = Float.NaN)), WIDTH_IMG, HEIGHT_IMG, smoother, FRAME_NS)
+
+        assertThat(snapshot.headXImg(0).isNaN()).isTrue()
+        assertThat(snapshot.boxLeftImg(0)).isEqualTo(80f)
+        assertThat(snapshot.boxRightImg(0)).isEqualTo(120f)
+    }
+
+    @Test
+    fun ofIdle_keepsTheLastSmoothedPointOfAKnownIdAndPassesANewIdThrough() {
+        val smoother = HeadSmoother(TrackerConfig())
+        TrackSnapshot.ofSmoothed(FakeTrackList(FakeTrack(1, headXImg = 100f)), WIDTH_IMG, HEIGHT_IMG, smoother, 0L)
+        val moved = FakeTrackList(FakeTrack(1, headXImg = 140f, boxLeftImg = 120f, boxRightImg = 160f))
+        val lastFrame = TrackSnapshot.ofSmoothed(moved, WIDTH_IMG, HEIGHT_IMG, smoother, FRAME_NS)
+        val idleList =
+            FakeTrackList(
+                FakeTrack(1, headXImg = 140f, boxLeftImg = 120f, boxRightImg = 160f),
+                FakeTrack(2, headXImg = 400f, boxLeftImg = 380f, boxRightImg = 420f),
+            )
+
+        val idle = TrackSnapshot.ofIdle(idleList, WIDTH_IMG, HEIGHT_IMG, smoother)
+
+        assertThat(idle.count).isEqualTo(2)
+        assertThat(idle.headXImg(0)).isEqualTo(lastFrame.headXImg(0))
+        assertThat(idle.boxLeftImg(0)).isEqualTo(lastFrame.boxLeftImg(0))
+        assertThat(idle.boxRightImg(0)).isEqualTo(lastFrame.boxRightImg(0))
+        assertThat(idle.headXImg(1)).isEqualTo(400f)
+        assertThat(idle.boxLeftImg(1)).isEqualTo(380f)
+        assertThat(smoother.activeCount).isEqualTo(1)
+    }
+
+    @Test
+    fun ofIdle_doesNotAdvanceTheSmoother() {
+        val withIdle = HeadSmoother(TrackerConfig())
+        val without = HeadSmoother(TrackerConfig())
+        val first = FakeTrackList(FakeTrack(1, headXImg = 100f))
+        val second = FakeTrackList(FakeTrack(1, headXImg = 140f))
+        for (smoother in listOf(withIdle, without)) TrackSnapshot.ofSmoothed(first, WIDTH_IMG, HEIGHT_IMG, smoother, 0L)
+
+        TrackSnapshot.ofIdle(second, WIDTH_IMG, HEIGHT_IMG, withIdle)
+        TrackSnapshot.ofIdle(FakeTrackList(), WIDTH_IMG, HEIGHT_IMG, withIdle)
+
+        val a = TrackSnapshot.ofSmoothed(second, WIDTH_IMG, HEIGHT_IMG, withIdle, FRAME_NS)
+        val b = TrackSnapshot.ofSmoothed(second, WIDTH_IMG, HEIGHT_IMG, without, FRAME_NS)
+        assertSameContent(a, b)
+        assertThat(withIdle.activeCount).isEqualTo(1)
+    }
+
+    private fun assertSameContent(
+        actual: TrackSnapshot,
+        expected: TrackSnapshot,
+    ) {
+        assertThat(actual.count).isEqualTo(expected.count)
+        assertThat(actual.widthImg).isEqualTo(expected.widthImg)
+        assertThat(actual.heightImg).isEqualTo(expected.heightImg)
+        for (i in 0 until expected.count) {
+            assertThat(actual.id(i)).isEqualTo(expected.id(i))
+            assertThat(actual.isLost(i)).isEqualTo(expected.isLost(i))
+            assertThat(actual.isHeadEstimated(i)).isEqualTo(expected.isHeadEstimated(i))
+            assertThat(actual.headXImg(i)).isEqualTo(expected.headXImg(i))
+            assertThat(actual.headYImg(i)).isEqualTo(expected.headYImg(i))
+            assertThat(actual.boxLeftImg(i)).isEqualTo(expected.boxLeftImg(i))
+            assertThat(actual.boxTopImg(i)).isEqualTo(expected.boxTopImg(i))
+            assertThat(actual.boxRightImg(i)).isEqualTo(expected.boxRightImg(i))
+            assertThat(actual.boxBottomImg(i)).isEqualTo(expected.boxBottomImg(i))
+        }
+    }
+
     private companion object {
         const val WIDTH_IMG = 1356
         const val HEIGHT_IMG = 610
+        const val FRAME_NS = 50_000_000L
+        const val TOLERANCE_IMG = 1e-3f
     }
 }

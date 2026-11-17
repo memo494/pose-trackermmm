@@ -108,6 +108,10 @@ package com.memo494.posetracker.core
  * @property trackExitMarginRatio a lost track whose head point is outside the image by more than this fraction of
  *   its height (unitless) is removed at once, in [[MIN_TRACK_EXIT_MARGIN_RATIO], [MAX_TRACK_EXIT_MARGIN_RATIO]];
  *   0 removes it as soon as the head leaves the image.
+ * @property trackTentativeMaxMisses number of consecutive frames a tentative (not yet shown) track may go
+ *   without a matching detection and still live, in frames, in [[MIN_TRACK_TENTATIVE_MAX_MISSES],
+ *   [MAX_TRACK_TENTATIVE_MAX_MISSES]]; the track coasts (velocity decays, never shown, no lost time), a hit resets
+ *   the count and does not undo hits already counted; 0 removes a tentative track on its first miss.
  */
 data class TrackerConfig(
     val scoreThreshold: Float = DEFAULT_SCORE_THRESHOLD,
@@ -161,6 +165,7 @@ data class TrackerConfig(
     val trackMatchMaxCost: Float = DEFAULT_TRACK_MATCH_MAX_COST,
     val trackLowMatchMaxCost: Float = DEFAULT_TRACK_LOW_MATCH_MAX_COST,
     val trackExitMarginRatio: Float = DEFAULT_TRACK_EXIT_MARGIN_RATIO,
+    val trackTentativeMaxMisses: Int = DEFAULT_TRACK_TENTATIVE_MAX_MISSES,
 ) {
     init {
         require(scoreThreshold in MIN_SCORE_THRESHOLD..MAX_SCORE_THRESHOLD) {
@@ -335,6 +340,10 @@ data class TrackerConfig(
         }
         require(trackExitMarginRatio in MIN_TRACK_EXIT_MARGIN_RATIO..MAX_TRACK_EXIT_MARGIN_RATIO) {
             "trackExitMarginRatio $trackExitMarginRatio outside [$MIN_TRACK_EXIT_MARGIN_RATIO, $MAX_TRACK_EXIT_MARGIN_RATIO]"
+        }
+        require(trackTentativeMaxMisses in MIN_TRACK_TENTATIVE_MAX_MISSES..MAX_TRACK_TENTATIVE_MAX_MISSES) {
+            "trackTentativeMaxMisses $trackTentativeMaxMisses outside " +
+                "[$MIN_TRACK_TENTATIVE_MAX_MISSES, $MAX_TRACK_TENTATIVE_MAX_MISSES]"
         }
     }
 
@@ -757,6 +766,15 @@ data class TrackerConfig(
 
         /** Highest accepted [trackExitMarginRatio]. */
         const val MAX_TRACK_EXIT_MARGIN_RATIO = 2.0f
+
+        /** Default [trackTentativeMaxMisses], in frames (M4a: measured on the reference model). */
+        const val DEFAULT_TRACK_TENTATIVE_MAX_MISSES = 1
+
+        /** Lowest accepted [trackTentativeMaxMisses], in frames (0 = a miss removes a tentative track). */
+        const val MIN_TRACK_TENTATIVE_MAX_MISSES = 0
+
+        /** Highest accepted [trackTentativeMaxMisses], in frames. */
+        const val MAX_TRACK_TENTATIVE_MAX_MISSES = 5
 
         /** How far ahead, in seconds, the thermal headroom is forecast; 0 = the current headroom. */
         const val THERMAL_HEADROOM_FORECAST_SECONDS = 0

@@ -563,6 +563,27 @@ class TrackerConfigTest {
     }
 
     @Test
+    fun trackTentativeMaxMisses_defaultsToOne_andAcceptsItsBounds() {
+        assertThat(TrackerConfig().trackTentativeMaxMisses).isEqualTo(1)
+        assertThat(TrackerConfig.DEFAULT_TRACK_TENTATIVE_MAX_MISSES).isAtLeast(TrackerConfig.MIN_TRACK_TENTATIVE_MAX_MISSES)
+        assertThat(TrackerConfig.DEFAULT_TRACK_TENTATIVE_MAX_MISSES).isAtMost(TrackerConfig.MAX_TRACK_TENTATIVE_MAX_MISSES)
+        assertThat(TrackerConfig.MIN_TRACK_TENTATIVE_MAX_MISSES).isEqualTo(0)
+        assertThat(TrackerConfig.MAX_TRACK_TENTATIVE_MAX_MISSES).isEqualTo(5)
+        assertThat(TrackerConfig(trackTentativeMaxMisses = 0).trackTentativeMaxMisses).isEqualTo(0)
+        assertThat(TrackerConfig(trackTentativeMaxMisses = 5).trackTentativeMaxMisses).isEqualTo(5)
+    }
+
+    @Test
+    fun trackTentativeMaxMisses_outsideItsBounds_isRejected() {
+        assertThrows(IllegalArgumentException::class.java) {
+            TrackerConfig(trackTentativeMaxMisses = TrackerConfig.MIN_TRACK_TENTATIVE_MAX_MISSES - 1)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            TrackerConfig(trackTentativeMaxMisses = TrackerConfig.MAX_TRACK_TENTATIVE_MAX_MISSES + 1)
+        }
+    }
+
+    @Test
     fun trackLifecycleFields_haveTheDocumentedDefaults() {
         val config = TrackerConfig()
 

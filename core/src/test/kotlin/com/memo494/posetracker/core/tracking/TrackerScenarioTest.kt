@@ -11,7 +11,7 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 
 /**
- * The acceptance scenarios S1 to S14 of docs/plans/M3.md (T5). The Python functions in
+ * The acceptance scenarios S1 to S15 of docs/plans/M3.md (T5). The Python functions in
  * `docs/plans/M3_sim/scenarios.py` define each scenario; every asserted number is in [MetricsThresholds].
  * Each scenario runs at 20, 30 and 60 fps and at 30 fps +-30 %, with seeds 1, 2 and 3; a failure message names
  * the scenario, the rate, the seed and the quantity.
@@ -204,6 +204,32 @@ class TrackerScenarioTest {
             assertBelow(c.message("max error in h"), run.metrics.maxErrorInH(1, 10), MetricsThresholds.S14_MAX_ERROR_H)
             assertCount(c.message("ids"), run.highestId, MetricsThresholds.S14_EXPECTED_IDS)
             assertAtLeast(c.message("coverage"), run.metrics.coverage(1, COVERAGE_FROM_FRAME), MetricsThresholds.S14_MIN_COVERAGE)
+        }
+
+    @Test
+    fun s15_walkerWithLowScoreAndFortyPercentMissingDetections_isShownWithinOneSecond() =
+        forEachRun("S15 tentative misses") { c ->
+            val times = scene(emptyList(), LOW_SCORE_DURATION_S, c, noise = false).frames.map { it.timeS }
+            val random = Random(c.seed * LOW_SCORE_SEED_FACTOR + 1L)
+            val dropouts =
+                times
+                    .filter { random.nextDouble() < LOW_SCORE_MISS_PROBABILITY }
+                    .map { TimeInterval(it - TIME_EPS_S, it + TIME_EPS_S) }
+            val person =
+                ScenePerson(
+                    1,
+                    listOf(pt(0.0, 400.0), pt(LOW_SCORE_DURATION_S, 900.0)),
+                    score = { LOW_SCORE_WALKER },
+                    dropouts = dropouts,
+                )
+            val sceneIn = scene(listOf(person), LOW_SCORE_DURATION_S, c, noise = false)
+            assertWithMessage(c.message("frame times stay those of the scene without people"))
+                .that(sceneIn.frames.map { it.timeS })
+                .isEqualTo(times)
+            val run = runScene(sceneIn)
+            val first = run.firstShownFrame()
+            assertWithMessage(c.message("a track is shown at all")).that(first).isAtLeast(0)
+            assertAtMost(c.message("ms until first shown"), times[first] * MS_PER_S, MetricsThresholds.S15_MAX_FIRST_SHOWN_MS)
         }
 
     private fun crossing(
@@ -464,6 +490,11 @@ class TrackerScenarioTest {
         const val FLICKER_PROBABILITY = 0.3
         const val FLICKER_SPACING_IMG = 90.0
         const val FLICKER_TRAVEL_IMG = 640.0
+        const val LOW_SCORE_DURATION_S = 4.0
+        const val LOW_SCORE_WALKER = 0.4
+        const val LOW_SCORE_MISS_PROBABILITY = 0.4
+        const val LOW_SCORE_SEED_FACTOR = 13L
+        const val MS_PER_S = 1000.0
         const val SEED_FACTOR = 31L
         const val SEED_OFFSET = 7L
     }

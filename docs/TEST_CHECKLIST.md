@@ -408,6 +408,57 @@ gone and nothing stays armed.
 **If it fails:** after arming the app below does not react to taps (the overlay stays touchable): Share
 diagnostics and say what you did before.
 
+## M4c — the lock comes back to the same person
+
+Do M4b first. This section is about one change: after you lock a person and they **leave the picture and come
+back**, the double ring returns to them by itself, recognised by the colours of their clothes (the upper body). It
+does not use their face and keeps no picture, only a colour count in memory, dropped when the lock ends. For this
+section play a video (or use the camera app) where one person walks out of the picture and comes back, and where
+people wear **clearly different** clothes.
+
+### 1. Out and back
+1. Press **Start**, tap the handle, tap one person: they get the double ring.
+2. Let that person walk **out of the picture** (or be hidden for several seconds) and then **come back within a
+   minute**.
+
+**Pass:** while they are away the **double ring is gone** (no ring on anybody); when they are back and have an
+ordinary ring, the **double ring returns on them** within about a second.
+**If it fails:** the ring never comes back, or it comes back on somebody else: Share diagnostics right away (the
+`lock:` lines in the log show why) and say what the person wore.
+
+### 2. Somebody else comes
+1. Lock a person, let them leave. Now let **someone in clearly different clothes** (another colour) walk in.
+
+**Pass:** **no double ring** jumps to the newcomer.
+**If it fails:** the newcomer gets the double ring: Share diagnostics.
+
+### 3. Two people in similar clothes
+1. Lock a person who wears, say, a black shirt. Let them leave and let **two people in black shirts** come in.
+
+**Pass:** the double ring **may stay away** (that is by design: two similar people are not told apart), but it must
+**not go to the wrong one**.
+**If it fails:** the ring goes to a person who was not the locked one: Share diagnostics and say how similar the
+clothes were.
+
+### 4. The wait ends
+1. Lock a person and let them leave. Tap the handle once (it counts as locked while the app waits): the wait is
+   over. Tap it again and tap a person to lock somebody new.
+2. Lock a person, let them leave, and **wait more than one minute** (keep the video playing). Then let them come back.
+
+**Pass:** after the handle tap, a returning person gets **no** ring until you lock again; after more than a minute the
+ring does **not** come back either (`lock: expired` in the log). Pressing **Stop** or rotating the phone also ends the
+wait.
+**If it fails:** a ring appears out of nowhere after the handle tap, Stop or a rotation: Share diagnostics.
+
+### 5. The numbers for tuning
+1. After blocks 1 to 3, press **Save diagnostics** (or Share).
+
+**Pass:** the log has the lines `lock: set`, `lock: pending`, `lock: relocked id=… d=… next=…` and, for people who were
+not accepted, `lock: candidate id=… d=… rejected (…)`; `summary.txt` has `locks`, `lockRelocks`, `lockRelockRejects` and
+`lockExpired`. Send the zip even when everything passed: the `d=` and `next=` numbers tune the colour limits.
+
+---
+
 ---
 
 ## What to send back
@@ -415,7 +466,7 @@ diagnostics and say what you did before.
    later; a saved zip can be sent later).
 2. **One sentence** about what was on the screen (which app, how many people, what you did).
 3. The **block number** of this checklist that failed (for example "block 5"; for the M0c section say "M0c block 5",
-   for M1a "M1a block 3", for M3 "M3 block 3", for M4a "M4a block 2", for M4b "M4b block 2").
+   for M1a "M1a block 3", for M3 "M3 block 3", for M4a "M4a block 2", for M4b "M4b block 2", for M4c "M4c block 2").
 4. A **screenshot** if the corner text or a warning looked strange.
 5. If everything passed: say "all blocks passed" and the build id from the top of the app.
 
@@ -440,3 +491,11 @@ These checks need a cable and `adb`, or the benchmark screen of M1b, and are not
   `trackRemovals` (cumulative since Start; 0 before the first frame). `trackIdlePromotions` counts people who got
   their marks from the HUD tick on a still picture (M3 block 5); `trackRecoveries` counts lost tracks that were
   matched again (M3 block 2). Expected rate of marks on a still picture: 0.4 to 0.9 s after the last frame.
+- `summary.txt` lock fields (M4c), after `trackRemovals` and before the model fields: `locks` (locks set), `lockRelocks`
+  (a pending lock moved to a returning person), `lockRelockRejects` (candidates whose 10-frame judge window ended
+  without acceptance), `lockExpired` (memory ran out), cumulative since Start. The log lines are `lock: set id=N`,
+  `pending id=N`, `relocked id=N -> M d=… next=…`, `candidate id=M d=… rejected (too far | ambiguous, next=… | no
+  torso)`, `expired` and `cleared (handle | reset | stop | replaced | track removed)`. Read `d` (distance of the
+  returning person to the remembered colours; smaller is closer, accepted up to `relockMaxDistance` 0.30) and `next`
+  (distance of the nearest other person; `none` = nobody else, `unsampled` = somebody could not be sampled) to tune
+  `relockMaxDistance` and `relockMinMargin`.

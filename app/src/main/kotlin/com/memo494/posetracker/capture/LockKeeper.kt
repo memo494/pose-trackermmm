@@ -258,9 +258,13 @@ internal class LockKeeper(
                     return false
                 }
 
-                RelockMatcher.Verdict.TOO_FAR -> noteVerdict(slot, distance, next, REASON_TOO_FAR)
+                RelockMatcher.Verdict.TOO_FAR -> {
+                    noteVerdict(slot, distance, next, REASON_TOO_FAR)
+                }
 
-                RelockMatcher.Verdict.AMBIGUOUS -> noteVerdict(slot, distance, next, REASON_AMBIGUOUS)
+                RelockMatcher.Verdict.AMBIGUOUS -> {
+                    noteVerdict(slot, distance, next, REASON_AMBIGUOUS)
+                }
             }
         }
         if (candidateFrames[slot] >= config.relockJudgeFrames) finishWindow(slot, list.id(index))

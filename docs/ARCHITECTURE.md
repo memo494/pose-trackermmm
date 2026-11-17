@@ -1,4 +1,4 @@
-# pose-tracker-android — Architecture (v1.1)
+# pose-tracker-android — Architecture (v1.2)
 
 Real-time Android app: a screen-capture overlay that draws a stable, low-latency dot on each person's head
 over any other app (video, stream, game), using YOLO26n-pose on-device. Built and modified by AI coding agents (Claude Code, Codex); built only
@@ -10,6 +10,10 @@ Ultralytics Flutter plugin (§2.1). Screen capture, overlay, tracking, smoothing
 and tests are ours.
 
 How the app gets built step by step is in `docs/BUILD_PLAN.md`. Changes per version are in §15.
+
+**v1.2 (M4c):** a lock survives the person leaving the picture: while the locked person is tracked the pipeline
+keeps a colour histogram of their torso, and when they come back (a new track) the lock moves to them if the colours
+match clearly and unambiguously (§6.6); new log lines and `summary.txt` counters (§6.7), `relock…` config (§7.1).
 
 **v1.0 (M4a):** a tentative track survives one missed frame (§6.3) and a display smoother (OneEuro per shown track)
 moves the head point and the box before they are drawn (§6.4); §7.1, §12, §15.
@@ -193,6 +197,8 @@ Dependencies: `app → detector → core`, `app → core`. Nothing else.
   ImageReader listener → acquireLatestImage → FrameTimestamp → RowCopy into a reused exact-width buffer
      → image.close()  → PoseDetector.detect → DetectionFrame(Img)
      → Tracker.update → TrackSnapshot.ofSmoothed (HeadSmoother, §6.4; immutable copy of the shown tracks)
+     → LockKeeper.onFrame (§6.6: torso signature of the locked person, or the re-lock judging; reads the frame's
+        pixels, so it runs here, before the frame array is reused)
      → OverlayState(detections, tracks, …) → OverlayStateHolder (AtomicReference)
   HUD tick (2 Hz) → Tracker.onIdle(now − arrival of the newest tracked frame) → TrackSnapshot.ofIdle (the
      smoother is not advanced) → new snapshot if the shown tracks changed → same state path
@@ -203,7 +209,7 @@ Dependencies: `app → detector → core`, `app → core`. Nothing else.
      ring per track (the head points are already smoothed; a LOST track is drawn faded, §6.5; the locked
      track gets a double ring, §6.6)
 [main thread — lock handle window]
-  tap on the handle → LockController (§6.6) → FramePipeline.requestLock / clearLock (AtomicInteger)
+  tap on the handle → LockController (§6.6) → FramePipeline.requestLock / clearLock (LockKeeper, AtomicInteger)
 ```
 
 | Object | Owner thread | Rule |
@@ -222,7 +228,8 @@ Dependencies: `app → detector → core`, `app → core`. Nothing else.
 | Imported model file (hash check after a probe trip) | IO worker / capture | `ImportedModelStore.storedFileMatches` reads the file once, only for a probe trip with a meta and a file: on `Dispatchers.IO` for the control screen and on the capture thread at Start; refuses the main thread |
 | `OverlayState` | made on capture, read on main | immutable; one new per processed frame, per HUD tick and per geometry change |
 | Overlay `View`, lock handle window, `LockController` / `LockArming`, `WindowManager` calls (M4b) | main | plain classes, preallocated; no work except drawing and the lock flow; the arming timeout is a main-looper `Handler` runnable |
-| `FramePipeline.lockedId` (M4b) | UI writes, capture reads and clears | `AtomicInteger`, -1 = none; `requestLock` / `clearLock` from the UI thread; the capture thread keeps it in every published state only while that id is among the state's shown tracks, else `compareAndSet(id, -1)`, so a request made meanwhile is not lost |
+| `LockKeeper` (M4b, M4c) | UI writes the wish, capture does the rest | the wish (`requestedId`) is an `AtomicInteger`, -1 = none, written by `requestLock` / `clearLock` from the UI thread; everything else (held id, signatures, pending state, candidates, counters) is plain fields on the capture thread. The capture thread puts the lock in a published state only while the held id is among the state's shown tracks (a pending lock puts none); it clears the wish with `compareAndSet(id, -1)`, so a request made meanwhile is not lost. `hasLock` (any thread) is true while a lock is held, pending or requested |
+| Torso signatures (M4c) | capture | two `AppearanceSignature`s (the locked person's and a scratch one) inside `LockKeeper`, allocated once; a colour histogram, no image; dropped when the lock ends |
 | `CaptureSession.pipeline` (M4b) | written on capture, read on main | `@Volatile`; main reads it only to call the thread-safe lock methods of `FramePipeline` through `LockTarget` |
 | TrackerConfig | DataStore → StateFlow | applied at next frame boundary |
 
@@ -478,13 +485,45 @@ uses no accessibility service.
   closed). After that tap, after the timeout, when the handle cancels, and when the window is removed with the
   session, the overlay gets `FLAG_NOT_TOUCHABLE` back (a failed `updateViewLayout` then removes the overlay and
   the handle rather than leave a touchable window). While armed the alpha cap (§6.5) still applies.
-- **Threads:** the lock id travels UI → capture in `FramePipeline.lockedId` (`AtomicInteger`, -1 = none, §5). Every
-  state the pipeline publishes carries it only while that id is among the state's shown tracks; otherwise the
-  capture thread clears it. So the lock ends when its track is removed (after `trackMaxLostMs`) and on any reset
-  (rotation, new display or capture size).
-- **No keep-alive and no re-lock in M4b:** when the track is removed the lock simply ends; a new track, even of the
-  same person, has a new id and is not locked. (Later idea, not built: keep the lock for 2 s and re-lock to a track
-  born after the loss within `R = min(0.5h + |v|·t, 1.5h)` of the last position with a height ratio of 0.7 to 1.4.)
+- **Threads:** the wish to lock travels UI → capture in `LockKeeper.requestedId` (`AtomicInteger`, -1 = none, §5).
+  Every state the pipeline publishes carries the lock only while the held id is among the state's shown tracks. An
+  id that was never shown is dropped; a reset (rotation, new display or capture size) ends the lock; a track that
+  is removed ends it, or makes it pending (next bullet). An id is never given to another track.
+- **Re-lock by clothing colours (M4c, as built).** *Signature:* while the locked track is matched to a detection
+  (not lost), the pipeline reads the pixels of that person's **torso** right after `detect` (on the capture thread,
+  before the frame array is reused) and averages them into an `AppearanceSignature`: a normalised HSV histogram,
+  `relockHueBins` 16 × `relockSatBins` 4 bins for pixels that have a colour, plus `relockGreyBins` 4 value bins for
+  pixels darker than `relockMinValue` or less saturated than `relockMinSaturation` (both 0.15); an exponential
+  average of weight `relockSignatureAlpha` (0.1) per frame. *Torso* (`TorsoRegion`): the rectangle through the
+  shoulder and hip keypoints (COCO 5, 6, 11, 12, each score at least `relockKeypointMinScore` 0.5), else, only when
+  the box is a standing body (height at least `relockFullBodyMinAspect` 1.8 × width), rows 0.25 to 0.6 of the box
+  and its middle 60 % of the width; cut by 10 % on every side and clipped to the image; never the head (the ring is
+  drawn there and is part of the capture). At most `relockMaxSamplePixels` (2000) pixels are read on a grid, and
+  fewer than `relockMinSamplePixels` (150) mean no torso. A torso that clipping cut (`TorsoRect.clipped`: the person
+  is partly out of the picture) is not added to the signature.
+  *Pending:* when the held track is no longer shown and a signature exists, the lock **waits** for
+  `relockMemoryMs` (60 s) of **frame-timestamp time** (HUD ticks and idle time do not count; a video paused for
+  longer than that expires the lock at its first frame). It draws nothing (no ring), `hasLock` stays true, so a tap
+  on the handle ends it. Without a signature the lock simply ends (as in M4b).
+  *Candidates:* while the held track is matched the pipeline notes the highest track id of the tracker's list
+  (`maxIdAtLastMatch`). While pending, a candidate is any **shown track matched in the frame whose id is higher**, so
+  also a person who came back while the old track was still lost. Each candidate is judged on each of its first
+  `relockJudgeFrames` (10) matched frames: every shown, matched track is sampled **once per frame** (a clipped or too
+  small torso is "unsampled"), the candidate's Bhattacharyya distance to the signature `d` and the smallest distance
+  `next` of the others go to `RelockMatcher.judge`: accepted when `d ≤ relockMaxDistance` (0.30) and `next − d ≥
+  relockMinMargin` (0.10). The lock moves at the first acceptance (the new track gets the double ring in that very
+  state). A candidate that is not accepted in its window is counted (`lockRelockRejects`) and logged once, when the
+  window ends. **Fail closed:** another shown, matched track that cannot be sampled makes the candidate ambiguous
+  (`next=unsampled`); a tie or doubt is no re-lock.
+  *Ends:* reset, Stop, a handle tap (also one that replaces a pending lock with a new one) or the memory running
+  out. The signature is a colour histogram in memory on the capture thread only (no face, no image), dropped at each
+  of these.
+  *Limits (by design, numbers are guesses until phone data exists):* two people in similar clothes may never be
+  told apart, and then the ring does not come back; a returning person is judged only on their first 10 matched
+  frames (a long entry half out of the picture can use them up); the colour of the light and of the video's
+  compression change the histogram; the distance and margin numbers are tuned from the `lock:` log lines (§6.7).
+- **Handle while pending:** the handle behaves as locked (a tap ends the wait, the next tap arms), though the ring
+  is not drawn.
 - **Drawing:** the locked track's head ring uses `lockRingStrokeDp` (3) and a second ring at radius ×
   `lockOuterRingRatio` (1.3); its brackets are unchanged. It fades like any LOST track.
 
@@ -517,6 +556,14 @@ uses no accessibility service.
   `tracksMostAtOnce`, `trackBirths`, `trackConfirmations`, `trackIdlePromotions`, `trackRecoveries`,
   `trackRemovals`. The last six are the tracker's cumulative counters since Start (§6.3; `reset()` on a geometry
   change keeps them); all are 0 before the first frame. They are read on the capture thread at the HUD tick.
+- **Lock in the log and in `summary.txt` (M4c).** One log line per lock event (never per frame): `lock: set id=N`,
+  `lock: pending id=N`, `lock: relocked id=N -> M d=0.18 next=0.41` (`next=none` when nobody else was shown),
+  `lock: candidate id=M d=0.41 rejected (too far)` / `rejected (ambiguous, next=0.38)` (`next=unsampled` when
+  another track could not be sampled) / `rejected (no torso)`, `lock: expired`, and `lock: cleared (handle | reset |
+  stop | replaced | track removed)`. The numbers `d` and `next` are what to read when tuning `relockMaxDistance` and
+  `relockMinMargin`. Four counters follow `trackRemovals` in `summary.txt`: `locks` (locks set), `lockRelocks`,
+  `lockRelockRejects` (candidates whose window ended without acceptance), `lockExpired`; since Start, read on the
+  capture thread at the HUD tick, 0 before the first lock.
 - **Timing in `summary.txt` (M1a).** After the model fields, in this order: `timingSamples`, then `copyMsP50`,
   `copyMsP95`, `preMsP50`, `preMsP95`, `inferMsP50`, `inferMsP95`, `postMsP50`, `postMsP95`, `frameMsP50`,
   `frameMsP95`, `resultAgeMsP50`, `resultAgeMsP95` (twelve keys, milliseconds with one decimal), then
@@ -569,7 +616,12 @@ limits per stage) and lifecycle (high and birth scores, confirm hits, idle promo
 smoother group (`smoothEnabled`, `smoothMinCutoffHz` 0.05..30, `smoothBeta` 0..100, `smoothDerivativeCutoffHz`
 0.05..30); defaults in §6.4. M4b adds the fade group (`fadeMinAlpha` 0..1, default 0.25; `fadeStepAlpha` 0.01..1,
 default 0.1) and the lock group (`lockHandleSizeDp` 16..96, 40; `lockMaxTapDistanceRatio` 0.1..3, 1.0; `lockArmTimeoutMs`
-1000..30000, 5000; `lockRingStrokeDp` 0.5..6, 3; `lockOuterRingRatio` 1.05..2, 1.3). There is no `displayLeadMs`
+1000..30000, 5000; `lockRingStrokeDp` 0.5..6, 3; `lockOuterRingRatio` 1.05..2, 1.3). M4c adds the re-lock group (all `relock…`, unit and bounds in KDoc): signature (`relockHueBins` 16, `relockSatBins`
+4, `relockGreyBins` 4, `relockMinValue` and `relockMinSaturation` 0.15, `relockSignatureAlpha` 0.1), torso
+(`relockTorsoShrink` 0.1, `relockBoxTopRatio` 0.25, `relockBoxBottomRatio` 0.6, `relockBoxWidthRatio` 0.6,
+`relockKeypointMinScore` 0.5, `relockFullBodyMinAspect` 1.8), sampling (`relockMaxSamplePixels` 2000,
+`relockMinSamplePixels` 150) and decision (`relockMemoryMs` 60000, `relockMaxDistance` 0.30, `relockMinMargin` 0.10,
+`relockJudgeFrames` 10). There is no `displayLeadMs`
 (no prediction, §6.4).
 
 ### 7.2 Thermal policy (M5)
@@ -712,7 +764,7 @@ Agents may not loosen asserted thresholds (protected files).
 | M1b | Later: raw-output goldens and the golden decode test, allocation-free pure-Kotlin decoder (D2), benchmark screen with CSV and soak mode, a bundled landscape model with a per-geometry choice | real numbers for fps / ms / heat; no per-frame allocation in the decoder |
 | M2 | Img→View hardening: `FitCenter` extended and checked on the phone across rotation, cutout and resize events (no camera) | green dots exactly on heads in portrait and landscape |
 | M3 | **M3a** (done): tracker + Kalman in `core`, scenario tests S1-S14 (20/30/60 fps, idle gaps); **M3b** (done): the tracker in the app (`FramePipeline` → `TrackSnapshot` → overlay; rings and brackets from tracks, `trk N` in the HUD, track ids with `debugMarks`, tracker counters in `summary.txt`); plan `docs/plans/M3.md` | rings and brackets from tracks that bridge short misses, a ring on a still picture after 0.4 to 0.9 s, `trk N` in the HUD, `track…` lines in the diagnostics |
-| M4 | **M4a** (done): tentative tracks survive one missed frame (rings come sooner), display smoother (OneEuro per shown track, box moves with the head), scenario S15; plan `docs/plans/M4.md`; **M4b** (done except the phone check): no forward prediction (measured, §6.4), fading LOST tracks, handle-window tap-to-lock; the tuning sheet is not built | M4a: rings that come sooner and do not tremble on a still person; M4b: LOST rings fade, tap-to-lock with a double ring |
+| M4 | **M4a** (done): tentative tracks survive one missed frame (rings come sooner), display smoother (OneEuro per shown track, box moves with the head), scenario S15; plan `docs/plans/M4.md`; **M4b** (done except the phone check): no forward prediction (measured, §6.4), fading LOST tracks, handle-window tap-to-lock; the tuning sheet is not built; **M4c** (built, phone check open): the lock comes back to a person who left the picture and returned, by the colours of their torso (§6.6) | M4a: rings that come sooner and do not tremble on a still person; M4b: LOST rings fade, tap-to-lock with a double ring; M4c: the double ring comes back on the same person within a minute, `lock:` lines in the log |
 | M5 | Thermal policy, perf pass, lifecycle/permission polish, replay mode | stable over 30 min |
 
 One session per milestone; M4 may need a second session for tuning on the phone.
@@ -751,7 +803,12 @@ One session per milestone; M4 may need a second session for tuning on the phone.
 - **DRM / secure apps capture black** (`FLAG_SECURE`): expected and unfixable by us; no dots there. Only
   documented, plus the HUD may say "no frames".
 - Tuning sheet (sliders for the important `TrackerConfig` numbers): not built in M4b; later.
-- Lock keep-alive and re-lock after a loss: not built (§6.6).
+- **Re-lock limits (M4c):** the colour signature cannot tell two people in similar clothes apart (then the ring does not
+  come back, by design); it is judged on the first 10 matched frames of a new track; `relockMaxDistance` 0.30 and
+  `relockMinMargin` 0.10 are guesses, to be tuned from the `d=` and `next=` values of the `lock:` log lines; the
+  phone shows how often the torso rows land on clothes and how often a returning person is half out of the picture
+  when first shown. A video paused for more than `relockMemoryMs` expires a pending lock at its first frame.
+- Lock keep-alive by position (re-lock without colours): not built; the colour signature replaces it (§6.6).
 
 ## 14. Build environment (summary; details in BUILD_PLAN.md)
 Code is written in Claude Code cloud sessions (claude.ai/code) on this repo by the AI team in
@@ -761,6 +818,17 @@ answers hard questions. Each change is verified in the session with `scripts/ver
 and always by GitHub Actions, which is the source of truth. The owner's laptop is not used for builds.
 
 ## 15. Changes
+- **v1.2 (M4c, 2026-11-17):** re-lock by clothing colours, documented as built (plan `docs/plans/M4.md`). (A) §6.6: the
+  "no re-lock" bullet is replaced by the as-built description: torso signature (HSV histogram with grey bins, EMA),
+  `TorsoRegion` (keypoints or a full-body box, clipped torsos and small samples are not used), pending for
+  `relockMemoryMs` of frame time with no ring, candidates by id (`maxIdAtLastMatch`), judging on each of the first
+  `relockJudgeFrames` matched frames with every track sampled once per frame, accept at distance 0.30 and margin 0.10,
+  fail closed on unsampled neighbours, ends (handle, replaced, reset, Stop, expiry), limits. (B) §5: `LockKeeper` in
+  the flow and thread table (replaces the `lockedId` row; signatures are capture-only). (C) §6.7: the `lock:` log
+  lines and the counters `locks`, `lockRelocks`, `lockRelockRejects`, `lockExpired`. (D) §7.1: the 18 `relock…`
+  fields; §12: M4c in the M4 row; §13: re-lock limits. `TrackList.matchedDetectionIndex` (core) tells which detection
+  matched a track in the newest `update`. Review fixes after T2: candidates by id instead of "newly shown", a
+  judging window, clipped torsos, the full-body box rule, one sample per track and frame, `cleared (replaced)`.
 - **v1.1 (M4b, 2026-11-17):** fading and tap-to-lock, documented as built (plan `docs/plans/M4.md`). (A) §6.4: no forward
   prediction, with the measured numbers (the lead raises jitter and overshoot and leaves the walker's error
   unchanged); `displayLeadMs` is gone. (B) §6.5: LOST tracks fade with `MarkFade` (`fadeMinAlpha`, `fadeStepAlpha`),

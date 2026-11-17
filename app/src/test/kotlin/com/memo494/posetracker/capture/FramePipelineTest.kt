@@ -1046,6 +1046,46 @@ class FramePipelineTest {
     }
 
     @Test
+    fun trackCounters_areZeroBeforeTheFirstFrame() {
+        val pipeline = trackingPipeline()
+
+        assertThat(pipeline.trackBirths).isEqualTo(0)
+        assertThat(pipeline.trackConfirmations).isEqualTo(0)
+        assertThat(pipeline.trackIdlePromotions).isEqualTo(0)
+        assertThat(pipeline.trackRecoveries).isEqualTo(0)
+        assertThat(pipeline.trackRemovals).isEqualTo(0)
+        assertThat(pipeline.tracksMostAtOnce).isEqualTo(0)
+    }
+
+    @Test
+    fun threeFramesOfOnePerson_countOneBirthAndOneConfirmation() {
+        val pipeline = trackingPipeline()
+        detector.people = listOf(walker())
+
+        framesFrom(pipeline, 0, 3)
+
+        assertThat(pipeline.trackBirths).isEqualTo(1)
+        assertThat(pipeline.trackConfirmations).isEqualTo(1)
+        assertThat(pipeline.tracksMostAtOnce).isEqualTo(1)
+        assertThat(pipeline.trackIdlePromotions).isEqualTo(0)
+        assertThat(pipeline.trackRecoveries).isEqualTo(0)
+        assertThat(pipeline.trackRemovals).isEqualTo(0)
+        assertThat(states.last().tracks.count).isEqualTo(1)
+    }
+
+    @Test
+    fun trackCounters_surviveTheResetOfANewSize() {
+        val pipeline = trackingPipeline()
+        detector.people = listOf(walker())
+        framesFrom(pipeline, 0, 3)
+
+        pipeline.setExpectedSize(CaptureSize(TRACK_WIDTH + 2, TRACK_HEIGHT))
+
+        assertThat(pipeline.trackBirths).isEqualTo(1)
+        assertThat(pipeline.trackConfirmations).isEqualTo(1)
+    }
+
+    @Test
     fun aNewExpectedSize_emptiesTheTracksAndTheNextTrackGetsAHigherId() {
         val pipeline = trackingPipeline()
         detector.people = listOf(walker())

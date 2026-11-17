@@ -9,8 +9,10 @@ import com.memo494.posetracker.core.capture.CaptureSize
 import com.memo494.posetracker.core.stats.ThermalReader
 import com.memo494.posetracker.core.stats.ThermalSampler
 import com.memo494.posetracker.core.stats.TimingSummary
+import com.memo494.posetracker.core.tracking.TrackSnapshot
 import com.memo494.posetracker.detector.Accelerator
 import com.memo494.posetracker.detector.FakePoseDetector
+import com.memo494.posetracker.overlay.FakeTracks
 import com.memo494.posetracker.overlay.OverlayState
 import org.junit.After
 import org.junit.Test
@@ -93,5 +95,28 @@ class CaptureStatsHolderTest {
         val stats = CaptureStatsHolder.latest!!
         assertThat(stats.thermalStatus).isEqualTo("n/a")
         assertThat(stats.thermalHeadroom).isNaN()
+    }
+
+    @Test
+    fun publish_beforeAnyFrame_hasZeroTrackCounters() {
+        CaptureStatsHolder.publish(OverlayState(), pipelineWithDetector(), null)
+
+        val stats = CaptureStatsHolder.latest!!
+        assertThat(stats.tracksShown).isEqualTo(0)
+        assertThat(stats.tracksMostAtOnce).isEqualTo(0)
+        assertThat(stats.trackBirths).isEqualTo(0)
+        assertThat(stats.trackConfirmations).isEqualTo(0)
+        assertThat(stats.trackIdlePromotions).isEqualTo(0)
+        assertThat(stats.trackRecoveries).isEqualTo(0)
+        assertThat(stats.trackRemovals).isEqualTo(0)
+    }
+
+    @Test
+    fun publish_tracksShownIsTheNumberOfTracksOfTheNewestState() {
+        val state = OverlayState(tracks = TrackSnapshot.of(FakeTracks(2)))
+
+        CaptureStatsHolder.publish(state, pipelineWithDetector(), null)
+
+        assertThat(CaptureStatsHolder.latest!!.tracksShown).isEqualTo(2)
     }
 }

@@ -142,6 +142,28 @@ internal class FramePipeline(
         private set
 
     /**
+     * Tracker counters since this pipeline (so this Start) began; a reset of the tracker keeps them. Plain reads of
+     * the [Tracker]'s fields: it is written and these are read on the capture thread only (the HUD tick that
+     * publishes the diagnostics), so they need no `@Volatile`. Zero before the first frame.
+     */
+    val trackBirths: Int get() = tracker.birthCount
+
+    /** Tentative tracks that became shown after enough hits, count; see [trackBirths]. */
+    val trackConfirmations: Int get() = tracker.confirmCount
+
+    /** Tentative tracks promoted by the HUD tick on a still picture, count; see [trackBirths]. */
+    val trackIdlePromotions: Int get() = tracker.idlePromoteCount
+
+    /** Lost tracks that were matched again, count; see [trackBirths]. */
+    val trackRecoveries: Int get() = tracker.recoverCount
+
+    /** Shown (confirmed or lost) tracks that were removed, count; see [trackBirths]. */
+    val trackRemovals: Int get() = tracker.removeCount
+
+    /** Most tracks shown at once since the start; see [trackBirths]. */
+    val tracksMostAtOnce: Int get() = tracker.mostShownAtOnce
+
+    /**
      * Sets the size every frame must have (Img pixels). `null` = unknown: every frame is dropped as a
      * size mismatch (fail closed). The copy buffer is replaced by the next frame of a new size.
      * Leaving a known size (rotation) republishes the state at once without its detections and tracks, which

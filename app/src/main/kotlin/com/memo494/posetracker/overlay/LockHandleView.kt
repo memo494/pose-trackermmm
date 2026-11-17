@@ -63,6 +63,7 @@ internal class LockHandleView(
         if (armed) canvas.drawCircle(centerX, centerY, radius * DOT_RATIO, dotPaint)
     }
 
+    /** The icon's drawing proportions, not tuning numbers: they stay here and not in `TrackerConfig`. */
     private companion object {
         /** Ring radius as a fraction of the handle's radius (leaves room for the stroke). */
         const val RING_RATIO = 0.6f

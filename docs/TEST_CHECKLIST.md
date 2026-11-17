@@ -364,12 +364,58 @@ about 0.37); the other tracker lines are still numbers, not `n/a`.
 
 ---
 
+## M4b — fading marks and tap-to-lock
+
+Do M4a first. This section is about two changes: a ring of a person the model loses **fades** instead of
+staying full and then vanishing, and you can **lock** one person with the small round handle at the right edge of
+the screen. The handle is part of the picture the app sees; it is small on purpose.
+
+### 1. A lost ring fades
+1. Install the newest build from the `latest` release. Press **Start** and play the M3 video. Watch a person
+   whom the model loses for a moment (someone who is partly hidden or turns away).
+
+**Pass:** the ring and the corner marks of that person **fade out over about 0.8 seconds** instead
+of staying full and then disappearing; if the person comes back the marks are full again.
+**If it fails:** the marks still stay full and then vanish, or they flicker: Share diagnostics and say which person.
+
+### 2. Lock a person
+1. Tap the small round handle at the **right edge** of the screen. The corner text shows **tap a person** and the
+   handle gets a dot.
+2. Tap a person (anywhere near the head or the body).
+3. Watch that person walk.
+
+**Pass:** that person gets a **second, thicker ring** and keeps it while walking; the other people keep their
+ordinary rings. Tap the handle again: the double ring is **gone**.
+**If it fails:** nothing happens on the first tap, the wrong person gets the ring, or the ring moves to another
+person: Share diagnostics and say what you tapped.
+
+### 3. A tap on an empty spot, and the timeout
+1. Tap the handle, then tap an empty spot far from every person. Nothing must be locked.
+2. Tap the handle again and wait about **five seconds** without tapping.
+
+**Pass:** the empty tap locks **nobody**, and the **tap a person** text goes away by itself after about five seconds.
+Tapping the handle a second time while the text is shown also cancels it.
+**If it fails:** somebody gets locked by the empty tap, or the text stays: Share diagnostics.
+
+### 4. Taps reach the app below again
+1. While **not** armed, tap and scroll in the app under the overlay (for example the video player).
+2. Arm (tap the handle), then tap a person. Now tap and scroll the app below again.
+3. Arm again and press **Stop** in the notification; then **Start** and try the app below.
+4. Arm, then rotate the phone, and try the app below.
+
+**Pass:** in every case taps and scrolling **reach the app below** normally; after Stop or a rotation the lock is
+gone and nothing stays armed.
+**If it fails:** after arming the app below does not react to taps (the overlay stays touchable): Share
+diagnostics and say what you did before.
+
+---
+
 ## What to send back
 1. The **diagnostics zip** (press **Share diagnostics** or **Save diagnostics** right after the problem, not hours
    later; a saved zip can be sent later).
 2. **One sentence** about what was on the screen (which app, how many people, what you did).
 3. The **block number** of this checklist that failed (for example "block 5"; for the M0c section say "M0c block 5",
-   for M1a "M1a block 3", for M3 "M3 block 3", for M4a "M4a block 2").
+   for M1a "M1a block 3", for M3 "M3 block 3", for M4a "M4a block 2", for M4b "M4b block 2").
 4. A **screenshot** if the corner text or a warning looked strange.
 5. If everything passed: say "all blocks passed" and the build id from the top of the app.
 

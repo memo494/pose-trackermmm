@@ -120,16 +120,17 @@ class OverlayWindow(
     /** Removes the overlay; safe to call repeatedly or when it was never shown. */
     fun remove() {
         checkMainThread()
-        val view = overlayView ?: return
-        overlayView = null
-        overlayParams = null
-        view.armedTapListener = null
+        if (overlayView == null && handleView == null) return
+        // First, while the window still exists: the arming ends and the touchable flag is restored.
         controller?.stop()
         controller = null
         mainHandler.removeCallbacks(timeoutRunnable)
+        overlayView?.armedTapListener = null
         removeQuietly(handleView)
         handleView = null
-        removeQuietly(view)
+        removeQuietly(overlayView)
+        overlayView = null
+        overlayParams = null
     }
 
     private fun removeQuietly(view: View?) {
@@ -154,8 +155,20 @@ class OverlayWindow(
         try {
             windowManager?.updateViewLayout(view, params)
         } catch (e: RuntimeException) {
-            // The window is gone; nothing to update.
+            // Fail closed: a window that cannot be made untouchable again must not stay (it would swallow the taps
+            // of the app below), so the overlay and its handle are removed; the session itself goes on.
+            if (!touchable) dropWindows(view)
         }
+    }
+
+    /** Removes the overlay [view] and the handle without a word and forgets them (a failed `updateViewLayout`). */
+    private fun dropWindows(view: View) {
+        overlayView?.armedTapListener = null
+        removeQuietly(handleView)
+        handleView = null
+        removeQuietly(view)
+        overlayView = null
+        overlayParams = null
     }
 
     private fun createLayoutParams(): WindowManager.LayoutParams {

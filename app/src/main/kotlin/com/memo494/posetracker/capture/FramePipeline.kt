@@ -368,7 +368,6 @@ internal class FramePipeline(
                 modelInputHeight = modelInputHeight,
                 modelImported = modelImported,
                 tracks = tracks,
-                lockedId = resolveLock(tracks),
             ),
         )
         trackedArrivalNs = clock.nowNs()

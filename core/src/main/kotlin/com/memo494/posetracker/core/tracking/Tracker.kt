@@ -23,7 +23,8 @@ import com.memo494.posetracker.core.model.PoseDetection
  *    outside the image;
  * 7. an unmatched detection with a score of at least `trackBirthScore` starts a tentative track while fewer
  *    than `maxTracks` tracks exist (confirmed at once when `trackConfirmHits` is 1);
- * 8. [onIdle] promotes the tentative tracks after `trackIdlePromoteMs` without a frame.
+ * 8. [onIdle] promotes the tentative tracks after `trackIdlePromoteMs` without a frame and removes a LOST track
+ *    whose lost time plus the idle time exceeds `trackMaxLostMs` (so a still screen does not keep a ring for ever).
  *
  * Thread rule: not thread-safe, one capture thread calls everything. **Allocation-free after construction**
  * (AGENTS rule 8): the pool of `maxTracks` tracks, the order array and every scratch array are made in the
@@ -157,19 +158,31 @@ class Tracker(
     /**
      * Tells the tracker that [idleNs] nanoseconds have passed since the newest frame arrived (measured by the
      * caller) and returns the tracks afterwards. At or above `trackIdlePromoteMs` every tentative track
-     * becomes confirmed; nothing else changes.
+     * becomes confirmed. A LOST track whose `lostMs` plus the idle time exceeds `trackMaxLostMs` is removed
+     * (counted in [removeCount]); `lostMs` itself is not changed, so repeated calls with a growing [idleNs] stay
+     * consistent and the next [update] goes on as before. A CONFIRMED track is never touched (a paused video
+     * keeps its rings); nothing else changes.
      */
     fun onIdle(idleNs: Long): TrackList {
-        if (idleNs >= config.trackIdlePromoteNs) {
-            for (pos in 0 until activeCount) {
-                val track = tracks[order[pos]]
-                if (track.state == TrackState.TENTATIVE) {
-                    track.state = TrackState.CONFIRMED
-                    idlePromoteCount++
-                }
+        val promote = idleNs >= config.trackIdlePromoteNs
+        val idleMs = maxOf(idleNs, 0L).toDouble() / nanosPerMilli
+        var survivors = 0
+        for (pos in 0 until activeCount) {
+            val slot = order[pos]
+            val track = tracks[slot]
+            if (track.state == TrackState.LOST && track.lostMs + idleMs > config.trackMaxLostMs) {
+                removeCount++
+                inUse[slot] = false
+                continue
             }
-            noteShown()
+            if (promote && track.state == TrackState.TENTATIVE) {
+                track.state = TrackState.CONFIRMED
+                idlePromoteCount++
+            }
+            order[survivors++] = slot
         }
+        activeCount = survivors
+        noteShown()
         return view
     }
 

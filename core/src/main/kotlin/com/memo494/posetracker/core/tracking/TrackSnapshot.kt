@@ -5,6 +5,9 @@ package com.memo494.posetracker.core.tracking
  * (docs/plans/M3.md, M3b). The tracker's own [TrackList] is a reused view that is valid only until its next call,
  * so the pipeline takes a snapshot on the capture thread right after each call and publishes that.
  *
+ * The snapshot also carries the size of the image its positions belong to ([widthImg] x [heightImg]); the view
+ * draws it only when that equals the capture size of the state (fail closed, like the raw detections).
+ *
  * Positions are Img pixels. The arrays are private and never handed out; every getter throws
  * `IndexOutOfBoundsException` for an index outside `0 until count`. Non-finite values are copied as they are
  * (the tracker already removes tracks that are not healthy).
@@ -15,6 +18,10 @@ package com.memo494.posetracker.core.tracking
 class TrackSnapshot private constructor(
     /** Number of tracks in the snapshot. */
     val count: Int,
+    /** Width of the image the positions belong to, Img pixels; 0 for [EMPTY]. */
+    val widthImg: Int,
+    /** Height of the image the positions belong to, Img pixels; 0 for [EMPTY]. */
+    val heightImg: Int,
     private val ids: IntArray,
     private val flags: BooleanArray,
     private val values: FloatArray,
@@ -52,8 +59,8 @@ class TrackSnapshot private constructor(
     }
 
     companion object {
-        /** The snapshot without tracks; shared, so nothing is allocated while nobody is tracked. */
-        val EMPTY: TrackSnapshot = TrackSnapshot(0, IntArray(0), BooleanArray(0), FloatArray(0))
+        /** The snapshot without tracks (image size 0 x 0); shared, so nothing is allocated while nobody is tracked. */
+        val EMPTY: TrackSnapshot = TrackSnapshot(0, 0, 0, IntArray(0), BooleanArray(0), FloatArray(0))
 
         private const val FLAGS_PER_TRACK = 2
         private const val LOST = 0
@@ -67,11 +74,16 @@ class TrackSnapshot private constructor(
         private const val BOX_BOTTOM = 5
 
         /**
-         * Copies the shown entries of [tracks], in list order. Returns the shared [EMPTY] (no allocation) when none
+         * Copies the shown entries of [tracks], in list order, for a frame of [widthImg] x [heightImg] Img pixels.
+         * Returns the shared [EMPTY] (no allocation) when none
          * is shown; otherwise allocates the snapshot and three arrays sized to the shown count (once per processed
          * frame, on the capture thread).
          */
-        fun of(tracks: TrackList): TrackSnapshot {
+        fun of(
+            tracks: TrackList,
+            widthImg: Int,
+            heightImg: Int,
+        ): TrackSnapshot {
             var shown = 0
             for (i in 0 until tracks.size) {
                 if (tracks.isShown(i)) shown++
@@ -95,7 +107,7 @@ class TrackSnapshot private constructor(
                 values[base + BOX_BOTTOM] = tracks.boxBottomImg(i)
                 next++
             }
-            return TrackSnapshot(shown, ids, flags, values)
+            return TrackSnapshot(shown, widthImg, heightImg, ids, flags, values)
         }
     }
 }

@@ -289,7 +289,7 @@ class RedrawPolicyTest {
         assertThat(RedrawPolicy.hudDue(100L, 5_000_000_000L, 500_000_000L, hudChanged = true)).isFalse()
     }
 
-    private fun tracks(vararg entries: FakeTrack): TrackSnapshot = TrackSnapshot.of(FakeTrackList(*entries))
+    private fun tracks(vararg entries: FakeTrack): TrackSnapshot = TrackSnapshot.of(FakeTrackList(*entries), 320, 240)
 
     private fun tracksChanged(
         previous: TrackSnapshot,

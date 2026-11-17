@@ -138,7 +138,8 @@ class PoseOverlayView(
     /**
      * The marks of [state]: per track the corner brackets and the head ring; with `debugMarks` also, first,
      * every raw detection (full box and keypoints) and, with each track, its id. Nothing is drawn while the
-     * detections are hidden or no Img -> View mapping can be built.
+     * detections are hidden or no Img -> View mapping can be built; tracks only when their image size is the
+     * capture size ([OverlayState.tracksMatchCapture]).
      */
     private fun drawMarks(
         canvas: Canvas,
@@ -147,6 +148,7 @@ class PoseOverlayView(
         if (!state.detectionsShown) return
         val fit = mappingFor(state) ?: return
         if (config.debugMarks) drawRawDetections(canvas, fit, state)
+        if (!state.tracksMatchCapture) return
         val tracks = state.tracks
         for (i in 0 until tracks.count) {
             drawTrack(canvas, fit, tracks, i)

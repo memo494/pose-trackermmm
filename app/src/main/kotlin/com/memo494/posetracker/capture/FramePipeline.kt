@@ -8,10 +8,10 @@ import com.memo494.posetracker.core.capture.RowCopy
 import com.memo494.posetracker.core.model.DetectionFrame
 import com.memo494.posetracker.core.model.TimestampSource
 import com.memo494.posetracker.core.overlay.OverlayWarning
+import com.memo494.posetracker.core.overlay.RedrawPolicy
 import com.memo494.posetracker.core.stats.Percentiles
 import com.memo494.posetracker.core.stats.TimingSummary
 import com.memo494.posetracker.core.stats.TimingWindow
-import com.memo494.posetracker.core.tracking.TrackList
 import com.memo494.posetracker.core.tracking.TrackSnapshot
 import com.memo494.posetracker.core.tracking.Tracker
 import com.memo494.posetracker.detector.PoseDetector
@@ -34,8 +34,9 @@ import com.memo494.posetracker.overlay.OverlayState
  * did not see (no detector, not display-sized, size mismatch, failed copy) is never given to the tracker: no
  * information is not "nobody there". Whenever the pipeline drops the detections from the state (a new capture or
  * display size), the tracker is reset and the state carries no tracks, so positions of an old geometry are never
- * mapped with a new one. The HUD tick tells the tracker how long ago the newest tracked frame arrived
- * (`Tracker.onIdle`), so a still picture still gets its marks.
+ * mapped with a new one. The HUD tick tells the tracker how long ago the newest tracked frame was published
+ * (`Tracker.onIdle`; copy and inference time are not idle time), so a still picture still gets its marks and a
+ * track that stays lost is removed.
  *
  * Timing: every **processed** frame (detected and published) adds one sample to each of six [TimingWindow]s:
  * copy, pre, inference, post, whole frame (acquire to publish) and result age (publish time minus the image
@@ -76,6 +77,7 @@ internal class FramePipeline(
         OverlayState(modelInputWidth = modelInputWidth, modelInputHeight = modelInputHeight, modelImported = modelImported)
     private val tracker = Tracker(config)
     private var trackedFrameNewest = false
+    /** Clock reading after the newest tracked frame was published (not its arrival): idle time starts here. */
     private var trackedArrivalNs = 0L
     private var imageClosed = false
     private var failureStreak = 0L
@@ -234,8 +236,8 @@ internal class FramePipeline(
     /**
      * Republishes the last state with the fps of now, so a static screen (no frames) decays to about 0
      * fps. Called at the HUD rate, on the capture thread. When the newest published state came from a tracked
-     * frame, the tracker is told how long ago that frame arrived; if that changes the number of shown tracks
-     * (a tentative track was promoted), the state carries a new [TrackSnapshot]. Never throws.
+     * frame, the tracker is told how long ago that frame was published; if the shown tracks then differ (a
+     * tentative track was promoted, a lost one removed), the state carries a new [TrackSnapshot]. Never throws.
      */
     fun onHudTick() {
         try {
@@ -253,15 +255,8 @@ internal class FramePipeline(
         nowNs: Long,
     ): OverlayState {
         val list = tracker.onIdle(nowNs - trackedArrivalNs)
-        return if (shownCount(list) != state.tracks.count) state.copy(tracks = TrackSnapshot.of(list)) else state
-    }
-
-    private fun shownCount(list: TrackList): Int {
-        var shown = 0
-        for (i in 0 until list.size) {
-            if (list.isShown(i)) shown++
-        }
-        return shown
+        val idle = TrackSnapshot.of(list, state.captureWidthImg, state.captureHeightImg)
+        return if (RedrawPolicy.tracksChanged(state.tracks, idle, 0f)) state.copy(tracks = idle) else state
     }
 
     /**
@@ -310,8 +305,7 @@ internal class FramePipeline(
         closeImage(image)
         if (!captureFrame.set(rgba, widthImg, heightImg, timestampNs, source)) error("capture frame rejected the copy")
         val result = detector.detect(captureFrame)
-        val tracks = TrackSnapshot.of(tracker.update(result))
-        trackedArrivalNs = acquireNs
+        val tracks = TrackSnapshot.of(tracker.update(result), widthImg, heightImg)
         trackedFrameNewest = true
         fpsMeter.onFrame(acquireNs)
         val maxRawScore = detector.lastMaxRawScore
@@ -337,6 +331,7 @@ internal class FramePipeline(
                 tracks = tracks,
             ),
         )
+        trackedArrivalNs = clock.nowNs()
         recordTimings(detector, copyStartNs, nowNs, acquireNs, timestampNs, source == TimestampSource.IMAGE)
         frames++
         failureStreak = 0L

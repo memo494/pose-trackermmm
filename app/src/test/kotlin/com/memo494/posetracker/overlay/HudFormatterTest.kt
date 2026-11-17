@@ -33,7 +33,7 @@ class HudFormatterTest {
     private fun snapshotOf(
         count: Int,
         shiftXImg: Float = 0f,
-    ): TrackSnapshot = TrackSnapshot.of(FakeTracks(count, 1, shiftXImg))
+    ): TrackSnapshot = TrackSnapshot.of(FakeTracks(count, 1, shiftXImg), 320, 240)
 
     private fun warning(state: OverlayState): String {
         val length = HudFormatter.formatWarning(state, buffer)

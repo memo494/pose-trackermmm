@@ -28,6 +28,8 @@ private const val HEAD_KEYPOINTS = TrackerConfig.HEAD_KEYPOINT_COUNT
 private const val TRACK_WIDTH = 320
 private const val TRACK_HEIGHT = 240
 private const val FRAME_STEP_MS = 50L
+private const val SLOW_DETECT_MS = 300L
+private const val NEW_PERSON_SHIFT_X_IMG = 150f
 private const val HEAD_TOLERANCE_IMG = 3f
 
 /** An image that records its reads and closes in [events]. */
@@ -982,14 +984,17 @@ class FramePipelineTest {
     private val headXsImg = floatArrayOf(130f, 124f, 136f, 118f, 142f)
     private val headYsImg = floatArrayOf(40f, 36f, 36f, 40f, 40f)
 
-    /** A person 200 px high whose five head keypoints (confidence 0.9) scatter around a known mean. */
-    private fun walker(boxTopImg: Float = 20f): PoseDetection {
+    /** A person 200 px high whose five head keypoints (confidence 0.9) scatter around a known mean, [shiftXImg] to the right. */
+    private fun walker(
+        boxTopImg: Float = 20f,
+        shiftXImg: Float = 0f,
+    ): PoseDetection {
         val xy = FloatArray(HEAD_KEYPOINTS * 2)
         for (k in 0 until HEAD_KEYPOINTS) {
-            xy[k * 2] = headXsImg[k]
+            xy[k * 2] = headXsImg[k] + shiftXImg
             xy[k * 2 + 1] = headYsImg[k]
         }
-        return PoseDetection(100f, boxTopImg, 160f, 220f, 0.9f, xy, FloatArray(HEAD_KEYPOINTS) { 0.9f })
+        return PoseDetection(100f + shiftXImg, boxTopImg, 160f + shiftXImg, 220f, 0.9f, xy, FloatArray(HEAD_KEYPOINTS) { 0.9f })
     }
 
     /** Sets the clock to [atMs] after the start and feeds one frame of the given size that arrives then. */
@@ -1174,7 +1179,76 @@ class FramePipelineTest {
         tickAt(pipeline, 1000)
         assertThat(states).hasSize(statesBefore + 1)
         assertThat(states.last().tracks).isSameInstanceAs(promoted)
+        assertThat(pipeline.trackIdlePromotions).isEqualTo(1)
         assertThat(pipeline.failures).isEqualTo(0L)
+    }
+
+    @Test
+    fun hudTick_countsTheIdleTimeFromTheEndOfProcessing_notFromTheArrival() {
+        val pipeline = trackingPipeline()
+        detector.people = listOf(walker())
+        detector.onDetect = { clock.currentNs += SLOW_DETECT_MS * MS_NS }
+        clock.currentNs = NOW_NS
+        pipeline.onFrame(image(widthImg = TRACK_WIDTH, heightImg = TRACK_HEIGHT), NOW_NS)
+        val endMs = SLOW_DETECT_MS
+
+        tickAt(pipeline, endMs + 399)
+        assertThat(states.last().tracks.count).isEqualTo(0)
+        assertThat(pipeline.trackIdlePromotions).isEqualTo(0)
+
+        tickAt(pipeline, endMs + 400)
+        assertThat(states.last().tracks.count).isEqualTo(1)
+        assertThat(pipeline.trackIdlePromotions).isEqualTo(1)
+    }
+
+    @Test
+    fun hudTick_afterOnePromotionAndOneRemoval_publishesTheNewTrackAlthoughTheCountStaysOne() {
+        val pipeline = trackingPipeline()
+        detector.people = listOf(walker())
+        val confirmedAtMs = framesFrom(pipeline, 0, 3)
+        assertThat(states.last().tracks.count).isEqualTo(1)
+        val leftHeadXImg = states.last().tracks.headXImg(0)
+        detector.people = listOf(walker(shiftXImg = NEW_PERSON_SHIFT_X_IMG))
+        val newestMs = confirmedAtMs + FRAME_STEP_MS
+        frameAt(pipeline, newestMs)
+        assertThat(states.last().tracks.headXImg(0)).isWithin(HEAD_TOLERANCE_IMG).of(leftHeadXImg)
+
+        tickAt(pipeline, newestMs + TrackerConfig().trackMaxLostMs.toLong() + 1)
+
+        val tracks = states.last().tracks
+        assertThat(tracks.count).isEqualTo(1)
+        assertThat(tracks.headXImg(0)).isWithin(HEAD_TOLERANCE_IMG).of(headXsImg.average().toFloat() + NEW_PERSON_SHIFT_X_IMG)
+        assertThat(pipeline.trackRemovals).isEqualTo(1)
+        assertThat(pipeline.trackIdlePromotions).isEqualTo(1)
+    }
+
+    @Test
+    fun aTrackedFrame_publishesTracksWithTheSizeOfTheFrame() {
+        val pipeline = trackingPipeline()
+        detector.people = listOf(walker())
+
+        framesFrom(pipeline, 0, 3)
+
+        val state = states.last()
+        assertThat(state.tracks.count).isEqualTo(1)
+        assertThat(state.tracks.widthImg).isEqualTo(TRACK_WIDTH)
+        assertThat(state.tracks.heightImg).isEqualTo(TRACK_HEIGHT)
+        assertThat(state.tracksMatchCapture).isTrue()
+    }
+
+    @Test
+    fun aPromotionByIdleTime_publishesTracksWithTheSizeOfTheFrame() {
+        val pipeline = trackingPipeline()
+        detector.people = listOf(walker())
+        frameAt(pipeline, 0)
+
+        tickAt(pipeline, TrackerConfig().trackIdlePromoteMs)
+
+        val state = states.last()
+        assertThat(state.tracks.count).isEqualTo(1)
+        assertThat(state.tracks.widthImg).isEqualTo(TRACK_WIDTH)
+        assertThat(state.tracks.heightImg).isEqualTo(TRACK_HEIGHT)
+        assertThat(state.tracksMatchCapture).isTrue()
     }
 
     @Test

@@ -58,6 +58,14 @@ data class OverlayState(
     val detectionsShown: Boolean
         get() = dotsVisible && warning?.hidesDetections != true
 
+    /**
+     * Whether [tracks] were made for the current capture size ([captureWidthImg] x [captureHeightImg]); the view
+     * draws tracks only then (fail closed, like the raw detections). False for the empty snapshot (size 0 x 0)
+     * unless the capture size is unknown too; it has nothing to draw anyway.
+     */
+    val tracksMatchCapture: Boolean
+        get() = tracks.widthImg == captureWidthImg && tracks.heightImg == captureHeightImg
+
     companion object {
         /** [maxRawScore] when the detector did not measure it. */
         const val NOT_MEASURED_SCORE = -1f

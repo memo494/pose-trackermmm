@@ -39,7 +39,7 @@ class OverlayStateHolderTest {
     ): OverlayState =
         OverlayState(
             frame = DetectionFrame(1L, TimestampSource.IMAGE, 610, 1356, listOf(person(shiftX))),
-            tracks = if (trackShiftX == null) TrackSnapshot.EMPTY else TrackSnapshot.of(FakeTracks(1, 1, trackShiftX)),
+            tracks = if (trackShiftX == null) TrackSnapshot.EMPTY else TrackSnapshot.of(FakeTracks(1, 1, trackShiftX), 610, 1356),
             accelerator = Accelerator.GPU,
             captureFps = captureFps,
             inferenceMs = inferenceMs,

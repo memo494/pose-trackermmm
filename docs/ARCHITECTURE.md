@@ -398,7 +398,9 @@ The overlay is a plain `View` (not `ComposeView`) in a `TYPE_APPLICATION_OVERLAY
   appear from the third frame (about 100 to 150 ms). A still picture sends no further frames, so the HUD tick
   (`Tracker.onIdle`, §5) promotes a person after `trackIdlePromoteMs` (400 ms) of silence: the marks come
   **0.4 to 0.9 s after the last frame** (400 ms plus up to one tick of 0.5 s at 2 Hz); before M3b they came at
-  once. A person the model misses for a moment keeps the marks (LOST) for up to `trackMaxLostMs` (800 ms).
+  once. A person the model misses for a moment keeps the marks (LOST) for up to `trackMaxLostMs` (800 ms). Below
+  about 2.5 processed frames per second a still picture and a slow stream cannot be told apart, so tentative
+  tracks are then shown.
 - **The overlay is in the capture** — and `FLAG_SECURE` on it would black out the **whole** capture, so it is
   not an option. Mitigation: hollow marks, thin strokes, a corner HUD strip, and the marks rule below.
 - **Marks rule (M0c T7, from M3b on the tracker's tracks):** the marks come from the **shown tracks**

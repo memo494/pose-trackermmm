@@ -11,9 +11,24 @@ class TrackSnapshotTest {
     }
 
     @Test
+    fun empty_hasImageSizeZeroByZero() {
+        assertThat(TrackSnapshot.EMPTY.widthImg).isEqualTo(0)
+        assertThat(TrackSnapshot.EMPTY.heightImg).isEqualTo(0)
+    }
+
+    @Test
+    fun of_storesTheImageSizeOfTheFrame() {
+        val snapshot = TrackSnapshot.of(FakeTrackList(FakeTrack(1)), WIDTH_IMG, HEIGHT_IMG)
+
+        assertThat(snapshot.widthImg).isEqualTo(WIDTH_IMG)
+        assertThat(snapshot.heightImg).isEqualTo(HEIGHT_IMG)
+    }
+
+    @Test
     fun of_aListWithoutShownTracks_returnsTheSharedEmptySnapshot() {
-        val none = TrackSnapshot.of(FakeTrackList())
-        val onlyTentative = TrackSnapshot.of(FakeTrackList(FakeTrack(1, shown = false), FakeTrack(2, shown = false)))
+        val none = TrackSnapshot.of(FakeTrackList(), WIDTH_IMG, HEIGHT_IMG)
+        val onlyTentative =
+            TrackSnapshot.of(FakeTrackList(FakeTrack(1, shown = false), FakeTrack(2, shown = false)), WIDTH_IMG, HEIGHT_IMG)
 
         assertThat(none).isSameInstanceAs(TrackSnapshot.EMPTY)
         assertThat(onlyTentative).isSameInstanceAs(TrackSnapshot.EMPTY)
@@ -30,7 +45,7 @@ class TrackSnapshotTest {
                 FakeTrack(5),
             )
 
-        val snapshot = TrackSnapshot.of(list)
+        val snapshot = TrackSnapshot.of(list, WIDTH_IMG, HEIGHT_IMG)
 
         assertThat(snapshot.count).isEqualTo(3)
         assertThat(snapshot.id(0)).isEqualTo(7)
@@ -56,7 +71,7 @@ class TrackSnapshotTest {
                 ),
             )
 
-        val snapshot = TrackSnapshot.of(list)
+        val snapshot = TrackSnapshot.of(list, WIDTH_IMG, HEIGHT_IMG)
 
         assertThat(snapshot.isLost(0)).isFalse()
         assertThat(snapshot.isHeadEstimated(0)).isFalse()
@@ -79,7 +94,7 @@ class TrackSnapshotTest {
     @Test
     fun of_isACopy_laterChangesOfTheListDoNotShowThrough() {
         val entries = mutableListOf(FakeTrack(1, headXImg = 10f))
-        val snapshot = TrackSnapshot.of(FakeTrackList(entries))
+        val snapshot = TrackSnapshot.of(FakeTrackList(entries), WIDTH_IMG, HEIGHT_IMG)
 
         entries[0] = FakeTrack(2, headXImg = 99f)
         entries.add(FakeTrack(3))
@@ -91,7 +106,8 @@ class TrackSnapshotTest {
 
     @Test
     fun of_copiesNonFiniteValuesAsTheyAre() {
-        val snapshot = TrackSnapshot.of(FakeTrackList(FakeTrack(1, headXImg = Float.NaN, boxLeftImg = Float.POSITIVE_INFINITY)))
+        val list = FakeTrackList(FakeTrack(1, headXImg = Float.NaN, boxLeftImg = Float.POSITIVE_INFINITY))
+        val snapshot = TrackSnapshot.of(list, WIDTH_IMG, HEIGHT_IMG)
 
         assertThat(snapshot.headXImg(0).isNaN()).isTrue()
         assertThat(snapshot.boxLeftImg(0)).isEqualTo(Float.POSITIVE_INFINITY)
@@ -99,7 +115,7 @@ class TrackSnapshotTest {
 
     @Test
     fun anIndexOutOfRange_throws() {
-        val snapshot = TrackSnapshot.of(FakeTrackList(FakeTrack(1), FakeTrack(2, shown = false)))
+        val snapshot = TrackSnapshot.of(FakeTrackList(FakeTrack(1), FakeTrack(2, shown = false)), WIDTH_IMG, HEIGHT_IMG)
 
         for (index in listOf(-1, 1, 2, Int.MAX_VALUE)) {
             assertThrows(IndexOutOfBoundsException::class.java) { snapshot.id(index) }
@@ -118,5 +134,10 @@ class TrackSnapshotTest {
     fun anyIndexOfTheEmptySnapshot_throws() {
         assertThrows(IndexOutOfBoundsException::class.java) { TrackSnapshot.EMPTY.id(0) }
         assertThrows(IndexOutOfBoundsException::class.java) { TrackSnapshot.EMPTY.headXImg(0) }
+    }
+
+    private companion object {
+        const val WIDTH_IMG = 1356
+        const val HEIGHT_IMG = 610
     }
 }

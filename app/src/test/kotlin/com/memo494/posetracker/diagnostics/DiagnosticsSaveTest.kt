@@ -55,10 +55,21 @@ class DiagnosticsSaveTest {
         val input = TrackingInput(ByteArray(10))
         val output = TrackingOutput()
 
-        DiagnosticsSave.copy(input, output)
+        val ok = DiagnosticsSave.copy(input, output)
 
+        assertThat(ok).isTrue()
         assertThat(input.closed).isTrue()
         assertThat(output.closed).isTrue()
+    }
+
+    @Test
+    fun copy_whenClosingTheOutputThrows_returnsFalse() {
+        val output =
+            object : ByteArrayOutputStream() {
+                override fun close(): Unit = throw IOException("close failed")
+            }
+
+        assertThat(DiagnosticsSave.copy(ByteArrayInputStream(ByteArray(10)), output)).isFalse()
     }
 
     @Test

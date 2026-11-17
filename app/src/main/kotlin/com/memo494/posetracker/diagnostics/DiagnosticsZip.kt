@@ -23,8 +23,14 @@ internal object DiagnosticsZip {
     /** Name of the zip; each call overwrites the previous one. */
     const val FILE_NAME = "pose-tracker-diagnostics.zip"
 
-    /** Builds and writes the zip, returning the file. Throws when the file cannot be written. */
-    fun write(context: Context): File {
+    /** Name of the temporary zip that Save writes, so it never rewrites the file a Share receiver may be reading. */
+    const val SAVE_FILE_NAME = "pose-tracker-diagnostics-save.zip"
+
+    /** Builds and writes the zip as [fileName], returning the file. Throws when the file cannot be written. */
+    fun write(
+        context: Context,
+        fileName: String = FILE_NAME,
+    ): File {
         val entries =
             DiagnosticsReport.entries(
                 appInfo = appInfo(),
@@ -37,7 +43,7 @@ internal object DiagnosticsZip {
             )
         val directory = File(context.cacheDir, DIRECTORY)
         if (!directory.isDirectory && !directory.mkdirs()) throw IOException("cannot create $directory")
-        val file = File(directory, FILE_NAME)
+        val file = File(directory, fileName)
         ZipOutputStream(file.outputStream().buffered()).use { zip ->
             for (entry in entries) {
                 zip.putNextEntry(ZipEntry(entry.name))

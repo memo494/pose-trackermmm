@@ -10,6 +10,7 @@ import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.provider.Settings
 import androidx.activity.ComponentActivity
@@ -464,27 +465,53 @@ class MainActivity : ComponentActivity() {
             val saved = withContext(Dispatchers.IO) { writeZipAndCopyTo(uri) }
             val notice = if (saved) DiagnosticsNotice.SAVED else DiagnosticsNotice.SAVE_FAILED
             updateDiagnostics { it.copy(sharing = false, notice = notice) }
+            if (saved && diagnosticsState.value.crashNotice) dismissCrashNotice()
         }
     }
 
+    /**
+     * Builds a private temporary zip, copies it to [uri] (truncating), deletes the temporary file, and on a
+     * failure removes the empty document the dialog created. Never throws.
+     */
     @Suppress("TooGenericExceptionCaught")
-    private fun writeZipAndCopyTo(uri: Uri): Boolean =
+    private fun writeZipAndCopyTo(uri: Uri): Boolean {
+        var temp: File? = null
+        val saved =
+            try {
+                val file = DiagnosticsZip.write(applicationContext, DiagnosticsZip.SAVE_FILE_NAME)
+                temp = file
+                // Output first, then input: copy() closes whichever of the two it gets, so nothing leaks.
+                val output = contentResolver.openOutputStream(uri, "wt")
+                val input =
+                    try {
+                        file.inputStream()
+                    } catch (t: Throwable) {
+                        AppLog.log("reading the temporary zip failed", t)
+                        null
+                    }
+                DiagnosticsSave.copy(input, output)
+            } catch (t: Throwable) {
+                AppLog.log("saving the diagnostics zip failed", t)
+                false
+            }
         try {
-            val file = DiagnosticsZip.write(applicationContext)
-            val input = file.inputStream()
-            // A provider that throws counts as one that returns null: copy() closes the input and returns false.
-            val output =
-                try {
-                    contentResolver.openOutputStream(uri)
-                } catch (e: Exception) {
-                    AppLog.log("opening the save target failed", e)
-                    null
-                }
-            DiagnosticsSave.copy(input, output)
-        } catch (e: Throwable) {
-            AppLog.log("saving the diagnostics zip failed", e)
-            false
+            temp?.delete()
+        } catch (t: Throwable) {
+            AppLog.log("deleting the temporary zip failed", t)
         }
+        if (!saved) deleteDocumentQuietly(uri)
+        return saved
+    }
+
+    /** Best effort: removes the empty file the "save as" dialog created for a save that failed. */
+    @Suppress("TooGenericExceptionCaught")
+    private fun deleteDocumentQuietly(uri: Uri) {
+        try {
+            DocumentsContract.deleteDocument(contentResolver, uri)
+        } catch (t: Throwable) {
+            AppLog.log("removing the unsaved document failed", t)
+        }
+    }
 
     private fun writeZipOrNull(): File? =
         try {

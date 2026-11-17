@@ -66,6 +66,7 @@
     <!-- Diagnostics (DiagnosticsSection). -->
     <string name="diagnostics_share">Share diagnostics</string>
     <string name="diagnostics_share_title">Send diagnostics</string>
+    <string name="diagnostics_save">Save diagnostics</string>
     <string name="diagnostics_log_show">Show log</string>
     <string name="diagnostics_log_hide">Hide log</string>
     <string name="diagnostics_log_refresh">Refresh</string>
@@ -74,4 +75,6 @@
     <string name="diagnostics_dismiss">Dismiss</string>
     <string name="diagnostics_notice_prepare_failed">Could not prepare the diagnostics. Please try again.</string>
     <string name="diagnostics_notice_share_failed">Could not open the share sheet. Please try again.</string>
+    <string name="diagnostics_notice_saved">Saved</string>
+    <string name="diagnostics_notice_save_failed">Could not save diagnostics. Please try again.</string>
 </resources>

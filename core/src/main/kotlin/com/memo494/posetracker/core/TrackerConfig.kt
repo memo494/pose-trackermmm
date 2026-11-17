@@ -112,6 +112,16 @@ package com.memo494.posetracker.core
  *   without a matching detection and still live, in frames, in [[MIN_TRACK_TENTATIVE_MAX_MISSES],
  *   [MAX_TRACK_TENTATIVE_MAX_MISSES]]; the track coasts (velocity decays, never shown, no lost time), a hit resets
  *   the count and does not undo hits already counted; 0 removes a tentative track on its first miss.
+ * @property smoothEnabled `true` (default): the shown head points are passed through a display smoother (a OneEuro
+ *   filter per track, `HeadSmoother`) before they are drawn, and the box moves with the smoothed head; `false` draws
+ *   the tracker's head points as they are.
+ * @property smoothMinCutoffHz cutoff frequency of the smoother for a head point that does not move, in hertz, in
+ *   [[MIN_SMOOTH_MIN_CUTOFF_HZ], [MAX_SMOOTH_MIN_CUTOFF_HZ]]; lower = steadier at rest, more lag.
+ * @property smoothBeta how fast the smoother's cutoff grows with the head point's speed, unitless (hertz per
+ *   track height per second), in [[MIN_SMOOTH_BETA], [MAX_SMOOTH_BETA]]; cutoff = [smoothMinCutoffHz] + beta *
+ *   speed / track height; 0 = a fixed cutoff.
+ * @property smoothDerivativeCutoffHz cutoff frequency, in hertz, of the filter that measures the head point's speed
+ *   for the smoother, in [[MIN_SMOOTH_DERIVATIVE_CUTOFF_HZ], [MAX_SMOOTH_DERIVATIVE_CUTOFF_HZ]].
  */
 data class TrackerConfig(
     val scoreThreshold: Float = DEFAULT_SCORE_THRESHOLD,
@@ -166,6 +176,10 @@ data class TrackerConfig(
     val trackLowMatchMaxCost: Float = DEFAULT_TRACK_LOW_MATCH_MAX_COST,
     val trackExitMarginRatio: Float = DEFAULT_TRACK_EXIT_MARGIN_RATIO,
     val trackTentativeMaxMisses: Int = DEFAULT_TRACK_TENTATIVE_MAX_MISSES,
+    val smoothEnabled: Boolean = DEFAULT_SMOOTH_ENABLED,
+    val smoothMinCutoffHz: Float = DEFAULT_SMOOTH_MIN_CUTOFF_HZ,
+    val smoothBeta: Float = DEFAULT_SMOOTH_BETA,
+    val smoothDerivativeCutoffHz: Float = DEFAULT_SMOOTH_DERIVATIVE_CUTOFF_HZ,
 ) {
     init {
         require(scoreThreshold in MIN_SCORE_THRESHOLD..MAX_SCORE_THRESHOLD) {
@@ -344,6 +358,16 @@ data class TrackerConfig(
         require(trackTentativeMaxMisses in MIN_TRACK_TENTATIVE_MAX_MISSES..MAX_TRACK_TENTATIVE_MAX_MISSES) {
             "trackTentativeMaxMisses $trackTentativeMaxMisses outside " +
                 "[$MIN_TRACK_TENTATIVE_MAX_MISSES, $MAX_TRACK_TENTATIVE_MAX_MISSES]"
+        }
+        require(smoothMinCutoffHz in MIN_SMOOTH_MIN_CUTOFF_HZ..MAX_SMOOTH_MIN_CUTOFF_HZ) {
+            "smoothMinCutoffHz $smoothMinCutoffHz outside [$MIN_SMOOTH_MIN_CUTOFF_HZ, $MAX_SMOOTH_MIN_CUTOFF_HZ]"
+        }
+        require(smoothBeta in MIN_SMOOTH_BETA..MAX_SMOOTH_BETA) {
+            "smoothBeta $smoothBeta outside [$MIN_SMOOTH_BETA, $MAX_SMOOTH_BETA]"
+        }
+        require(smoothDerivativeCutoffHz in MIN_SMOOTH_DERIVATIVE_CUTOFF_HZ..MAX_SMOOTH_DERIVATIVE_CUTOFF_HZ) {
+            "smoothDerivativeCutoffHz $smoothDerivativeCutoffHz outside " +
+                "[$MIN_SMOOTH_DERIVATIVE_CUTOFF_HZ, $MAX_SMOOTH_DERIVATIVE_CUTOFF_HZ]"
         }
     }
 
@@ -775,6 +799,36 @@ data class TrackerConfig(
 
         /** Highest accepted [trackTentativeMaxMisses], in frames. */
         const val MAX_TRACK_TENTATIVE_MAX_MISSES = 5
+
+        /** Default [smoothEnabled]: the display smoother is on (M4a: measured on the reference model). */
+        const val DEFAULT_SMOOTH_ENABLED = true
+
+        /** Default [smoothMinCutoffHz], in hertz. */
+        const val DEFAULT_SMOOTH_MIN_CUTOFF_HZ = 1.0f
+
+        /** Lowest accepted [smoothMinCutoffHz], in hertz. */
+        const val MIN_SMOOTH_MIN_CUTOFF_HZ = 0.05f
+
+        /** Highest accepted [smoothMinCutoffHz], in hertz. */
+        const val MAX_SMOOTH_MIN_CUTOFF_HZ = 30.0f
+
+        /** Default [smoothBeta], unitless. */
+        const val DEFAULT_SMOOTH_BETA = 3.0f
+
+        /** Lowest accepted [smoothBeta]. */
+        const val MIN_SMOOTH_BETA = 0.0f
+
+        /** Highest accepted [smoothBeta]. */
+        const val MAX_SMOOTH_BETA = 100.0f
+
+        /** Default [smoothDerivativeCutoffHz], in hertz. */
+        const val DEFAULT_SMOOTH_DERIVATIVE_CUTOFF_HZ = 1.0f
+
+        /** Lowest accepted [smoothDerivativeCutoffHz], in hertz. */
+        const val MIN_SMOOTH_DERIVATIVE_CUTOFF_HZ = 0.05f
+
+        /** Highest accepted [smoothDerivativeCutoffHz], in hertz. */
+        const val MAX_SMOOTH_DERIVATIVE_CUTOFF_HZ = 30.0f
 
         /** How far ahead, in seconds, the thermal headroom is forecast; 0 = the current headroom. */
         const val THERMAL_HEADROOM_FORECAST_SECONDS = 0

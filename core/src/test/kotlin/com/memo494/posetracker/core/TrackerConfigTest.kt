@@ -584,6 +584,66 @@ class TrackerConfigTest {
     }
 
     @Test
+    fun smoothFields_haveTheDocumentedDefaults() {
+        val config = TrackerConfig()
+
+        assertThat(config.smoothEnabled).isTrue()
+        assertThat(config.smoothMinCutoffHz).isEqualTo(1.0f)
+        assertThat(config.smoothBeta).isEqualTo(3.0f)
+        assertThat(config.smoothDerivativeCutoffHz).isEqualTo(1.0f)
+    }
+
+    @Test
+    fun smoothFields_acceptTheirBounds_andTheDefaultsLieInside() {
+        assertWithin(TrackerConfig().smoothMinCutoffHz, TrackerConfig.MIN_SMOOTH_MIN_CUTOFF_HZ, TrackerConfig.MAX_SMOOTH_MIN_CUTOFF_HZ)
+        assertWithin(TrackerConfig().smoothBeta, TrackerConfig.MIN_SMOOTH_BETA, TrackerConfig.MAX_SMOOTH_BETA)
+        assertWithin(
+            TrackerConfig().smoothDerivativeCutoffHz,
+            TrackerConfig.MIN_SMOOTH_DERIVATIVE_CUTOFF_HZ,
+            TrackerConfig.MAX_SMOOTH_DERIVATIVE_CUTOFF_HZ,
+        )
+        assertThat(TrackerConfig.MIN_SMOOTH_MIN_CUTOFF_HZ).isEqualTo(0.05f)
+        assertThat(TrackerConfig.MAX_SMOOTH_MIN_CUTOFF_HZ).isEqualTo(30f)
+        assertThat(TrackerConfig.MIN_SMOOTH_BETA).isEqualTo(0f)
+        assertThat(TrackerConfig.MAX_SMOOTH_BETA).isEqualTo(100f)
+        assertThat(TrackerConfig.MIN_SMOOTH_DERIVATIVE_CUTOFF_HZ).isEqualTo(0.05f)
+        assertThat(TrackerConfig.MAX_SMOOTH_DERIVATIVE_CUTOFF_HZ).isEqualTo(30f)
+        TrackerConfig(smoothMinCutoffHz = TrackerConfig.MIN_SMOOTH_MIN_CUTOFF_HZ, smoothBeta = TrackerConfig.MIN_SMOOTH_BETA)
+        TrackerConfig(smoothMinCutoffHz = TrackerConfig.MAX_SMOOTH_MIN_CUTOFF_HZ, smoothBeta = TrackerConfig.MAX_SMOOTH_BETA)
+        TrackerConfig(smoothDerivativeCutoffHz = TrackerConfig.MIN_SMOOTH_DERIVATIVE_CUTOFF_HZ)
+        TrackerConfig(smoothDerivativeCutoffHz = TrackerConfig.MAX_SMOOTH_DERIVATIVE_CUTOFF_HZ)
+    }
+
+    @Test
+    fun smoothFields_outsideTheirBounds_areRejected() {
+        assertThrows(IllegalArgumentException::class.java) {
+            TrackerConfig(smoothMinCutoffHz = TrackerConfig.MIN_SMOOTH_MIN_CUTOFF_HZ / 2)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            TrackerConfig(smoothMinCutoffHz = TrackerConfig.MAX_SMOOTH_MIN_CUTOFF_HZ + 1)
+        }
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(smoothBeta = -0.5f) }
+        assertThrows(IllegalArgumentException::class.java) {
+            TrackerConfig(smoothBeta = TrackerConfig.MAX_SMOOTH_BETA + 1)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            TrackerConfig(smoothDerivativeCutoffHz = TrackerConfig.MIN_SMOOTH_DERIVATIVE_CUTOFF_HZ / 2)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            TrackerConfig(smoothDerivativeCutoffHz = TrackerConfig.MAX_SMOOTH_DERIVATIVE_CUTOFF_HZ + 1)
+        }
+    }
+
+    @Test
+    fun smoothFields_nanAndInfinity_areRejected() {
+        for (value in listOf(Float.NaN, Float.POSITIVE_INFINITY, Float.NEGATIVE_INFINITY)) {
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(smoothMinCutoffHz = value) }
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(smoothBeta = value) }
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(smoothDerivativeCutoffHz = value) }
+        }
+    }
+
+    @Test
     fun trackLifecycleFields_haveTheDocumentedDefaults() {
         val config = TrackerConfig()
 

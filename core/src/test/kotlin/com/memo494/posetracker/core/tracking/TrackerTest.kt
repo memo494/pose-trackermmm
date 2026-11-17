@@ -696,6 +696,73 @@ class TrackerTest {
         assertThat(tracker.removeCount).isEqualTo(1)
     }
 
+    @Test
+    fun matchedDetectionIndex_followsTheDetectionNotTheTrackOrder() {
+        for (k in 0 until 3) feed(tracker, k, person(300f), person(900f))
+
+        val list = feed(tracker, 3, person(905f), person(305f))
+
+        assertThat(list.size).isEqualTo(2)
+        assertThat(list.matchedDetectionIndex(0)).isEqualTo(1)
+        assertThat(list.matchedDetectionIndex(1)).isEqualTo(0)
+    }
+
+    @Test
+    fun matchedDetectionIndex_isMinusOneForATrackWithoutAMatchInThatFrame() {
+        for (k in 0 until 3) feed(tracker, k, person(300f), person(900f))
+
+        val list = feed(tracker, 3, person(900f))
+
+        assertThat(list.size).isEqualTo(2)
+        assertThat(list.state(0)).isEqualTo(TrackState.LOST)
+        assertThat(list.matchedDetectionIndex(0)).isEqualTo(-1)
+        assertThat(list.matchedDetectionIndex(1)).isEqualTo(0)
+    }
+
+    @Test
+    fun matchedDetectionIndex_ofANewTrack_isTheDetectionThatStartedIt() {
+        val list = feed(tracker, 0, person(300f, BELOW_BIRTH_SCORE), person(900f))
+
+        assertThat(list.size).isEqualTo(1)
+        assertThat(list.matchedDetectionIndex(0)).isEqualTo(1)
+    }
+
+    @Test
+    fun matchedDetectionIndex_ofATrackThatBecomesConfirmed_isTheDetectionOfThatFrame() {
+        feed(tracker, 0, person(900f))
+        feed(tracker, 1, person(900f))
+
+        val list = feed(tracker, 2, person(300f, BELOW_BIRTH_SCORE), person(900f))
+
+        assertThat(list.state(0)).isEqualTo(TrackState.CONFIRMED)
+        assertThat(list.matchedDetectionIndex(0)).isEqualTo(1)
+    }
+
+    @Test
+    fun matchedDetectionIndex_afterAnIgnoredFrame_isMinusOne() {
+        for (k in 0 until 3) feed(tracker, k, person(600f))
+
+        val ignored = tracker.update(frameAt(START_NS + 2 * STEP_NS, person(600f)))
+
+        assertThat(ignored.matchedDetectionIndex(0)).isEqualTo(-1)
+    }
+
+    @Test
+    fun matchedDetectionIndex_staysAsTheLastUpdateLeftItAfterOnIdle() {
+        for (k in 0 until 3) feed(tracker, k, person(600f))
+
+        val list = tracker.onIdle(config.trackIdlePromoteNs)
+
+        assertThat(list.matchedDetectionIndex(0)).isEqualTo(0)
+    }
+
+    @Test
+    fun matchedDetectionIndex_outsideTheList_throws() {
+        feed(tracker, 0, person(600f))
+
+        assertThrows(IndexOutOfBoundsException::class.java) { feed(tracker, 1, person(600f)).matchedDetectionIndex(1) }
+    }
+
     /**
      * Feeds [COAST_HITS] detections that move by (`stepXImg`, `stepYImg`) per frame from (`startXImg`, `startYImg`),
      * then empty frames until the track is gone; returns how many empty frames left it alive (at most [MAX_COAST_FRAMES]).

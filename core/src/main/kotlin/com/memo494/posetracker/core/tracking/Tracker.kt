@@ -56,6 +56,9 @@ class Tracker(
         var score = 0f
         var headEstimated = false
 
+        /** Index of the detection matched or started on in the newest [update], or -1. */
+        var matchedDet = -1
+
         /** Box edges relative to the head point, in units of the box height. */
         var offLeft = 0f
         var offTop = 0f
@@ -142,7 +145,10 @@ class Tracker(
         var dteNs = 0.0
         if (hasLastFrame) {
             val dtNs = frame.timestampNs - lastTimestampNs
-            if (dtNs <= 0L) return view
+            if (dtNs <= 0L) {
+                for (pos in 0 until activeCount) tracks[order[pos]].matchedDet = -1
+                return view
+            }
             val gap = dtNs.toDouble() > maxDtNs
             dteNs = minOf(dtNs.toDouble(), maxDtNs)
             predictAll((dteNs / nanosPerSecond).toFloat(), if (gap) config.trackGapNoiseInflate else 1f)
@@ -304,6 +310,7 @@ class Tracker(
             val slot = order[pos]
             val track = tracks[slot]
             val matched = trackDet[pos] >= 0 && applyHit(track, detections[trackDet[pos]])
+            track.matchedDet = if (matched) trackDet[pos] else -1
             val alive =
                 if (matched) {
                     track.isHealthy()
@@ -398,6 +405,7 @@ class Tracker(
             val slot = freeSlot()
             if (slot < 0) return
             if (start(tracks[slot], detection)) {
+                tracks[slot].matchedDet = index
                 inUse[slot] = true
                 order[activeCount++] = slot
                 birthCount++
@@ -487,6 +495,8 @@ class Tracker(
         override fun isHeadEstimated(index: Int): Boolean = at(index).headEstimated
 
         override fun lostMs(index: Int): Float = at(index).lostMs
+
+        override fun matchedDetectionIndex(index: Int): Int = at(index).matchedDet
 
         private fun at(index: Int): Track {
             if (index < 0 || index >= activeCount) throw IndexOutOfBoundsException("index $index, size $activeCount")

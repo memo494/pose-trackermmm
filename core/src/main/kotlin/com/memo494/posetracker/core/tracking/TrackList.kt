@@ -54,4 +54,12 @@ interface TrackList {
 
     /** Time in milliseconds the track has been without a matching detection; 0 unless it is `LOST`. */
     fun lostMs(index: Int): Float
+
+    /**
+     * Index, in the detection list of the newest [Tracker.update], of the detection this track was matched to (or
+     * started on) in that call; -1 when it was not matched in it (lost, tentative and missed), after a call that
+     * ignored the frame (`dt <= 0`), and for every call that is not an update ([Tracker.onIdle]
+     * keeps what the last update set). Lets the caller read pixels or keypoints of exactly this person.
+     */
+    fun matchedDetectionIndex(index: Int): Int
 }

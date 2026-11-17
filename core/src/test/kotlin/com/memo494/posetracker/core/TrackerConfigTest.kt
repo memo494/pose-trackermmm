@@ -759,6 +759,128 @@ class TrackerConfigTest {
     }
 
     @Test
+    fun relockFields_haveTheDocumentedDefaults() {
+        val config = TrackerConfig()
+
+        assertThat(config.relockHueBins).isEqualTo(16)
+        assertThat(config.relockSatBins).isEqualTo(4)
+        assertThat(config.relockGreyBins).isEqualTo(4)
+        assertThat(config.relockMinValue).isEqualTo(0.15f)
+        assertThat(config.relockMinSaturation).isEqualTo(0.15f)
+        assertThat(config.relockMaxSamplePixels).isEqualTo(2000)
+        assertThat(config.relockSignatureAlpha).isEqualTo(0.1f)
+        assertThat(config.relockTorsoShrink).isEqualTo(0.1f)
+        assertThat(config.relockBoxTopRatio).isEqualTo(0.25f)
+        assertThat(config.relockBoxBottomRatio).isEqualTo(0.6f)
+        assertThat(config.relockBoxWidthRatio).isEqualTo(0.6f)
+        assertThat(config.relockKeypointMinScore).isEqualTo(0.5f)
+        assertThat(config.relockMemoryMs).isEqualTo(60_000L)
+        assertThat(config.relockMaxDistance).isEqualTo(0.30f)
+        assertThat(config.relockMinMargin).isEqualTo(0.10f)
+    }
+
+    @Test
+    fun relockMemoryNs_isTheMemoryInNanoseconds() {
+        assertThat(TrackerConfig().relockMemoryNs).isEqualTo(60_000_000_000L)
+        assertThat(TrackerConfig(relockMemoryMs = 2500L).relockMemoryNs).isEqualTo(2_500_000_000L)
+    }
+
+    @Test
+    fun relockFields_acceptTheirBounds() {
+        TrackerConfig(
+            relockHueBins = TrackerConfig.MIN_RELOCK_HUE_BINS,
+            relockSatBins = TrackerConfig.MIN_RELOCK_SAT_BINS,
+            relockGreyBins = TrackerConfig.MIN_RELOCK_GREY_BINS,
+            relockMinValue = TrackerConfig.MIN_RELOCK_COLOUR_LIMIT,
+            relockMinSaturation = TrackerConfig.MIN_RELOCK_COLOUR_LIMIT,
+            relockMaxSamplePixels = TrackerConfig.MIN_RELOCK_SAMPLE_PIXELS,
+            relockSignatureAlpha = TrackerConfig.MIN_RELOCK_SIGNATURE_ALPHA,
+            relockTorsoShrink = 0f,
+            relockBoxTopRatio = 0f,
+            relockBoxBottomRatio = TrackerConfig.MIN_RELOCK_BOX_BOTTOM_RATIO + 0.1f,
+            relockBoxWidthRatio = TrackerConfig.MIN_RELOCK_BOX_WIDTH_RATIO,
+            relockKeypointMinScore = TrackerConfig.MIN_KEYPOINT_MIN_SCORE,
+            relockMemoryMs = TrackerConfig.MIN_RELOCK_MEMORY_MS,
+            relockMaxDistance = TrackerConfig.MIN_RELOCK_MAX_DISTANCE,
+            relockMinMargin = 0f,
+        )
+        TrackerConfig(
+            relockHueBins = TrackerConfig.MAX_RELOCK_HUE_BINS,
+            relockSatBins = TrackerConfig.MAX_RELOCK_SAT_BINS,
+            relockGreyBins = TrackerConfig.MAX_RELOCK_GREY_BINS,
+            relockMinValue = TrackerConfig.MAX_RELOCK_COLOUR_LIMIT,
+            relockMinSaturation = TrackerConfig.MAX_RELOCK_COLOUR_LIMIT,
+            relockMaxSamplePixels = TrackerConfig.MAX_RELOCK_SAMPLE_PIXELS,
+            relockSignatureAlpha = TrackerConfig.MAX_RELOCK_SIGNATURE_ALPHA,
+            relockTorsoShrink = TrackerConfig.MAX_RELOCK_TORSO_SHRINK,
+            relockBoxTopRatio = TrackerConfig.MAX_RELOCK_BOX_TOP_RATIO,
+            relockBoxBottomRatio = 1f,
+            relockBoxWidthRatio = 1f,
+            relockKeypointMinScore = TrackerConfig.MAX_KEYPOINT_MIN_SCORE,
+            relockMemoryMs = TrackerConfig.MAX_RELOCK_MEMORY_MS,
+            relockMaxDistance = TrackerConfig.MAX_RELOCK_MAX_DISTANCE,
+            relockMinMargin = TrackerConfig.MAX_RELOCK_MIN_MARGIN,
+        )
+    }
+
+    @Test
+    fun relockFields_outsideTheirBounds_areRejected() {
+        val rejected: List<() -> TrackerConfig> =
+            listOf(
+                { TrackerConfig(relockHueBins = TrackerConfig.MIN_RELOCK_HUE_BINS - 1) },
+                { TrackerConfig(relockHueBins = TrackerConfig.MAX_RELOCK_HUE_BINS + 1) },
+                { TrackerConfig(relockSatBins = 0) },
+                { TrackerConfig(relockSatBins = TrackerConfig.MAX_RELOCK_SAT_BINS + 1) },
+                { TrackerConfig(relockGreyBins = 0) },
+                { TrackerConfig(relockGreyBins = TrackerConfig.MAX_RELOCK_GREY_BINS + 1) },
+                { TrackerConfig(relockMinValue = 0f) },
+                { TrackerConfig(relockMinValue = TrackerConfig.MAX_RELOCK_COLOUR_LIMIT + 0.1f) },
+                { TrackerConfig(relockMinSaturation = 0f) },
+                { TrackerConfig(relockMinSaturation = TrackerConfig.MAX_RELOCK_COLOUR_LIMIT + 0.1f) },
+                { TrackerConfig(relockMaxSamplePixels = TrackerConfig.MIN_RELOCK_SAMPLE_PIXELS - 1) },
+                { TrackerConfig(relockMaxSamplePixels = TrackerConfig.MAX_RELOCK_SAMPLE_PIXELS + 1) },
+                { TrackerConfig(relockSignatureAlpha = 0f) },
+                { TrackerConfig(relockSignatureAlpha = 1.01f) },
+                { TrackerConfig(relockTorsoShrink = -0.01f) },
+                { TrackerConfig(relockTorsoShrink = TrackerConfig.MAX_RELOCK_TORSO_SHRINK + 0.01f) },
+                { TrackerConfig(relockBoxTopRatio = -0.01f) },
+                { TrackerConfig(relockBoxTopRatio = TrackerConfig.MAX_RELOCK_BOX_TOP_RATIO + 0.01f) },
+                { TrackerConfig(relockBoxBottomRatio = 1.01f) },
+                { TrackerConfig(relockBoxBottomRatio = 0.05f) },
+                { TrackerConfig(relockBoxTopRatio = 0.5f, relockBoxBottomRatio = 0.5f) },
+                { TrackerConfig(relockBoxTopRatio = 0.7f, relockBoxBottomRatio = 0.6f) },
+                { TrackerConfig(relockBoxWidthRatio = 0.05f) },
+                { TrackerConfig(relockBoxWidthRatio = 1.01f) },
+                { TrackerConfig(relockKeypointMinScore = TrackerConfig.MIN_KEYPOINT_MIN_SCORE / 2f) },
+                { TrackerConfig(relockKeypointMinScore = 1f) },
+                { TrackerConfig(relockMemoryMs = TrackerConfig.MIN_RELOCK_MEMORY_MS - 1L) },
+                { TrackerConfig(relockMemoryMs = TrackerConfig.MAX_RELOCK_MEMORY_MS + 1L) },
+                { TrackerConfig(relockMaxDistance = 0f) },
+                { TrackerConfig(relockMaxDistance = 1.01f) },
+                { TrackerConfig(relockMinMargin = -0.01f) },
+                { TrackerConfig(relockMinMargin = 1.01f) },
+            )
+
+        for (build in rejected) assertThrows(IllegalArgumentException::class.java) { build() }
+    }
+
+    @Test
+    fun relockFields_nanAndInfinity_areRejected() {
+        for (value in listOf(Float.NaN, Float.POSITIVE_INFINITY, Float.NEGATIVE_INFINITY)) {
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(relockMinValue = value) }
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(relockMinSaturation = value) }
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(relockSignatureAlpha = value) }
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(relockTorsoShrink = value) }
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(relockBoxTopRatio = value) }
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(relockBoxBottomRatio = value) }
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(relockBoxWidthRatio = value) }
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(relockKeypointMinScore = value) }
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(relockMaxDistance = value) }
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(relockMinMargin = value) }
+        }
+    }
+
+    @Test
     fun trackLifecycleFields_haveTheDocumentedDefaults() {
         val config = TrackerConfig()
 

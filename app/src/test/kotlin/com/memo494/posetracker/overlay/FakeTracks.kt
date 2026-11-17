@@ -43,4 +43,6 @@ internal class FakeTracks(
     override fun isHeadEstimated(index: Int): Boolean = false
 
     override fun lostMs(index: Int): Float = 0f
+
+    override fun matchedDetectionIndex(index: Int): Int = index
 }

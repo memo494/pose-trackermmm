@@ -365,7 +365,8 @@ about 0.37); the other tracker lines are still numbers, not `n/a`.
 ---
 
 ## What to send back
-1. The **diagnostics zip** (press **Share diagnostics** right after the problem, not hours later).
+1. The **diagnostics zip** (press **Share diagnostics** or **Save diagnostics** right after the problem, not hours
+   later; a saved zip can be sent later).
 2. **One sentence** about what was on the screen (which app, how many people, what you did).
 3. The **block number** of this checklist that failed (for example "block 5"; for the M0c section say "M0c block 5",
    for M1a "M1a block 3", for M3 "M3 block 3", for M4a "M4a block 2").

@@ -39,6 +39,7 @@ import com.memo494.posetracker.diagnostics.AppLog
 import com.memo494.posetracker.diagnostics.CrashNotice
 import com.memo494.posetracker.diagnostics.CrashStore
 import com.memo494.posetracker.diagnostics.DiagnosticsNotice
+import com.memo494.posetracker.diagnostics.DiagnosticsSave
 import com.memo494.posetracker.diagnostics.DiagnosticsSection
 import com.memo494.posetracker.diagnostics.DiagnosticsShare
 import com.memo494.posetracker.diagnostics.DiagnosticsUiState
@@ -91,6 +92,12 @@ class MainActivity : ComponentActivity() {
             dispatch(ControlEvent.ImportPicked(uri?.toString()))
         }
 
+    // "Save as" dialog for the diagnostics zip; no storage permission is needed. Cancel gives a null Uri.
+    private val saveDiagnosticsLauncher =
+        registerForActivityResult(ActivityResultContracts.CreateDocument(DIAGNOSTICS_MIME_TYPE)) { uri ->
+            if (uri != null) saveDiagnosticsTo(uri)
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
@@ -116,6 +123,7 @@ class MainActivity : ComponentActivity() {
                         DiagnosticsSection(
                             state = diagnosticsState.value,
                             onShareClick = { shareDiagnostics() },
+                            onSaveClick = { startSaveDiagnostics() },
                             onToggleLogClick = { toggleLog() },
                             onRefreshLogClick = { refreshLog() },
                         )
@@ -436,6 +444,48 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Opens the system "save as" dialog; the zip is built only after a place is picked ([saveDiagnosticsTo]). */
+    private fun startSaveDiagnostics() {
+        if (diagnosticsState.value.sharing) return
+        updateDiagnostics { it.copy(notice = null) }
+        try {
+            saveDiagnosticsLauncher.launch(DiagnosticsSave.fileName())
+        } catch (e: Exception) {
+            AppLog.log("opening the save dialog failed", e)
+            updateDiagnostics { it.copy(notice = DiagnosticsNotice.SAVE_FAILED) }
+        }
+    }
+
+    /** Writes the zip and copies it to [uri] off the main thread, then shows "Saved" or the failure notice. */
+    private fun saveDiagnosticsTo(uri: Uri) {
+        if (diagnosticsState.value.sharing) return
+        updateDiagnostics { it.copy(sharing = true, notice = null) }
+        lifecycleScope.launch {
+            val saved = withContext(Dispatchers.IO) { writeZipAndCopyTo(uri) }
+            val notice = if (saved) DiagnosticsNotice.SAVED else DiagnosticsNotice.SAVE_FAILED
+            updateDiagnostics { it.copy(sharing = false, notice = notice) }
+        }
+    }
+
+    @Suppress("TooGenericExceptionCaught")
+    private fun writeZipAndCopyTo(uri: Uri): Boolean =
+        try {
+            val file = DiagnosticsZip.write(applicationContext)
+            val input = file.inputStream()
+            // A provider that throws counts as one that returns null: copy() closes the input and returns false.
+            val output =
+                try {
+                    contentResolver.openOutputStream(uri)
+                } catch (e: Exception) {
+                    AppLog.log("opening the save target failed", e)
+                    null
+                }
+            DiagnosticsSave.copy(input, output)
+        } catch (e: Throwable) {
+            AppLog.log("saving the diagnostics zip failed", e)
+            false
+        }
+
     private fun writeZipOrNull(): File? =
         try {
             DiagnosticsZip.write(applicationContext)
@@ -468,6 +518,7 @@ class MainActivity : ComponentActivity() {
 
     private companion object {
         const val MODEL_PICKER_MIME_TYPE = "*/*"
+        const val DIAGNOSTICS_MIME_TYPE = "application/zip"
 
         /** App preferences file and the key of the "Debug marks" switch; only read and written on `Dispatchers.IO`. */
         const val PREFS_NAME = "pose_tracker_prefs"

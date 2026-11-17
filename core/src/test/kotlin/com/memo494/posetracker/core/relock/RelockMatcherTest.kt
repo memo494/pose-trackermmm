@@ -77,6 +77,12 @@ class RelockMatcherTest {
     }
 
     @Test
+    fun judge_withTheDefaults_acceptsAtDistance035ButNotWhenANeighbourIsWithinTheMargin() {
+        assertThat(matcher.judge(0.35f, Float.POSITIVE_INFINITY)).isEqualTo(RelockMatcher.Verdict.ACCEPT)
+        assertThat(matcher.judge(0.35f, 0.44f)).isEqualTo(RelockMatcher.Verdict.AMBIGUOUS)
+    }
+
+    @Test
     fun judge_acceptsACandidateExactlyAtTheLimit() {
         val exact = RelockMatcher(TrackerConfig(relockMaxDistance = 0.5f))
 

@@ -176,9 +176,9 @@ package com.memo494.posetracker.core
  * @property relockJudgeFrames how many of its first matched frames, count, a new track is compared with a pending lock
  *   (each frame is judged until one is accepted), in [[MIN_RELOCK_JUDGE_FRAMES], [MAX_RELOCK_JUDGE_FRAMES]]; one reject
  *   is counted and logged when the window ends without an acceptance.
- * @property relockUpperTorsoRatio height of the upper-body torso, as a multiple of the distance between the shoulders,
- *   below the shoulders' line, used when the hips are not confident, the box is not a whole body and both shoulders are,
- *   unitless, in [[MIN_RELOCK_UPPER_TORSO_RATIO], [MAX_RELOCK_UPPER_TORSO_RATIO]].
+ * @property relockUpperTorsoRatio height of the upper-body torso, as a multiple of the horizontal distance between the
+ *   shoulders, below the lower shoulder, used when the hips are not confident, the box is not a whole body and both
+ *   shoulders are, unitless, in [[MIN_RELOCK_UPPER_TORSO_RATIO], [MAX_RELOCK_UPPER_TORSO_RATIO]].
  */
 data class TrackerConfig(
     val scoreThreshold: Float = DEFAULT_SCORE_THRESHOLD,

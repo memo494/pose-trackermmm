@@ -12,11 +12,11 @@ import kotlin.math.min
  * through the shoulder and hip keypoints when all four are confident, else, only when the box looks like a whole
  * standing body (height at least `relockFullBodyMinAspect` times its width), a fixed part of it (rows
  * `relockBoxTopRatio..relockBoxBottomRatio` of its height, the middle `relockBoxWidthRatio` of its width); then cut by
- * `relockTorsoShrink` on every side and clipped to the image. When the box is not a whole body (a person at a desk,
- * cut by the frame edge, M4d) but both shoulders are confident, the torso is the part between the shoulders, from
- * their line down by `relockUpperTorsoRatio` times the distance between them. It never reaches the head (shoulders are
- * below it, the box rows start under it), which is where the lock ring is drawn. A torso that clipping to the image cut is marked
- * [TorsoRect.clipped].
+ * `relockTorsoShrink` on every side and clipped to the image. When the hips are not confident and the box is not a
+ * whole body (a person at a desk, cut by the frame edge, M4d) but both shoulders are, the torso is the part between
+ * the shoulders, from the lower shoulder down by `relockUpperTorsoRatio` times the horizontal distance between the
+ * shoulders. It never reaches the head (shoulders are below it, the box rows start under it), which is where the lock
+ * ring is drawn. A torso that clipping to the image cut is marked [TorsoRect.clipped].
  *
  * Allocation-free after construction; the four working floats are fields, so one instance belongs to one thread.
  */
@@ -31,8 +31,10 @@ class TorsoRegion(
     /**
      * Writes the torso of [detection] into [out] and returns true, or clears [out] and returns false (fail closed)
      * when no rectangle of at least one pixel is left: a box or coordinate that is not finite, a box with no size or
-     * too wide for a whole body (without confident keypoints), or a torso entirely outside the [widthImg] x
-     * [heightImg] image.
+     * too wide for a whole body and no confident shoulders (or hips), four confident keypoints that span no
+     * rectangle (the box is then not tried), or a torso entirely outside the [widthImg] x [heightImg] image. With
+     * the four shoulder and hip keypoints confident only they are used; otherwise the box part (whole-body box) or the
+     * shoulders-only part (other boxes) is.
      */
     fun of(
         detection: PoseDetection,
@@ -42,7 +44,13 @@ class TorsoRegion(
     ): Boolean {
         out.clear()
         if (widthImg <= 0 || heightImg <= 0) return false
-        if (!fromKeypoints(detection) && !fromBox(detection) && !fromUpperBody(detection)) return false
+        val found =
+            if (hasFourKeypoints(detection)) {
+                fromKeypoints(detection)
+            } else {
+                fromBox(detection) || fromUpperBody(detection)
+            }
+        if (!found) return false
         val cutXImg = (rightImg - leftImg) * config.relockTorsoShrink
         val cutYImg = (bottomImg - topImg) * config.relockTorsoShrink
         val widthLimit = widthImg.toFloat()
@@ -64,15 +72,20 @@ class TorsoRegion(
         return true
     }
 
-    /** The rectangle through the shoulder and hip keypoints; false when one is missing, not confident or not finite. */
+    /** True when the shoulder and hip keypoints all exist, are confident and finite. */
+    private fun hasFourKeypoints(detection: PoseDetection): Boolean =
+        detection.keypointCount > TrackerConfig.KEYPOINT_RIGHT_HIP &&
+            usable(detection, TrackerConfig.KEYPOINT_LEFT_SHOULDER) &&
+            usable(detection, TrackerConfig.KEYPOINT_RIGHT_SHOULDER) &&
+            usable(detection, TrackerConfig.KEYPOINT_LEFT_HIP) &&
+            usable(detection, TrackerConfig.KEYPOINT_RIGHT_HIP)
+
+    /** The rectangle through the shoulder and hip keypoints (see [hasFourKeypoints]); false when it has no area. */
     private fun fromKeypoints(detection: PoseDetection): Boolean {
-        if (detection.keypointCount <= TrackerConfig.KEYPOINT_RIGHT_HIP) return false
         val leftShoulder = TrackerConfig.KEYPOINT_LEFT_SHOULDER
         val rightShoulder = TrackerConfig.KEYPOINT_RIGHT_SHOULDER
         val leftHip = TrackerConfig.KEYPOINT_LEFT_HIP
         val rightHip = TrackerConfig.KEYPOINT_RIGHT_HIP
-        if (!(usable(detection, leftShoulder) && usable(detection, rightShoulder))) return false
-        if (!(usable(detection, leftHip) && usable(detection, rightHip))) return false
         val shoulderLeftImg = min(detection.keypointXImg(leftShoulder), detection.keypointXImg(rightShoulder))
         val hipLeftImg = min(detection.keypointXImg(leftHip), detection.keypointXImg(rightHip))
         val shoulderRightImg = max(detection.keypointXImg(leftShoulder), detection.keypointXImg(rightShoulder))
@@ -100,7 +113,8 @@ class TorsoRegion(
     }
 
     /**
-     * The shoulders down by `relockUpperTorsoRatio` shoulder widths; false when the box is not usable, is a whole
+     * From the lower shoulder down by `relockUpperTorsoRatio` times the horizontal distance between the shoulders (so
+     * never above either shoulder, even when they are tilted); false when the box is not usable, is a whole
      * body's shape (the box part answers that case), or a shoulder is missing, not confident or not finite.
      */
     private fun fromUpperBody(detection: PoseDetection): Boolean {
@@ -111,9 +125,8 @@ class TorsoRegion(
         if (!(usable(detection, leftShoulder) && usable(detection, rightShoulder))) return false
         leftImg = min(detection.keypointXImg(leftShoulder), detection.keypointXImg(rightShoulder))
         rightImg = max(detection.keypointXImg(leftShoulder), detection.keypointXImg(rightShoulder))
-        topImg = min(detection.keypointYImg(leftShoulder), detection.keypointYImg(rightShoulder))
-        bottomImg = max(detection.keypointYImg(leftShoulder), detection.keypointYImg(rightShoulder)) +
-            (rightImg - leftImg) * config.relockUpperTorsoRatio
+        topImg = max(detection.keypointYImg(leftShoulder), detection.keypointYImg(rightShoulder))
+        bottomImg = topImg + (rightImg - leftImg) * config.relockUpperTorsoRatio
         return rightImg > leftImg && bottomImg > topImg
     }
 

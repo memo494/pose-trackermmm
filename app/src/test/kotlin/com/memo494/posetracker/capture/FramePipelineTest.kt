@@ -2271,4 +2271,46 @@ class FramePipelineTest {
         assertThat(pipeline.lockRelockRejectCount).isEqualTo(1)
         assertThat(lockLogs()).hasSize(logged)
     }
+
+    /**
+     * A person at a desk: the [walker]'s head, both shoulders confident (40 px apart, 32 px under the box top), no
+     * other keypoint confident, and a box 72 px high, 60 wide: not a whole body, so only the shoulders give a torso.
+     */
+    private fun deskPerson(shiftXImg: Float = 0f): PoseDetection {
+        val xy = FloatArray(TrackerConfig.POSE_KEYPOINT_COUNT * 2)
+        val scores = FloatArray(TrackerConfig.POSE_KEYPOINT_COUNT)
+        for (k in 0 until HEAD_KEYPOINTS) {
+            xy[k * 2] = headXsImg[k] + shiftXImg
+            xy[k * 2 + 1] = headYsImg[k]
+            scores[k] = 0.9f
+        }
+        val shoulderYImg = 52f
+        xy[TrackerConfig.KEYPOINT_LEFT_SHOULDER * 2] = 110f + shiftXImg
+        xy[TrackerConfig.KEYPOINT_LEFT_SHOULDER * 2 + 1] = shoulderYImg
+        xy[TrackerConfig.KEYPOINT_RIGHT_SHOULDER * 2] = 150f + shiftXImg
+        xy[TrackerConfig.KEYPOINT_RIGHT_SHOULDER * 2 + 1] = shoulderYImg
+        scores[TrackerConfig.KEYPOINT_LEFT_SHOULDER] = 0.9f
+        scores[TrackerConfig.KEYPOINT_RIGHT_SHOULDER] = 0.9f
+        return PoseDetection(100f + shiftXImg, 20f, 160f + shiftXImg, 92f, 0.9f, xy, scores)
+    }
+
+    @Test
+    fun relock_aPersonAtADeskWhoseHipsAreNotSeen_getsTheLockAgainByTheirShoulders() {
+        val pipeline = trackingPipeline()
+        val sitting = Look(deskPerson(), RED_SHIRT)
+        lookFramesFrom(pipeline, 0, 3, sitting)
+        pipeline.requestLock(1)
+        var atMs = lookFramesFrom(pipeline, 3 * FRAME_STEP_MS, 3, sitting)
+        for (i in 0 until 4) {
+            atMs += DEPARTURE_STEP_MS
+            lookFrameAt(pipeline, atMs)
+        }
+        assertThat(lockLogs().last()).isEqualTo("lock: pending id=1 frames=3")
+
+        lookFramesFrom(pipeline, atMs + FRAME_STEP_MS, 3, Look(deskPerson(NEW_PERSON_SHIFT_X_IMG), RED_SHIRT))
+
+        assertThat(states.last().lockedId).isEqualTo(states.last().tracks.id(0))
+        assertThat(pipeline.lockRelockCount).isEqualTo(1)
+        assertThat(lockLogs().last()).isEqualTo("lock: relocked id=1 -> 2 d=0.00 next=none")
+    }
 }

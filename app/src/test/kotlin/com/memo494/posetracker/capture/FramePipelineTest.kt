@@ -36,6 +36,10 @@ private const val SHAKE_IMG = 6f
 private const val SHAKY_FRAMES = 40
 private const val SAME_HEAD_TOLERANCE_IMG = 0.01f
 private const val SMOOTHING_MAX_TRAVEL_RATIO = 0.5f
+private const val IDLE_MS = 400L
+private const val SMALL_IDLE_STEP_MS = 10L
+private const val BIG_IDLE_STEP_MS = 150L
+private const val LOST_MS_TOLERANCE = 1f
 
 /** An image that records its reads and closes in [events]. */
 private class FakeFrameImage(
@@ -1426,5 +1430,67 @@ class FramePipelineTest {
 
         assertThat(states.last().tracks.count).isEqualTo(1)
         assertThat(states.last().tracks.headXImg(0)).isEqualTo(trackersHeadXImg)
+    }
+
+    /** Three frames with a person (a confirmed track), then one frame without: the track is LOST; returns the time of that frame. */
+    private fun lostAfterOneMiss(pipeline: FramePipeline): Long {
+        detector.people = listOf(walker())
+        val confirmedAtMs = framesFrom(pipeline, 0, 3)
+        detector.people = emptyList()
+        val missAtMs = confirmedAtMs + FRAME_STEP_MS
+        frameAt(pipeline, missAtMs)
+        return missAtMs
+    }
+
+    @Test
+    fun aFrameThatLosesTheTrack_publishesItAsLostWithTheTrackersLostMs() {
+        val pipeline = trackingPipeline()
+
+        lostAfterOneMiss(pipeline)
+
+        val tracks = states.last().tracks
+        assertThat(tracks.count).isEqualTo(1)
+        assertThat(tracks.isLost(0)).isTrue()
+        assertThat(tracks.lostMs(0)).isWithin(LOST_MS_TOLERANCE).of(FRAME_STEP_MS.toFloat())
+    }
+
+    @Test
+    fun hudTick_onALostTrack_publishesTheLostMsPlusTheIdleTime() {
+        val pipeline = trackingPipeline()
+        val missAtMs = lostAfterOneMiss(pipeline)
+
+        tickAt(pipeline, missAtMs + IDLE_MS)
+
+        val tracks = states.last().tracks
+        assertThat(tracks.count).isEqualTo(1)
+        assertThat(tracks.isLost(0)).isTrue()
+        assertThat(tracks.lostMs(0)).isWithin(LOST_MS_TOLERANCE).of(FRAME_STEP_MS + IDLE_MS.toFloat())
+    }
+
+    @Test
+    fun hudTick_onALostTrack_republishesOnlyWhenTheFadeMovedByAStep() {
+        val pipeline = trackingPipeline()
+        val missAtMs = lostAfterOneMiss(pipeline)
+        tickAt(pipeline, missAtMs + IDLE_MS)
+        val first = states.last().tracks
+
+        tickAt(pipeline, missAtMs + IDLE_MS + SMALL_IDLE_STEP_MS)
+        assertThat(states.last().tracks).isSameInstanceAs(first)
+
+        tickAt(pipeline, missAtMs + IDLE_MS + BIG_IDLE_STEP_MS)
+        val second = states.last().tracks
+        assertThat(second).isNotSameInstanceAs(first)
+        assertThat(second.lostMs(0)).isGreaterThan(first.lostMs(0) + BIG_IDLE_STEP_MS - LOST_MS_TOLERANCE)
+    }
+
+    @Test
+    fun hudTick_onAConfirmedTrack_leavesItsLostMsAtZero() {
+        val pipeline = trackingPipeline()
+        detector.people = listOf(walker())
+        val lastMs = framesFrom(pipeline, 0, 3)
+
+        tickAt(pipeline, lastMs + IDLE_MS)
+
+        assertThat(states.last().tracks.lostMs(0)).isEqualTo(0f)
     }
 }

@@ -644,6 +644,42 @@ class TrackerConfigTest {
     }
 
     @Test
+    fun fadeFields_haveTheDocumentedDefaults() {
+        val config = TrackerConfig()
+
+        assertThat(config.fadeMinAlpha).isEqualTo(0.25f)
+        assertThat(config.fadeStepAlpha).isEqualTo(0.1f)
+    }
+
+    @Test
+    fun fadeFields_acceptTheirBounds_andTheDefaultsLieInside() {
+        assertWithin(TrackerConfig().fadeMinAlpha, TrackerConfig.MIN_FADE_MIN_ALPHA, TrackerConfig.MAX_FADE_MIN_ALPHA)
+        assertWithin(TrackerConfig().fadeStepAlpha, TrackerConfig.MIN_FADE_STEP_ALPHA, TrackerConfig.MAX_FADE_STEP_ALPHA)
+        assertThat(TrackerConfig.MIN_FADE_MIN_ALPHA).isEqualTo(0f)
+        assertThat(TrackerConfig.MAX_FADE_MIN_ALPHA).isEqualTo(1f)
+        assertThat(TrackerConfig.MIN_FADE_STEP_ALPHA).isEqualTo(0.01f)
+        assertThat(TrackerConfig.MAX_FADE_STEP_ALPHA).isEqualTo(1f)
+        TrackerConfig(fadeMinAlpha = TrackerConfig.MIN_FADE_MIN_ALPHA, fadeStepAlpha = TrackerConfig.MIN_FADE_STEP_ALPHA)
+        TrackerConfig(fadeMinAlpha = TrackerConfig.MAX_FADE_MIN_ALPHA, fadeStepAlpha = TrackerConfig.MAX_FADE_STEP_ALPHA)
+    }
+
+    @Test
+    fun fadeFields_outsideTheirBounds_areRejected() {
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(fadeMinAlpha = -0.01f) }
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(fadeMinAlpha = 1.01f) }
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(fadeStepAlpha = TrackerConfig.MIN_FADE_STEP_ALPHA / 2) }
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(fadeStepAlpha = 1.01f) }
+    }
+
+    @Test
+    fun fadeFields_nanAndInfinity_areRejected() {
+        for (value in listOf(Float.NaN, Float.POSITIVE_INFINITY, Float.NEGATIVE_INFINITY)) {
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(fadeMinAlpha = value) }
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(fadeStepAlpha = value) }
+        }
+    }
+
+    @Test
     fun trackLifecycleFields_haveTheDocumentedDefaults() {
         val config = TrackerConfig()
 

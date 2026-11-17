@@ -72,6 +72,9 @@ class TrackSnapshot private constructor(
         private const val BOX_TOP = 3
         private const val BOX_RIGHT = 4
         private const val BOX_BOTTOM = 5
+        private const val PLAIN = 0
+        private const val SMOOTHED = 1
+        private const val IDLE = 2
 
         /**
          * Copies the shown entries of [tracks], in list order, for a frame of [widthImg] x [heightImg] Img pixels.
@@ -83,12 +86,53 @@ class TrackSnapshot private constructor(
             tracks: TrackList,
             widthImg: Int,
             heightImg: Int,
+        ): TrackSnapshot = build(tracks, widthImg, heightImg, null, 0L, PLAIN)
+
+        /**
+         * Like [of], with the head point of every shown track passed through [smoother] for the frame taken at
+         * [timestampNs] (the timestamp the tracker was given): the smoother runs `begin`, `smooth` for each shown
+         * track and `end` (also when none is shown, so the slots of vanished tracks are freed). The box is moved by
+         * the same delta as the head point, so ring and brackets stay together. Capture thread; allocates like [of].
+         */
+        fun ofSmoothed(
+            tracks: TrackList,
+            widthImg: Int,
+            heightImg: Int,
+            smoother: HeadSmoother,
+            timestampNs: Long,
+        ): TrackSnapshot = build(tracks, widthImg, heightImg, smoother, timestampNs, SMOOTHED)
+
+        /**
+         * Like [of] for the idle republish: a shown track the [smoother] knows keeps its last smoothed head point
+         * (the box moved by the same delta), a track it does not know (newly promoted) passes through unsmoothed.
+         * The smoother is not advanced.
+         */
+        fun ofIdle(
+            tracks: TrackList,
+            widthImg: Int,
+            heightImg: Int,
+            smoother: HeadSmoother,
+        ): TrackSnapshot = build(tracks, widthImg, heightImg, smoother, 0L, IDLE)
+
+        private fun build(
+            tracks: TrackList,
+            widthImg: Int,
+            heightImg: Int,
+            smoother: HeadSmoother?,
+            timestampNs: Long,
+            mode: Int,
         ): TrackSnapshot {
+            if (mode == SMOOTHED) smoother?.begin(timestampNs)
             var shown = 0
             for (i in 0 until tracks.size) {
-                if (tracks.isShown(i)) shown++
+                if (!tracks.isShown(i)) continue
+                shown++
+                if (mode == SMOOTHED) smoother?.mark(tracks.id(i))
             }
-            if (shown == 0) return EMPTY
+            if (shown == 0) {
+                if (mode == SMOOTHED) smoother?.end()
+                return EMPTY
+            }
             val ids = IntArray(shown)
             val flags = BooleanArray(shown * FLAGS_PER_TRACK)
             val values = FloatArray(shown * VALUES_PER_TRACK)
@@ -99,15 +143,39 @@ class TrackSnapshot private constructor(
                 flags[FLAGS_PER_TRACK * next + LOST] = tracks.state(i) == TrackState.LOST
                 flags[FLAGS_PER_TRACK * next + ESTIMATED] = tracks.isHeadEstimated(i)
                 val base = VALUES_PER_TRACK * next
-                values[base + HEAD_X] = tracks.headXImg(i)
-                values[base + HEAD_Y] = tracks.headYImg(i)
-                values[base + BOX_LEFT] = tracks.boxLeftImg(i)
-                values[base + BOX_TOP] = tracks.boxTopImg(i)
-                values[base + BOX_RIGHT] = tracks.boxRightImg(i)
-                values[base + BOX_BOTTOM] = tracks.boxBottomImg(i)
+                val rawXImg = tracks.headXImg(i)
+                val rawYImg = tracks.headYImg(i)
+                var headXImg = rawXImg
+                var headYImg = rawYImg
+                if (smoother != null && mode == SMOOTHED) {
+                    smoother.smooth(ids[next], rawXImg, rawYImg, tracks.heightImg(i))
+                    headXImg = smoother.outXImg
+                    headYImg = smoother.outYImg
+                } else if (smoother != null && smoother.recall(ids[next])) {
+                    headXImg = smoother.outXImg
+                    headYImg = smoother.outYImg
+                }
+                val deltaXImg = deltaOf(headXImg, rawXImg)
+                val deltaYImg = deltaOf(headYImg, rawYImg)
+                values[base + HEAD_X] = headXImg
+                values[base + HEAD_Y] = headYImg
+                values[base + BOX_LEFT] = tracks.boxLeftImg(i) + deltaXImg
+                values[base + BOX_TOP] = tracks.boxTopImg(i) + deltaYImg
+                values[base + BOX_RIGHT] = tracks.boxRightImg(i) + deltaXImg
+                values[base + BOX_BOTTOM] = tracks.boxBottomImg(i) + deltaYImg
                 next++
             }
+            if (mode == SMOOTHED) smoother?.end()
             return TrackSnapshot(shown, widthImg, heightImg, ids, flags, values)
+        }
+
+        /** [smoothed] minus [raw], or 0 when that is not a finite number (the box then stays where it is). */
+        private fun deltaOf(
+            smoothed: Float,
+            raw: Float,
+        ): Float {
+            val delta = smoothed - raw
+            return if (delta.isFinite()) delta else 0f
         }
     }
 }

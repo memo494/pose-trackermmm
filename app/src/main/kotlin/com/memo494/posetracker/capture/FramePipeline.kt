@@ -12,6 +12,7 @@ import com.memo494.posetracker.core.overlay.RedrawPolicy
 import com.memo494.posetracker.core.stats.Percentiles
 import com.memo494.posetracker.core.stats.TimingSummary
 import com.memo494.posetracker.core.stats.TimingWindow
+import com.memo494.posetracker.core.tracking.HeadSmoother
 import com.memo494.posetracker.core.tracking.TrackSnapshot
 import com.memo494.posetracker.core.tracking.Tracker
 import com.memo494.posetracker.detector.PoseDetector
@@ -37,6 +38,11 @@ import com.memo494.posetracker.overlay.OverlayState
  * mapped with a new one. The HUD tick tells the tracker how long ago the newest tracked frame was published
  * (`Tracker.onIdle`; copy and inference time are not idle time), so a still picture still gets its marks and a
  * track that stays lost is removed.
+ *
+ * Smoothing (M4a): the snapshot of a frame carries head points smoothed by a [HeadSmoother] (a OneEuro filter per
+ * track, run with the frame's timestamp, the one the tracker used) and boxes moved by the same delta. Every tracker
+ * reset also resets the smoother. The idle republish never advances it: it reuses the last smoothed point of a track
+ * the smoother knows and passes a newly promoted track through unsmoothed.
  *
  * Timing: every **processed** frame (detected and published) adds one sample to each of six [TimingWindow]s:
  * copy, pre, inference, post, whole frame (acquire to publish) and result age (publish time minus the image
@@ -76,6 +82,11 @@ internal class FramePipeline(
     private var lastState =
         OverlayState(modelInputWidth = modelInputWidth, modelInputHeight = modelInputHeight, modelImported = modelImported)
     private val tracker = Tracker(config)
+    private val smoother = HeadSmoother(config)
+
+    /** Number of ids the display smoother holds (read-only, for tests). */
+    internal val smootherActiveCount: Int
+        get() = smoother.activeCount
     private var trackedFrameNewest = false
 
     /** Clock reading after the newest tracked frame was published (not its arrival): idle time starts here. */
@@ -256,7 +267,7 @@ internal class FramePipeline(
         nowNs: Long,
     ): OverlayState {
         val list = tracker.onIdle(nowNs - trackedArrivalNs)
-        val idle = TrackSnapshot.of(list, state.captureWidthImg, state.captureHeightImg)
+        val idle = TrackSnapshot.ofIdle(list, state.captureWidthImg, state.captureHeightImg, smoother)
         return if (RedrawPolicy.tracksChanged(state.tracks, idle, 0f)) state.copy(tracks = idle) else state
     }
 
@@ -306,7 +317,7 @@ internal class FramePipeline(
         closeImage(image)
         if (!captureFrame.set(rgba, widthImg, heightImg, timestampNs, source)) error("capture frame rejected the copy")
         val result = detector.detect(captureFrame)
-        val tracks = TrackSnapshot.of(tracker.update(result), widthImg, heightImg)
+        val tracks = TrackSnapshot.ofSmoothed(tracker.update(result), widthImg, heightImg, smoother, result.timestampNs)
         trackedFrameNewest = true
         fpsMeter.onFrame(acquireNs)
         val maxRawScore = detector.lastMaxRawScore
@@ -423,6 +434,7 @@ internal class FramePipeline(
         try {
             if (dropFrame) {
                 tracker.reset()
+                smoother.reset()
                 trackedFrameNewest = false
             }
             val base = lastState

@@ -273,13 +273,140 @@ class TrackerTest {
 
     @Test
     fun anUnmatchedTentativeTrack_isRemovedAndTheOthersKeepTheirOrder() {
-        feed(tracker, 0, person(200f), person(600f), person(1000f))
+        val strict = Tracker(TrackerConfig(trackTentativeMaxMisses = 0))
+        feed(strict, 0, person(200f), person(600f), person(1000f))
 
-        val list = feed(tracker, 1, person(200f), person(1000f))
+        val list = feed(strict, 1, person(200f), person(1000f))
 
         assertThat(list.size).isEqualTo(2)
         assertThat(list.id(0)).isEqualTo(1)
         assertThat(list.id(1)).isEqualTo(3)
+    }
+
+    @Test
+    fun withToleranceZero_aMissRemovesATentativeTrack() {
+        val strict = Tracker(TrackerConfig(trackTentativeMaxMisses = 0))
+        feed(strict, 0, person(600f))
+        feed(strict, 1, person(600f))
+
+        val list = feed(strict, 2)
+
+        assertThat(list.size).isEqualTo(0)
+        assertThat(strict.removeCount).isEqualTo(0)
+    }
+
+    @Test
+    fun aTentativeTrack_survivesOneMissAndIsConfirmedOnTheThirdHit() {
+        feed(tracker, 0, person(600f))
+        val missed = feed(tracker, 1)
+
+        assertThat(missed.size).isEqualTo(1)
+        assertThat(missed.id(0)).isEqualTo(1)
+        assertThat(missed.state(0)).isEqualTo(TrackState.TENTATIVE)
+        assertThat(missed.isShown(0)).isFalse()
+        assertThat(missed.lostMs(0)).isEqualTo(0f)
+
+        val second = feed(tracker, 2, person(600f))
+        assertThat(second.state(0)).isEqualTo(TrackState.TENTATIVE)
+
+        val third = feed(tracker, 3, person(600f))
+        assertThat(third.size).isEqualTo(1)
+        assertThat(third.id(0)).isEqualTo(1)
+        assertThat(third.state(0)).isEqualTo(TrackState.CONFIRMED)
+        assertThat(third.isShown(0)).isTrue()
+        assertThat(tracker.birthCount).isEqualTo(1)
+        assertThat(tracker.confirmCount).isEqualTo(1)
+        assertThat(tracker.recoverCount).isEqualTo(0)
+    }
+
+    @Test
+    fun aMissDoesNotResetTheHitCounter() {
+        feed(tracker, 0, person(600f))
+        feed(tracker, 1, person(600f))
+        feed(tracker, 2)
+
+        val list = feed(tracker, 3, person(600f))
+
+        assertThat(list.state(0)).isEqualTo(TrackState.CONFIRMED)
+    }
+
+    @Test
+    fun twoMissesInARow_removeATentativeTrack_andTheNextHitStartsANewOne() {
+        feed(tracker, 0, person(600f))
+        assertThat(feed(tracker, 1).size).isEqualTo(1)
+
+        val gone = feed(tracker, 2)
+        assertThat(gone.size).isEqualTo(0)
+        assertThat(tracker.removeCount).isEqualTo(0)
+
+        val again = feed(tracker, 3, person(600f))
+        assertThat(again.size).isEqualTo(1)
+        assertThat(again.id(0)).isEqualTo(2)
+        assertThat(again.state(0)).isEqualTo(TrackState.TENTATIVE)
+        assertThat(tracker.birthCount).isEqualTo(2)
+    }
+
+    @Test
+    fun aHitResetsTheMissCounter_soAHitMissHitMissHitPersonIsShown() {
+        feed(tracker, 0, person(600f))
+        feed(tracker, 1)
+        feed(tracker, 2, person(600f))
+        val secondMiss = feed(tracker, 3)
+        assertThat(secondMiss.size).isEqualTo(1)
+        assertThat(secondMiss.state(0)).isEqualTo(TrackState.TENTATIVE)
+
+        val list = feed(tracker, 4, person(600f))
+
+        assertThat(list.size).isEqualTo(1)
+        assertThat(list.id(0)).isEqualTo(1)
+        assertThat(list.state(0)).isEqualTo(TrackState.CONFIRMED)
+        assertThat(list.isShown(0)).isTrue()
+        assertThat(tracker.birthCount).isEqualTo(1)
+    }
+
+    @Test
+    fun withToleranceTwo_aTentativeTrackSurvivesTwoMissesButNotThree() {
+        val patient = Tracker(TrackerConfig(trackTentativeMaxMisses = 2))
+        feed(patient, 0, person(600f))
+        assertThat(feed(patient, 1).size).isEqualTo(1)
+        assertThat(feed(patient, 2).size).isEqualTo(1)
+
+        assertThat(feed(patient, 3).size).isEqualTo(0)
+    }
+
+    @Test
+    fun aMissedTentativeTrack_coastsWithItsVelocityDecayedLikeALostOne() {
+        val tentative = Tracker(TrackerConfig(trackConfirmHits = COAST_HITS + 1))
+        val confirmed = Tracker(TrackerConfig(trackConfirmHits = 1))
+        for (k in 0 until COAST_HITS) {
+            feed(tentative, k, person(300f + COAST_STEP * k))
+            feed(confirmed, k, person(300f + COAST_STEP * k))
+        }
+
+        val coasting = feed(tentative, COAST_HITS)
+        val lost = feed(confirmed, COAST_HITS)
+
+        assertThat(coasting.size).isEqualTo(1)
+        assertThat(coasting.state(0)).isEqualTo(TrackState.TENTATIVE)
+        assertThat(lost.state(0)).isEqualTo(TrackState.LOST)
+        assertThat(coasting.headXImg(0)).isEqualTo(lost.headXImg(0))
+        assertThat(coasting.velocityXImgPerS(0)).isEqualTo(lost.velocityXImgPerS(0))
+        assertThat(coasting.velocityXImgPerS(0)).isGreaterThan(0f)
+        assertThat(coasting.lostMs(0)).isEqualTo(0f)
+    }
+
+    @Test
+    fun onIdle_leavesATentativeTrackThatHasMissedAFrameTentativeAndHidden() {
+        feed(tracker, 0, person(600f))
+        feed(tracker, 1)
+
+        val list = tracker.onIdle(config.trackIdlePromoteNs)
+
+        assertThat(list.size).isEqualTo(1)
+        assertThat(list.state(0)).isEqualTo(TrackState.TENTATIVE)
+        assertThat(list.isShown(0)).isFalse()
+        assertThat(tracker.idlePromoteCount).isEqualTo(0)
+        assertThat(tracker.confirmCount).isEqualTo(0)
     }
 
     @Test

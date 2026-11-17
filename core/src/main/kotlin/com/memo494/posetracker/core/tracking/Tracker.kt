@@ -18,9 +18,10 @@ import com.memo494.posetracker.core.model.PoseDetection
  * 4. stage 1 assigns all tracks to the high detections, stage 2 the unmatched tracks to the low ones, each
  *    with a cost limit (`AssociationCost`, `HungarianAssigner`);
  * 5. a matched track is updated and counted a hit (a tentative one is confirmed after `trackConfirmHits`);
- * 6. an unmatched tentative track is removed; an unmatched confirmed one is LOST (its velocity decays) and
- *    is removed after `trackMaxLostMs` or when its head point is more than `trackExitMarginRatio` heights
- *    outside the image;
+ * 6. an unmatched tentative track coasts (its velocity decays, it stays tentative and hidden, `lostMs` stays 0)
+ *    until its consecutive misses exceed `trackTentativeMaxMisses`, then it is removed (a hit resets the count);
+ *    an unmatched confirmed one is LOST (its velocity decays) and is removed after `trackMaxLostMs` or when
+ *    its head point is more than `trackExitMarginRatio` heights outside the image;
  * 7. an unmatched detection with a score of at least `trackBirthScore` starts a tentative track while fewer
  *    than `maxTracks` tracks exist (confirmed at once when `trackConfirmHits` is 1);
  * 8. [onIdle] promotes the tentative tracks after `trackIdlePromoteMs` without a frame and removes a LOST track
@@ -48,6 +49,9 @@ class Tracker(
         var id = 0
         var state = TrackState.TENTATIVE
         var hits = 0
+
+        /** Consecutive frames without a match while tentative; a hit resets it. */
+        var misses = 0
         var lostMs = 0f
         var score = 0f
         var headEstimated = false
@@ -158,7 +162,7 @@ class Tracker(
     /**
      * Tells the tracker that [idleNs] nanoseconds have passed since the newest frame arrived (measured by the
      * caller) and returns the tracks afterwards. At or above `trackIdlePromoteMs` every tentative track
-     * becomes confirmed. A LOST track whose `lostMs` plus the idle time exceeds `trackMaxLostMs` is removed
+     * that was hit on the newest frame (no miss since) becomes confirmed; one that has missed stays tentative. A LOST track whose `lostMs` plus the idle time exceeds `trackMaxLostMs` is removed
      * (counted in [removeCount]); `lostMs` itself is not changed, so repeated calls with a growing [idleNs] stay
      * consistent and the next [update] goes on as before. A CONFIRMED track is never touched (a paused video
      * keeps its rings); nothing else changes.
@@ -175,7 +179,7 @@ class Tracker(
                 inUse[slot] = false
                 continue
             }
-            if (promote && track.state == TrackState.TENTATIVE) {
+            if (promote && track.state == TrackState.TENTATIVE && track.misses == 0) {
                 track.state = TrackState.CONFIRMED
                 idlePromoteCount++
             }
@@ -333,6 +337,7 @@ class Tracker(
         track.height.update(boxHeightImg, heightNoiseImg * heightNoiseImg)
         setOffsets(track, detection, boxHeightImg)
         track.hits++
+        track.misses = 0
         track.lostMs = 0f
         track.score = detection.score
         track.headEstimated = point.estimated
@@ -353,7 +358,14 @@ class Tracker(
         dteS: Float,
         frame: DetectionFrame,
     ): Boolean {
-        if (track.state == TrackState.TENTATIVE) return false
+        if (track.state == TrackState.TENTATIVE) {
+            track.misses++
+            if (track.misses > config.trackTentativeMaxMisses) return false
+            track.x.decayVelocity(dteS, missTauS)
+            track.y.decayVelocity(dteS, missTauS)
+            track.height.decayVelocity(dteS, missTauS)
+            return true
+        }
         track.state = TrackState.LOST
         track.lostMs += dteMs
         track.x.decayVelocity(dteS, missTauS)
@@ -420,6 +432,7 @@ class Tracker(
         setOffsets(track, detection, boxHeightImg)
         track.id = nextId++
         track.hits = 1
+        track.misses = 0
         track.lostMs = 0f
         track.score = detection.score
         track.headEstimated = point.estimated

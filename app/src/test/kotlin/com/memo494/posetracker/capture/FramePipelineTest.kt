@@ -15,6 +15,7 @@ import com.memo494.posetracker.detector.PoseDetector
 import com.memo494.posetracker.overlay.OverlayState
 import org.junit.Test
 import java.nio.ByteBuffer
+import kotlin.math.abs
 
 private const val WIDTH = 4
 private const val HEIGHT = 2
@@ -31,6 +32,10 @@ private const val FRAME_STEP_MS = 50L
 private const val SLOW_DETECT_MS = 300L
 private const val NEW_PERSON_SHIFT_X_IMG = 150f
 private const val HEAD_TOLERANCE_IMG = 3f
+private const val SHAKE_IMG = 6f
+private const val SHAKY_FRAMES = 40
+private const val SAME_HEAD_TOLERANCE_IMG = 0.01f
+private const val SMOOTHING_MAX_TRAVEL_RATIO = 0.5f
 
 /** An image that records its reads and closes in [events]. */
 private class FakeFrameImage(
@@ -974,8 +979,8 @@ class FramePipelineTest {
     // ---- the tracker (M3b T2) ----
 
     /** A pipeline expecting [TRACK_WIDTH] x [TRACK_HEIGHT] frames; the states of the set-up are forgotten. */
-    private fun trackingPipeline(): FramePipeline {
-        val pipeline = pipeline()
+    private fun trackingPipeline(config: TrackerConfig = TrackerConfig()): FramePipeline {
+        val pipeline = pipeline(config = config)
         pipeline.setExpectedSize(CaptureSize(TRACK_WIDTH, TRACK_HEIGHT))
         states.clear()
         return pipeline
@@ -1317,5 +1322,109 @@ class FramePipelineTest {
         assertThat(states.last().tracks).isSameInstanceAs(tracks)
         assertThat(states.last().tracks.count).isEqualTo(1)
         assertThat(states.last().detectionsShown).isFalse()
+    }
+
+    // ---- the display smoother (M4a T3) ----
+
+    /** A person like [walker] (box 60 x 200 px) whose five head keypoints sit [offsetXImg] / [offsetYImg] off their mean. */
+    private fun shaky(
+        offsetXImg: Float,
+        offsetYImg: Float,
+    ): PoseDetection {
+        val xy = FloatArray(HEAD_KEYPOINTS * 2)
+        for (k in 0 until HEAD_KEYPOINTS) {
+            xy[k * 2] = headXsImg.average().toFloat() + offsetXImg
+            xy[k * 2 + 1] = headYsImg.average().toFloat() + offsetYImg
+        }
+        return PoseDetection(100f, 20f, 160f, 220f, 0.9f, xy, FloatArray(HEAD_KEYPOINTS) { 0.9f })
+    }
+
+    /** Feeds one shaky frame at [atMs]; [index] decides the sign of the shake (even: plus). */
+    private fun shakyFrameAt(
+        pipeline: FramePipeline,
+        atMs: Long,
+        index: Int,
+    ) {
+        val sign = if (index % 2 == 0) 1f else -1f
+        detector.people = listOf(shaky(sign * SHAKE_IMG, sign * SHAKE_IMG))
+        frameAt(pipeline, atMs)
+    }
+
+    /** Head x published after each of [SHAKY_FRAMES] shaky frames of one still person; NaN while no track is shown. */
+    private fun publishedHeadsOfAShakyPerson(config: TrackerConfig): FloatArray {
+        val pipeline = trackingPipeline(config)
+        val heads = FloatArray(SHAKY_FRAMES) { Float.NaN }
+        for (i in 0 until SHAKY_FRAMES) {
+            shakyFrameAt(pipeline, i * FRAME_STEP_MS, i)
+            val tracks = states.last().tracks
+            if (tracks.count == 1) heads[i] = tracks.headXImg(0)
+        }
+        return heads
+    }
+
+    /** Sum of the frame-to-frame moves of the shown heads in [heads], from the first shown one on. */
+    private fun travelOf(heads: FloatArray): Float {
+        var travel = 0f
+        for (i in 1 until heads.size) {
+            if (!heads[i].isNaN() && !heads[i - 1].isNaN()) travel += abs(heads[i] - heads[i - 1])
+        }
+        return travel
+    }
+
+    @Test
+    fun aJitteringStillPerson_hasAPublishedHeadThatMovesLessThanTheTrackersOwn() {
+        val smoothed = publishedHeadsOfAShakyPerson(TrackerConfig())
+        val trackers = publishedHeadsOfAShakyPerson(TrackerConfig(smoothEnabled = false))
+
+        assertThat(travelOf(trackers)).isGreaterThan(0f)
+        assertThat(travelOf(smoothed)).isLessThan(SMOOTHING_MAX_TRAVEL_RATIO * travelOf(trackers))
+        assertThat(smoothed[2]).isEqualTo(trackers[2])
+    }
+
+    @Test
+    fun afterAReset_theFirstFrameOfTheNewTrackPassesThroughUnsmoothed() {
+        val trackers = publishedHeadsOfAShakyPerson(TrackerConfig(smoothEnabled = false))
+        val pipeline = trackingPipeline()
+        for (i in 0 until 10) shakyFrameAt(pipeline, i * FRAME_STEP_MS, i)
+        assertThat(states.last().tracks.count).isEqualTo(1)
+
+        assertThat(pipeline.smootherActiveCount).isEqualTo(1)
+        pipeline.setDisplaySized(false)
+        assertThat(pipeline.smootherActiveCount).isEqualTo(0)
+        pipeline.setDisplaySized(true)
+        assertThat(states.last().tracks.count).isEqualTo(0)
+        for (i in 0 until 3) shakyFrameAt(pipeline, (20 + i) * FRAME_STEP_MS, i)
+
+        assertThat(states.last().tracks.count).isEqualTo(1)
+        assertThat(states.last().tracks.headXImg(0)).isWithin(SAME_HEAD_TOLERANCE_IMG).of(trackers[2])
+    }
+
+    @Test
+    fun hudTick_withinTheIdleLimit_doesNotMoveASmoothedPoint() {
+        val pipeline = trackingPipeline()
+        for (i in 0 until 10) shakyFrameAt(pipeline, i * FRAME_STEP_MS, i)
+        val published = states.last().tracks
+        val lastFrameMs = 9 * FRAME_STEP_MS
+
+        tickAt(pipeline, lastFrameMs + FRAME_STEP_MS)
+        tickAt(pipeline, lastFrameMs + 2 * FRAME_STEP_MS)
+
+        assertThat(states.last().tracks).isSameInstanceAs(published)
+        assertThat(published.count).isEqualTo(1)
+    }
+
+    @Test
+    fun aTrackPromotedByIdleTime_isPublishedUnsmoothed() {
+        val unsmoothed = trackingPipeline(TrackerConfig(smoothEnabled = false))
+        shakyFrameAt(unsmoothed, 0, 0)
+        tickAt(unsmoothed, TrackerConfig().trackIdlePromoteMs)
+        val trackersHeadXImg = states.last().tracks.headXImg(0)
+        val smoothing = trackingPipeline()
+        shakyFrameAt(smoothing, 0, 0)
+
+        tickAt(smoothing, TrackerConfig().trackIdlePromoteMs)
+
+        assertThat(states.last().tracks.count).isEqualTo(1)
+        assertThat(states.last().tracks.headXImg(0)).isEqualTo(trackersHeadXImg)
     }
 }

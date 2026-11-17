@@ -144,4 +144,7 @@ object MetricsThresholds {
 
     /** S14: lowest coverage from frame 2. Model worst: 1.0. */
     const val S14_MIN_COVERAGE = 0.95
+
+    /** S15: time in milliseconds from the first frame until a track is shown, at most. Model p90 600 ms at 20 fps. */
+    const val S15_MAX_FIRST_SHOWN_MS = 1000.0
 }

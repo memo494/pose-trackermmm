@@ -12,8 +12,10 @@ import kotlin.math.min
  * through the shoulder and hip keypoints when all four are confident, else, only when the box looks like a whole
  * standing body (height at least `relockFullBodyMinAspect` times its width), a fixed part of it (rows
  * `relockBoxTopRatio..relockBoxBottomRatio` of its height, the middle `relockBoxWidthRatio` of its width); then cut by
- * `relockTorsoShrink` on every side and clipped to the image. It never reaches the head (shoulders are below it, the
- * box rows start under it), which is where the lock ring is drawn. A torso that clipping to the image cut is marked
+ * `relockTorsoShrink` on every side and clipped to the image. When the box is not a whole body (a person at a desk,
+ * cut by the frame edge, M4d) but both shoulders are confident, the torso is the part between the shoulders, from
+ * their line down by `relockUpperTorsoRatio` times the distance between them. It never reaches the head (shoulders are
+ * below it, the box rows start under it), which is where the lock ring is drawn. A torso that clipping to the image cut is marked
  * [TorsoRect.clipped].
  *
  * Allocation-free after construction; the four working floats are fields, so one instance belongs to one thread.
@@ -40,7 +42,7 @@ class TorsoRegion(
     ): Boolean {
         out.clear()
         if (widthImg <= 0 || heightImg <= 0) return false
-        if (!fromKeypoints(detection) && !fromBox(detection)) return false
+        if (!fromKeypoints(detection) && !fromBox(detection) && !fromUpperBody(detection)) return false
         val cutXImg = (rightImg - leftImg) * config.relockTorsoShrink
         val cutYImg = (bottomImg - topImg) * config.relockTorsoShrink
         val widthLimit = widthImg.toFloat()
@@ -90,12 +92,40 @@ class TorsoRegion(
             detection.keypointXImg(keypoint).isFinite() &&
             detection.keypointYImg(keypoint).isFinite()
 
-    /** The fixed part of the person box; false when the box has no finite positive size or is not a whole body's shape. */
-    private fun fromBox(detection: PoseDetection): Boolean {
+    /** True when the box has a finite positive size. */
+    private fun boxIsUsable(detection: PoseDetection): Boolean {
         val boxHeightImg = detection.boxBottomImg - detection.boxTopImg
         val boxWidthImg = detection.boxRightImg - detection.boxLeftImg
-        if (!(boxHeightImg.isFinite() && boxHeightImg > 0f && boxWidthImg.isFinite() && boxWidthImg > 0f)) return false
-        if (boxHeightImg < boxWidthImg * config.relockFullBodyMinAspect) return false
+        return boxHeightImg.isFinite() && boxHeightImg > 0f && boxWidthImg.isFinite() && boxWidthImg > 0f
+    }
+
+    /**
+     * The shoulders down by `relockUpperTorsoRatio` shoulder widths; false when the box is not usable, is a whole
+     * body's shape (the box part answers that case), or a shoulder is missing, not confident or not finite.
+     */
+    private fun fromUpperBody(detection: PoseDetection): Boolean {
+        if (!boxIsUsable(detection) || isWholeBody(detection)) return false
+        if (detection.keypointCount <= TrackerConfig.KEYPOINT_RIGHT_SHOULDER) return false
+        val leftShoulder = TrackerConfig.KEYPOINT_LEFT_SHOULDER
+        val rightShoulder = TrackerConfig.KEYPOINT_RIGHT_SHOULDER
+        if (!(usable(detection, leftShoulder) && usable(detection, rightShoulder))) return false
+        leftImg = min(detection.keypointXImg(leftShoulder), detection.keypointXImg(rightShoulder))
+        rightImg = max(detection.keypointXImg(leftShoulder), detection.keypointXImg(rightShoulder))
+        topImg = min(detection.keypointYImg(leftShoulder), detection.keypointYImg(rightShoulder))
+        bottomImg = max(detection.keypointYImg(leftShoulder), detection.keypointYImg(rightShoulder)) +
+            (rightImg - leftImg) * config.relockUpperTorsoRatio
+        return rightImg > leftImg && bottomImg > topImg
+    }
+
+    private fun isWholeBody(detection: PoseDetection): Boolean =
+        detection.boxBottomImg - detection.boxTopImg >=
+            (detection.boxRightImg - detection.boxLeftImg) * config.relockFullBodyMinAspect
+
+    /** The fixed part of the person box; false when the box has no finite positive size or is not a whole body's shape. */
+    private fun fromBox(detection: PoseDetection): Boolean {
+        if (!boxIsUsable(detection) || !isWholeBody(detection)) return false
+        val boxHeightImg = detection.boxBottomImg - detection.boxTopImg
+        val boxWidthImg = detection.boxRightImg - detection.boxLeftImg
         val centerXImg = (detection.boxLeftImg + detection.boxRightImg) / 2f
         val halfWidthImg = boxWidthImg * config.relockBoxWidthRatio / 2f
         leftImg = centerXImg - halfWidthImg

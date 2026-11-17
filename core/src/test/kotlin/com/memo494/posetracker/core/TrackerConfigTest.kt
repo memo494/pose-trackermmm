@@ -775,11 +775,12 @@ class TrackerConfigTest {
         assertThat(config.relockBoxWidthRatio).isEqualTo(0.6f)
         assertThat(config.relockKeypointMinScore).isEqualTo(0.5f)
         assertThat(config.relockMemoryMs).isEqualTo(60_000L)
-        assertThat(config.relockMaxDistance).isEqualTo(0.30f)
+        assertThat(config.relockMaxDistance).isEqualTo(0.40f)
         assertThat(config.relockMinMargin).isEqualTo(0.10f)
         assertThat(config.relockMinSamplePixels).isEqualTo(150)
         assertThat(config.relockFullBodyMinAspect).isEqualTo(1.8f)
         assertThat(config.relockJudgeFrames).isEqualTo(10)
+        assertThat(config.relockUpperTorsoRatio).isEqualTo(0.8f)
     }
 
     @Test
@@ -809,6 +810,7 @@ class TrackerConfigTest {
             relockMinSamplePixels = TrackerConfig.MIN_RELOCK_MIN_SAMPLE_PIXELS,
             relockFullBodyMinAspect = TrackerConfig.MIN_RELOCK_FULL_BODY_ASPECT,
             relockJudgeFrames = TrackerConfig.MIN_RELOCK_JUDGE_FRAMES,
+            relockUpperTorsoRatio = TrackerConfig.MIN_RELOCK_UPPER_TORSO_RATIO,
         )
         TrackerConfig(
             relockHueBins = TrackerConfig.MAX_RELOCK_HUE_BINS,
@@ -829,6 +831,7 @@ class TrackerConfigTest {
             relockMinSamplePixels = TrackerConfig.MAX_RELOCK_MIN_SAMPLE_PIXELS,
             relockFullBodyMinAspect = TrackerConfig.MAX_RELOCK_FULL_BODY_ASPECT,
             relockJudgeFrames = TrackerConfig.MAX_RELOCK_JUDGE_FRAMES,
+            relockUpperTorsoRatio = TrackerConfig.MAX_RELOCK_UPPER_TORSO_RATIO,
         )
     }
 
@@ -875,9 +878,22 @@ class TrackerConfigTest {
                 { TrackerConfig(relockFullBodyMinAspect = TrackerConfig.MAX_RELOCK_FULL_BODY_ASPECT + 0.1f) },
                 { TrackerConfig(relockJudgeFrames = 0) },
                 { TrackerConfig(relockJudgeFrames = TrackerConfig.MAX_RELOCK_JUDGE_FRAMES + 1) },
+                { TrackerConfig(relockUpperTorsoRatio = TrackerConfig.MIN_RELOCK_UPPER_TORSO_RATIO / 2f) },
+                { TrackerConfig(relockUpperTorsoRatio = TrackerConfig.MAX_RELOCK_UPPER_TORSO_RATIO + 0.1f) },
             )
 
         for (build in rejected) assertThrows(IllegalArgumentException::class.java) { build() }
+    }
+
+    @Test
+    fun relockMinSamplePixels_mustBeAtMostAQuarterOfTheMaximum() {
+        val limit = 2000 / TrackerConfig.RELOCK_SAMPLE_GRID_SLACK
+
+        TrackerConfig(relockMaxSamplePixels = 2000, relockMinSamplePixels = limit)
+        assertThrows(IllegalArgumentException::class.java) {
+            TrackerConfig(relockMaxSamplePixels = 2000, relockMinSamplePixels = limit + 1)
+        }
+        assertThat(TrackerConfig.RELOCK_SAMPLE_GRID_SLACK).isEqualTo(4)
     }
 
     @Test
@@ -894,6 +910,7 @@ class TrackerConfigTest {
             assertThrows(IllegalArgumentException::class.java) { TrackerConfig(relockMaxDistance = value) }
             assertThrows(IllegalArgumentException::class.java) { TrackerConfig(relockMinMargin = value) }
             assertThrows(IllegalArgumentException::class.java) { TrackerConfig(relockFullBodyMinAspect = value) }
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(relockUpperTorsoRatio = value) }
         }
     }
 

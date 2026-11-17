@@ -16,8 +16,9 @@ import kotlin.math.hypot
  *
  * Use per processed frame: [begin] with the frame's timestamp, [smooth] once for each shown track, [end]. A track
  * that was not smoothed between the two loses its slot, so an id that comes back starts again as a first sample.
- * When the pool is full, a new id takes the slot of an id not yet smoothed in the frame. [recall] reads the stored point of an id without advancing anything (the idle republish). [reset] forgets every
- * id (call it wherever the tracker is reset).
+ * When the pool is full, a new id takes the slot of an id not yet smoothed in the frame. [recall] reads the stored
+ * point of an id without advancing anything (the idle republish). [reset] forgets every id (call it wherever the
+ * tracker is reset).
  *
  * Holds a pool of [TrackerConfig.maxTracks] slots keyed by track id; no call allocates after construction. Results
  * are written to [outXImg] and [outYImg]. With [TrackerConfig.smoothEnabled] `false` it is the identity. Not

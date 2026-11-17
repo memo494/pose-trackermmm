@@ -82,6 +82,9 @@ class OverlayStateHolder(
                 keypointMinScore = config.keypointMinScore,
                 debugMarks = config.debugMarks,
                 hudDue = hudDue,
+                fadeStepAlpha = config.fadeStepAlpha,
+                maxLostMs = config.trackMaxLostMs,
+                fadeMinAlpha = config.fadeMinAlpha,
             )
         if (redraw) {
             drawnState = state

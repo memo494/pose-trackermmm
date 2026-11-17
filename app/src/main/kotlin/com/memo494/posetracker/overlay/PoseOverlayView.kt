@@ -13,6 +13,7 @@ import com.memo494.posetracker.core.model.PoseDetection
 import com.memo494.posetracker.core.overlay.CornerBrackets
 import com.memo494.posetracker.core.overlay.HeadRing
 import com.memo494.posetracker.core.overlay.LabelPlacement
+import com.memo494.posetracker.core.overlay.MarkFade
 import com.memo494.posetracker.core.tracking.TrackSnapshot
 import com.memo494.posetracker.detector.Accelerator
 import kotlin.math.max
@@ -67,6 +68,8 @@ class PoseOverlayView(
             strokeWidth = config.dotStrokeDp * density
             color = context.getColor(R.color.overlay_keypoint_green)
         }
+    private val boxBaseAlpha = boxPaint.alpha
+    private val ringBaseAlpha = ringPaint.alpha
     private val keypointPaint =
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.FILL
@@ -206,6 +209,8 @@ class PoseOverlayView(
         val rightView = fit.imgToViewX(tracks.boxRightImg(index))
         val topView = fit.imgToViewY(tracks.boxTopImg(index))
         val bottomView = fit.imgToViewY(tracks.boxBottomImg(index))
+        val lost = tracks.isLost(index)
+        if (lost) setMarkAlpha(MarkFade.alpha(tracks.lostMs(index), config.trackMaxLostMs, config.fadeMinAlpha))
         drawCornerBrackets(canvas, leftView, topView, rightView, bottomView)
 
         val ringRadiusView = HeadRing.radius(rightView - leftView, config.headRingRadiusRatio, minHeadRingRadiusPx)
@@ -216,7 +221,14 @@ class PoseOverlayView(
             ringPaint,
         )
 
+        if (lost) setMarkAlpha(1f)
         if (config.debugMarks) drawTrackId(canvas, tracks.id(index), leftView, topView)
+    }
+
+    /** Scales the opacity of the box and ring paints to [alpha] (0..1) of their own; 1 restores them. No allocation. */
+    private fun setMarkAlpha(alpha: Float) {
+        boxPaint.alpha = (boxBaseAlpha * alpha + ALPHA_ROUNDING).toInt()
+        ringPaint.alpha = (ringBaseAlpha * alpha + ALPHA_ROUNDING).toInt()
     }
 
     /** Debug only: the [trackId] as a number above the top-left corner of its box, kept inside the view. */
@@ -333,5 +345,8 @@ class PoseOverlayView(
     private companion object {
         /** HUD lines always shown: version, stats, detections; a warning adds one more. */
         const val HUD_BASE_LINES = 3
+
+        /** Added before truncating a scaled 0..255 alpha to an Int, so it rounds to the nearest. */
+        const val ALPHA_ROUNDING = 0.5f
     }
 }

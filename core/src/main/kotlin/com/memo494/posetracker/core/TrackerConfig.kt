@@ -122,6 +122,11 @@ package com.memo494.posetracker.core
  *   speed / track height; 0 = a fixed cutoff.
  * @property smoothDerivativeCutoffHz cutoff frequency, in hertz, of the filter that measures the head point's speed
  *   for the smoother, in [[MIN_SMOOTH_DERIVATIVE_CUTOFF_HZ], [MAX_SMOOTH_DERIVATIVE_CUTOFF_HZ]].
+ * @property fadeMinAlpha lowest opacity, unitless, of the marks of a `LOST` track: the opacity falls from 1 to
+ *   this as the lost time grows from 0 to [trackMaxLostMs] (`max(fadeMinAlpha, 1 - lostMs / trackMaxLostMs)`), in
+ *   [[MIN_FADE_MIN_ALPHA], [MAX_FADE_MIN_ALPHA]]; 1 = no fading.
+ * @property fadeStepAlpha smallest change of a track's opacity, unitless, that redraws the overlay (so the fade is
+ *   drawn in steps, not on every frame), in [[MIN_FADE_STEP_ALPHA], [MAX_FADE_STEP_ALPHA]].
  */
 data class TrackerConfig(
     val scoreThreshold: Float = DEFAULT_SCORE_THRESHOLD,
@@ -180,6 +185,8 @@ data class TrackerConfig(
     val smoothMinCutoffHz: Float = DEFAULT_SMOOTH_MIN_CUTOFF_HZ,
     val smoothBeta: Float = DEFAULT_SMOOTH_BETA,
     val smoothDerivativeCutoffHz: Float = DEFAULT_SMOOTH_DERIVATIVE_CUTOFF_HZ,
+    val fadeMinAlpha: Float = DEFAULT_FADE_MIN_ALPHA,
+    val fadeStepAlpha: Float = DEFAULT_FADE_STEP_ALPHA,
 ) {
     init {
         require(scoreThreshold in MIN_SCORE_THRESHOLD..MAX_SCORE_THRESHOLD) {
@@ -368,6 +375,12 @@ data class TrackerConfig(
         require(smoothDerivativeCutoffHz in MIN_SMOOTH_DERIVATIVE_CUTOFF_HZ..MAX_SMOOTH_DERIVATIVE_CUTOFF_HZ) {
             "smoothDerivativeCutoffHz $smoothDerivativeCutoffHz outside " +
                 "[$MIN_SMOOTH_DERIVATIVE_CUTOFF_HZ, $MAX_SMOOTH_DERIVATIVE_CUTOFF_HZ]"
+        }
+        require(fadeMinAlpha in MIN_FADE_MIN_ALPHA..MAX_FADE_MIN_ALPHA) {
+            "fadeMinAlpha $fadeMinAlpha outside [$MIN_FADE_MIN_ALPHA, $MAX_FADE_MIN_ALPHA]"
+        }
+        require(fadeStepAlpha in MIN_FADE_STEP_ALPHA..MAX_FADE_STEP_ALPHA) {
+            "fadeStepAlpha $fadeStepAlpha outside [$MIN_FADE_STEP_ALPHA, $MAX_FADE_STEP_ALPHA]"
         }
     }
 
@@ -829,6 +842,24 @@ data class TrackerConfig(
 
         /** Highest accepted [smoothDerivativeCutoffHz], in hertz. */
         const val MAX_SMOOTH_DERIVATIVE_CUTOFF_HZ = 30.0f
+
+        /** Default [fadeMinAlpha], unitless. */
+        const val DEFAULT_FADE_MIN_ALPHA = 0.25f
+
+        /** Lowest accepted [fadeMinAlpha]: invisible at the end of the fade. */
+        const val MIN_FADE_MIN_ALPHA = 0f
+
+        /** Highest accepted [fadeMinAlpha]: no fading. */
+        const val MAX_FADE_MIN_ALPHA = 1f
+
+        /** Default [fadeStepAlpha], unitless. */
+        const val DEFAULT_FADE_STEP_ALPHA = 0.1f
+
+        /** Lowest accepted [fadeStepAlpha]. */
+        const val MIN_FADE_STEP_ALPHA = 0.01f
+
+        /** Highest accepted [fadeStepAlpha]. */
+        const val MAX_FADE_STEP_ALPHA = 1f
 
         /** How far ahead, in seconds, the thermal headroom is forecast; 0 = the current headroom. */
         const val THERMAL_HEADROOM_FORECAST_SECONDS = 0

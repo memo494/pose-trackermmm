@@ -13,7 +13,7 @@ package com.memo494.posetracker.core.tracking
  * (the tracker already removes tracks that are not healthy).
  *
  * Layout: `ids[i]`; `flags[2 * i]` = lost, `flags[2 * i + 1]` = head estimated; `values[6 * i ..]` = head x, head y,
- * box left, top, right, bottom.
+ * box left, top, right, bottom, lost time in ms (0 unless lost).
  */
 class TrackSnapshot private constructor(
     /** Number of tracks in the snapshot. */
@@ -34,6 +34,12 @@ class TrackSnapshot private constructor(
 
     /** True when the head point was the box fallback (fewer than the needed head keypoints were visible). */
     fun isHeadEstimated(index: Int): Boolean = flags[FLAGS_PER_TRACK * checked(index) + ESTIMATED]
+
+    /**
+     * Milliseconds the track has been without a matching detection; 0 unless it is `LOST`. For an idle snapshot
+     * ([ofIdle]) the idle time since the newest frame is included, capped at the limit the tracker keeps a track.
+     */
+    fun lostMs(index: Int): Float = values[VALUES_PER_TRACK * checked(index) + LOST_MS]
 
     /** Head point x, Img pixels. */
     fun headXImg(index: Int): Float = values[VALUES_PER_TRACK * checked(index) + HEAD_X]
@@ -65,13 +71,14 @@ class TrackSnapshot private constructor(
         private const val FLAGS_PER_TRACK = 2
         private const val LOST = 0
         private const val ESTIMATED = 1
-        private const val VALUES_PER_TRACK = 6
+        private const val VALUES_PER_TRACK = 7
         private const val HEAD_X = 0
         private const val HEAD_Y = 1
         private const val BOX_LEFT = 2
         private const val BOX_TOP = 3
         private const val BOX_RIGHT = 4
         private const val BOX_BOTTOM = 5
+        private const val LOST_MS = 6
         private const val PLAIN = 0
         private const val SMOOTHED = 1
         private const val IDLE = 2
@@ -86,7 +93,7 @@ class TrackSnapshot private constructor(
             tracks: TrackList,
             widthImg: Int,
             heightImg: Int,
-        ): TrackSnapshot = build(tracks, widthImg, heightImg, null, 0L, PLAIN)
+        ): TrackSnapshot = build(tracks, widthImg, heightImg, null, 0L, PLAIN, 0f, 0f)
 
         /**
          * Like [of], with the head point of every shown track passed through [smoother] for the frame taken at
@@ -100,19 +107,23 @@ class TrackSnapshot private constructor(
             heightImg: Int,
             smoother: HeadSmoother,
             timestampNs: Long,
-        ): TrackSnapshot = build(tracks, widthImg, heightImg, smoother, timestampNs, SMOOTHED)
+        ): TrackSnapshot = build(tracks, widthImg, heightImg, smoother, timestampNs, SMOOTHED, 0f, 0f)
 
         /**
          * Like [of] for the idle republish: a shown track the [smoother] knows keeps its last smoothed head point
          * (the box moved by the same delta), a track it does not know (newly promoted) passes through unsmoothed.
-         * The smoother is not advanced.
+         * The smoother is not advanced. A `LOST` track's [TrackSnapshot.lostMs] is its lost time plus [idleMs] (the
+         * time since the newest frame; a negative or non-numeric value counts as 0), capped at [maxLostMs]
+         * (`trackMaxLostMs`).
          */
         fun ofIdle(
             tracks: TrackList,
             widthImg: Int,
             heightImg: Int,
             smoother: HeadSmoother,
-        ): TrackSnapshot = build(tracks, widthImg, heightImg, smoother, 0L, IDLE)
+            idleMs: Float,
+            maxLostMs: Float,
+        ): TrackSnapshot = build(tracks, widthImg, heightImg, smoother, 0L, IDLE, if (idleMs > 0f) idleMs else 0f, maxLostMs)
 
         private fun build(
             tracks: TrackList,
@@ -121,6 +132,8 @@ class TrackSnapshot private constructor(
             smoother: HeadSmoother?,
             timestampNs: Long,
             mode: Int,
+            idleMs: Float,
+            maxLostMs: Float,
         ): TrackSnapshot {
             if (mode == SMOOTHED) smoother?.begin(timestampNs)
             var shown = 0
@@ -140,7 +153,8 @@ class TrackSnapshot private constructor(
             for (i in 0 until tracks.size) {
                 if (!tracks.isShown(i)) continue
                 ids[next] = tracks.id(i)
-                flags[FLAGS_PER_TRACK * next + LOST] = tracks.state(i) == TrackState.LOST
+                val lost = tracks.state(i) == TrackState.LOST
+                flags[FLAGS_PER_TRACK * next + LOST] = lost
                 flags[FLAGS_PER_TRACK * next + ESTIMATED] = tracks.isHeadEstimated(i)
                 val base = VALUES_PER_TRACK * next
                 val rawXImg = tracks.headXImg(i)
@@ -163,10 +177,23 @@ class TrackSnapshot private constructor(
                 values[base + BOX_TOP] = tracks.boxTopImg(i) + deltaYImg
                 values[base + BOX_RIGHT] = tracks.boxRightImg(i) + deltaXImg
                 values[base + BOX_BOTTOM] = tracks.boxBottomImg(i) + deltaYImg
+                values[base + LOST_MS] = if (lost) lostMsOf(tracks.lostMs(i), idleMs, maxLostMs, mode == IDLE) else 0f
                 next++
             }
             if (mode == SMOOTHED) smoother?.end()
             return TrackSnapshot(shown, widthImg, heightImg, ids, flags, values)
+        }
+
+        /** [lostMs], plus [idleMs] capped at [maxLostMs] when [idle]. */
+        private fun lostMsOf(
+            lostMs: Float,
+            idleMs: Float,
+            maxLostMs: Float,
+            idle: Boolean,
+        ): Float {
+            if (!idle) return lostMs
+            val total = lostMs + idleMs
+            return if (total > maxLostMs) maxLostMs else total
         }
 
         /** [smoothed] minus [raw], or 0 when that is not a finite number (the box then stays where it is). */

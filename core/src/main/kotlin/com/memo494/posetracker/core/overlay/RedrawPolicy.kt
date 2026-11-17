@@ -86,6 +86,9 @@ object RedrawPolicy {
      * @param keypointMinScore keypoints below this confidence are not drawn, unitless in [0, 1].
      * @param debugMarks whether the raw detections are drawn as well (`config.debugMarks`).
      * @param hudDue result of [hudDue] for this update.
+     * @param fadeStepAlpha smallest change of a lost track's opacity that redraws (`fadeStepAlpha`).
+     * @param maxLostMs time after which the tracker drops a lost track (`trackMaxLostMs`).
+     * @param fadeMinAlpha floor of the fade opacity (`fadeMinAlpha`).
      */
     fun shouldRedrawMarks(
         previousTracks: TrackSnapshot,
@@ -100,12 +103,15 @@ object RedrawPolicy {
         keypointMinScore: Float,
         debugMarks: Boolean,
         hudDue: Boolean,
+        fadeStepAlpha: Float,
+        maxLostMs: Float,
+        fadeMinAlpha: Float,
     ): Boolean {
         if (hudDue) return true
         if (previousWarning != currentWarning) return true
         val previousDrawn = if (previousShown) previousTracks else TrackSnapshot.EMPTY
         val currentDrawn = if (currentShown) currentTracks else TrackSnapshot.EMPTY
-        if (tracksChanged(previousDrawn, currentDrawn, deadbandImg)) return true
+        if (tracksChanged(previousDrawn, currentDrawn, deadbandImg, fadeStepAlpha, maxLostMs, fadeMinAlpha)) return true
         if (!debugMarks) return false
         return shouldRedraw(
             previous = previousFrame,
@@ -124,12 +130,21 @@ object RedrawPolicy {
     /**
      * Whether the tracks drawn in [previous] and those in [current] differ on screen: the counts differ, an id
      * differs at an index, or a head coordinate or a box edge moved by more than [deadbandImg] (Img pixels,
-     * along an axis). `isLost` and `isHeadEstimated` are not compared (they change no pixel in M3b). Allocation-free.
+     * along an axis), or the opacity of a track ([MarkFade.alpha] of its `lostMs`) changed by at least
+     * [fadeStepAlpha]. `isLost` and `isHeadEstimated` are not compared (they change no pixel; a lost track's
+     * opacity does, through `lostMs`). Allocation-free.
+     *
+     * @param fadeStepAlpha smallest change of the opacity that counts, unitless (`fadeStepAlpha`).
+     * @param maxLostMs time after which the tracker drops a lost track (`trackMaxLostMs`).
+     * @param fadeMinAlpha floor of the fade opacity (`fadeMinAlpha`).
      */
     fun tracksChanged(
         previous: TrackSnapshot,
         current: TrackSnapshot,
         deadbandImg: Float,
+        fadeStepAlpha: Float,
+        maxLostMs: Float,
+        fadeMinAlpha: Float,
     ): Boolean {
         if (previous.count != current.count) return true
         for (i in 0 until previous.count) {
@@ -140,6 +155,9 @@ object RedrawPolicy {
             if (moved(previous.boxTopImg(i), current.boxTopImg(i), deadbandImg)) return true
             if (moved(previous.boxRightImg(i), current.boxRightImg(i), deadbandImg)) return true
             if (moved(previous.boxBottomImg(i), current.boxBottomImg(i), deadbandImg)) return true
+            val previousAlpha = MarkFade.alpha(previous.lostMs(i), maxLostMs, fadeMinAlpha)
+            val currentAlpha = MarkFade.alpha(current.lostMs(i), maxLostMs, fadeMinAlpha)
+            if (abs(currentAlpha - previousAlpha) >= fadeStepAlpha) return true
         }
         return false
     }

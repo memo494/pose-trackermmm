@@ -267,8 +267,11 @@ internal class FramePipeline(
         nowNs: Long,
     ): OverlayState {
         val list = tracker.onIdle(nowNs - trackedArrivalNs)
-        val idle = TrackSnapshot.ofIdle(list, state.captureWidthImg, state.captureHeightImg, smoother)
-        return if (RedrawPolicy.tracksChanged(state.tracks, idle, 0f)) state.copy(tracks = idle) else state
+        val idleMs = (nowNs - trackedArrivalNs).toFloat() / TrackerConfig.NANOS_PER_MILLI.toFloat()
+        val maxLostMs = config.trackMaxLostMs
+        val idle = TrackSnapshot.ofIdle(list, state.captureWidthImg, state.captureHeightImg, smoother, idleMs, maxLostMs)
+        val changed = RedrawPolicy.tracksChanged(state.tracks, idle, 0f, config.fadeStepAlpha, maxLostMs, config.fadeMinAlpha)
+        return if (changed) state.copy(tracks = idle) else state
     }
 
     /**

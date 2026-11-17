@@ -77,6 +77,7 @@ internal class FramePipeline(
         OverlayState(modelInputWidth = modelInputWidth, modelInputHeight = modelInputHeight, modelImported = modelImported)
     private val tracker = Tracker(config)
     private var trackedFrameNewest = false
+
     /** Clock reading after the newest tracked frame was published (not its arrival): idle time starts here. */
     private var trackedArrivalNs = 0L
     private var imageClosed = false

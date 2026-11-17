@@ -463,6 +463,8 @@ The overlay is a plain `View` (not `ComposeView`) in a `TYPE_APPLICATION_OVERLAY
   capture size and scale, size-change events, capture fps, dropped size-mismatched frames, timestamp-source
   statistics, `now − image.timestamp` range), FPS + thermal stats, `model_info.json`, current `TrackerConfig`,
   last 10 s replay JSON, latest benchmark CSV. This zip is what the owner pastes to an agent.
+  **Save diagnostics** writes the same zip to a place the owner picks (system "save as" dialog, no storage
+  permission; `DiagnosticsSave`), so it can be kept and sent later.
 - **Model in the HUD (M0c):** the detections line ends with the model's input size and, for an imported model,
   the mark `imp`: `det 2/3 trk 2 max 0.89 in 416` (built-in) or `det 2/3 trk 2 max 0.89 in 640 imp`; with no
   model loaded the ` in …` part is left out (`HudFormatter.formatDetections`). When an imported model was expected

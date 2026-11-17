@@ -10,6 +10,7 @@ import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.provider.Settings
 import androidx.activity.ComponentActivity
@@ -39,6 +40,7 @@ import com.memo494.posetracker.diagnostics.AppLog
 import com.memo494.posetracker.diagnostics.CrashNotice
 import com.memo494.posetracker.diagnostics.CrashStore
 import com.memo494.posetracker.diagnostics.DiagnosticsNotice
+import com.memo494.posetracker.diagnostics.DiagnosticsSave
 import com.memo494.posetracker.diagnostics.DiagnosticsSection
 import com.memo494.posetracker.diagnostics.DiagnosticsShare
 import com.memo494.posetracker.diagnostics.DiagnosticsUiState
@@ -91,6 +93,12 @@ class MainActivity : ComponentActivity() {
             dispatch(ControlEvent.ImportPicked(uri?.toString()))
         }
 
+    // "Save as" dialog for the diagnostics zip; no storage permission is needed. Cancel gives a null Uri.
+    private val saveDiagnosticsLauncher =
+        registerForActivityResult(ActivityResultContracts.CreateDocument(DIAGNOSTICS_MIME_TYPE)) { uri ->
+            if (uri != null) saveDiagnosticsTo(uri)
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
@@ -116,6 +124,7 @@ class MainActivity : ComponentActivity() {
                         DiagnosticsSection(
                             state = diagnosticsState.value,
                             onShareClick = { shareDiagnostics() },
+                            onSaveClick = { startSaveDiagnostics() },
                             onToggleLogClick = { toggleLog() },
                             onRefreshLogClick = { refreshLog() },
                         )
@@ -436,6 +445,74 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Opens the system "save as" dialog; the zip is built only after a place is picked ([saveDiagnosticsTo]). */
+    private fun startSaveDiagnostics() {
+        if (diagnosticsState.value.sharing) return
+        updateDiagnostics { it.copy(notice = null) }
+        try {
+            saveDiagnosticsLauncher.launch(DiagnosticsSave.fileName())
+        } catch (e: Exception) {
+            AppLog.log("opening the save dialog failed", e)
+            updateDiagnostics { it.copy(notice = DiagnosticsNotice.SAVE_FAILED) }
+        }
+    }
+
+    /** Writes the zip and copies it to [uri] off the main thread, then shows "Saved" or the failure notice. */
+    private fun saveDiagnosticsTo(uri: Uri) {
+        if (diagnosticsState.value.sharing) return
+        updateDiagnostics { it.copy(sharing = true, notice = null) }
+        lifecycleScope.launch {
+            val saved = withContext(Dispatchers.IO) { writeZipAndCopyTo(uri) }
+            val notice = if (saved) DiagnosticsNotice.SAVED else DiagnosticsNotice.SAVE_FAILED
+            updateDiagnostics { it.copy(sharing = false, notice = notice) }
+            if (saved && diagnosticsState.value.crashNotice) dismissCrashNotice()
+        }
+    }
+
+    /**
+     * Builds a private temporary zip, copies it to [uri] (truncating), deletes the temporary file, and on a
+     * failure removes the empty document the dialog created. Never throws.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private fun writeZipAndCopyTo(uri: Uri): Boolean {
+        var temp: File? = null
+        val saved =
+            try {
+                val file = DiagnosticsZip.write(applicationContext, DiagnosticsZip.SAVE_FILE_NAME)
+                temp = file
+                // Output first, then input: copy() closes whichever of the two it gets, so nothing leaks.
+                val output = contentResolver.openOutputStream(uri, "wt")
+                val input =
+                    try {
+                        file.inputStream()
+                    } catch (t: Throwable) {
+                        AppLog.log("reading the temporary zip failed", t)
+                        null
+                    }
+                DiagnosticsSave.copy(input, output)
+            } catch (t: Throwable) {
+                AppLog.log("saving the diagnostics zip failed", t)
+                false
+            }
+        try {
+            temp?.delete()
+        } catch (t: Throwable) {
+            AppLog.log("deleting the temporary zip failed", t)
+        }
+        if (!saved) deleteDocumentQuietly(uri)
+        return saved
+    }
+
+    /** Best effort: removes the empty file the "save as" dialog created for a save that failed. */
+    @Suppress("TooGenericExceptionCaught")
+    private fun deleteDocumentQuietly(uri: Uri) {
+        try {
+            DocumentsContract.deleteDocument(contentResolver, uri)
+        } catch (t: Throwable) {
+            AppLog.log("removing the unsaved document failed", t)
+        }
+    }
+
     private fun writeZipOrNull(): File? =
         try {
             DiagnosticsZip.write(applicationContext)
@@ -468,6 +545,7 @@ class MainActivity : ComponentActivity() {
 
     private companion object {
         const val MODEL_PICKER_MIME_TYPE = "*/*"
+        const val DIAGNOSTICS_MIME_TYPE = "application/zip"
 
         /** App preferences file and the key of the "Debug marks" switch; only read and written on `Dispatchers.IO`. */
         const val PREFS_NAME = "pose_tracker_prefs"

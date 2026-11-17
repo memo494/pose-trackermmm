@@ -49,13 +49,14 @@ internal fun CrashNotice(
 }
 
 /**
- * Share diagnostics, the short failure notice, and the log with its Show or Hide and Refresh buttons.
+ * Share diagnostics, Save diagnostics, the short notice (failure or "Saved"), and the log with its Show or Hide and Refresh buttons.
  * Stateless: the log text is refreshed only by the callbacks, there is no polling.
  */
 @Composable
 internal fun DiagnosticsSection(
     state: DiagnosticsUiState,
     onShareClick: () -> Unit,
+    onSaveClick: () -> Unit,
     onToggleLogClick: () -> Unit,
     onRefreshLogClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -64,16 +65,23 @@ internal fun DiagnosticsSection(
         Button(onClick = onShareClick, enabled = !state.sharing, modifier = Modifier.fillMaxWidth()) {
             Text(stringResource(R.string.diagnostics_share))
         }
+        OutlinedButton(onClick = onSaveClick, enabled = !state.sharing, modifier = Modifier.fillMaxWidth()) {
+            Text(stringResource(R.string.diagnostics_save))
+        }
         val notice = state.notice
         if (notice != null) {
             val noticeRes =
                 when (notice) {
                     DiagnosticsNotice.PREPARE_FAILED -> R.string.diagnostics_notice_prepare_failed
                     DiagnosticsNotice.SHARE_FAILED -> R.string.diagnostics_notice_share_failed
+                    DiagnosticsNotice.SAVED -> R.string.diagnostics_notice_saved
+                    DiagnosticsNotice.SAVE_FAILED -> R.string.diagnostics_notice_save_failed
                 }
+            val colors = MaterialTheme.colorScheme
+            val noticeColor = if (notice == DiagnosticsNotice.SAVED) colors.primary else colors.error
             Text(
                 text = stringResource(noticeRes),
-                color = MaterialTheme.colorScheme.error,
+                color = noticeColor,
                 style = MaterialTheme.typography.bodyMedium,
             )
         }

@@ -497,20 +497,25 @@ uses no accessibility service.
   average of weight `relockSignatureAlpha` (0.1) per frame. *Torso* (`TorsoRegion`): the rectangle through the
   shoulder and hip keypoints (COCO 5, 6, 11, 12, each score at least `relockKeypointMinScore` 0.5), else, only when
   the box is a standing body (height at least `relockFullBodyMinAspect` 1.8 × width), rows 0.25 to 0.6 of the box
-  and its middle 60 % of the width; cut by 10 % on every side and clipped to the image; never the head (the ring is
-  drawn there and is part of the capture). At most `relockMaxSamplePixels` (2000) pixels are read on a grid, and
+  and its middle 60 % of the width; else (M4d), when the box is not a standing body but both shoulders are confident
+  (a person at a desk, hips out of the picture), the **upper-body torso**: between the shoulders, from the lower
+  shoulder down by `relockUpperTorsoRatio` (0.8) × the horizontal distance between the shoulders (never above a
+  shoulder); when all four keypoints are confident but span no rectangle, nothing else is tried (fail closed); cut by
+  10 % on every side and clipped to the image; never the head (the ring is drawn there and is part of the capture). At most `relockMaxSamplePixels` (2000) pixels are read on a grid, and
   fewer than `relockMinSamplePixels` (150) mean no torso. A torso that clipping cut (`TorsoRect.clipped`: the person
   is partly out of the picture) is not added to the signature.
   *Pending:* when the held track is no longer shown and a signature exists, the lock **waits** for
   `relockMemoryMs` (60 s) of **frame-timestamp time** (HUD ticks and idle time do not count; a video paused for
   longer than that expires the lock at its first frame). It draws nothing (no ring), `hasLock` stays true, so a tap
-  on the handle ends it. Without a signature the lock simply ends (as in M4b).
+  on the handle ends it. Without a signature (no unclipped torso was ever read) the lock ends at once as `cleared (no
+  signature)` instead of judging candidates against nothing. The signature keeps filling on every matched, unclipped
+  frame while the lock is held; `lock: pending id=N frames=K` says how many frames filled it.
   *Candidates:* while the held track is matched the pipeline notes the highest track id of the tracker's list
   (`maxIdAtLastMatch`). While pending, a candidate is any **shown track matched in the frame whose id is higher**, so
   also a person who came back while the old track was still lost. Each candidate is judged on each of its first
   `relockJudgeFrames` (10) matched frames: every shown, matched track is sampled **once per frame** (a clipped or too
   small torso is "unsampled"), the candidate's Bhattacharyya distance to the signature `d` and the smallest distance
-  `next` of the others go to `RelockMatcher.judge`: accepted when `d ≤ relockMaxDistance` (0.30) and `next − d ≥
+  `next` of the others go to `RelockMatcher.judge`: accepted when `d ≤ relockMaxDistance` (0.40, M4d; 0.30 in M4c) and `next − d ≥
   relockMinMargin` (0.10). The lock moves at the first acceptance (the new track gets the double ring in that very
   state). A candidate that is not accepted in its window is counted (`lockRelockRejects`) and logged once, when the
   window ends. **Fail closed:** another shown, matched track that cannot be sampled makes the candidate ambiguous
@@ -557,10 +562,10 @@ uses no accessibility service.
   `trackRemovals`. The last six are the tracker's cumulative counters since Start (§6.3; `reset()` on a geometry
   change keeps them); all are 0 before the first frame. They are read on the capture thread at the HUD tick.
 - **Lock in the log and in `summary.txt` (M4c).** One log line per lock event (never per frame): `lock: set id=N`,
-  `lock: pending id=N`, `lock: relocked id=N -> M d=0.18 next=0.41` (`next=none` when nobody else was shown),
+  `lock: pending id=N frames=K` (K = frames blended into the signature), `lock: relocked id=N -> M d=0.18 next=0.41` (`next=none` when nobody else was shown),
   `lock: candidate id=M d=0.41 rejected (too far)` / `rejected (ambiguous, next=0.38)` (`next=unsampled` when
   another track could not be sampled) / `rejected (no torso)`, `lock: expired`, and `lock: cleared (handle | reset |
-  stop | replaced | track removed)`. The numbers `d` and `next` are what to read when tuning `relockMaxDistance` and
+  stop | replaced | no signature)`. The numbers `d` and `next` are what to read when tuning `relockMaxDistance` and
   `relockMinMargin`. Four counters follow `trackRemovals` in `summary.txt`: `locks` (locks set), `lockRelocks`,
   `lockRelockRejects` (candidates whose window ended without acceptance), `lockExpired`; since Start, read on the
   capture thread at the HUD tick, 0 before the first lock.
@@ -620,8 +625,9 @@ default 0.1) and the lock group (`lockHandleSizeDp` 16..96, 40; `lockMaxTapDista
 4, `relockGreyBins` 4, `relockMinValue` and `relockMinSaturation` 0.15, `relockSignatureAlpha` 0.1), torso
 (`relockTorsoShrink` 0.1, `relockBoxTopRatio` 0.25, `relockBoxBottomRatio` 0.6, `relockBoxWidthRatio` 0.6,
 `relockKeypointMinScore` 0.5, `relockFullBodyMinAspect` 1.8), sampling (`relockMaxSamplePixels` 2000,
-`relockMinSamplePixels` 150) and decision (`relockMemoryMs` 60000, `relockMaxDistance` 0.30, `relockMinMargin` 0.10,
-`relockJudgeFrames` 10). There is no `displayLeadMs`
+`relockMinSamplePixels` 150) and decision (`relockMemoryMs` 60000, `relockMaxDistance` 0.40, `relockMinMargin` 0.10,
+`relockJudgeFrames` 10); M4d adds `relockUpperTorsoRatio` 0.8 (0.2..2) and the check `relockMinSamplePixels` ≤
+`relockMaxSamplePixels` / `RELOCK_SAMPLE_GRID_SLACK` (4). There is no `displayLeadMs`
 (no prediction, §6.4).
 
 ### 7.2 Thermal policy (M5)
@@ -804,8 +810,8 @@ One session per milestone; M4 may need a second session for tuning on the phone.
   documented, plus the HUD may say "no frames".
 - Tuning sheet (sliders for the important `TrackerConfig` numbers): not built in M4b; later.
 - **Re-lock limits (M4c):** the colour signature cannot tell two people in similar clothes apart (then the ring does not
-  come back, by design); it is judged on the first 10 matched frames of a new track; `relockMaxDistance` 0.30 and
-  `relockMinMargin` 0.10 are guesses, to be tuned from the `d=` and `next=` values of the `lock:` log lines; the
+  come back, by design); it is judged on the first 10 matched frames of a new track; `relockMaxDistance` 0.40 (M4d, from the first
+  phone test) and `relockMinMargin` 0.10 are to be tuned from the `d=` and `next=` values of the `lock:` log lines; the
   phone shows how often the torso rows land on clothes and how often a returning person is half out of the picture
   when first shown. A video paused for more than `relockMemoryMs` expires a pending lock at its first frame.
 - Lock keep-alive by position (re-lock without colours): not built; the colour signature replaces it (§6.6).
@@ -818,11 +824,16 @@ answers hard questions. Each change is verified in the session with `scripts/ver
 and always by GitHub Actions, which is the source of truth. The owner's laptop is not used for builds.
 
 ## 15. Changes
+- **v1.3 (M4d, 2026-11-17):** re-lock tuning from the first phone test (plan `docs/plans/M4.md`). §6.6: `relockMaxDistance`
+  0.30 → 0.40; upper-body torso from the shoulders (`relockUpperTorsoRatio` 0.8) when the hips are not confident and the
+  box is not a standing body; four confident keypoints with no area fail closed; a lock with an empty signature ends
+  at once as `cleared (no signature)`. §6.7: `lock: pending id=N frames=K`. §7.1: the new field and the check
+  `relockMinSamplePixels` ≤ `relockMaxSamplePixels` / 4. §13: limits updated.
 - **v1.2 (M4c, 2026-11-17):** re-lock by clothing colours, documented as built (plan `docs/plans/M4.md`). (A) §6.6: the
   "no re-lock" bullet is replaced by the as-built description: torso signature (HSV histogram with grey bins, EMA),
   `TorsoRegion` (keypoints or a full-body box, clipped torsos and small samples are not used), pending for
   `relockMemoryMs` of frame time with no ring, candidates by id (`maxIdAtLastMatch`), judging on each of the first
-  `relockJudgeFrames` matched frames with every track sampled once per frame, accept at distance 0.30 and margin 0.10,
+  `relockJudgeFrames` matched frames with every track sampled once per frame, accept at distance 0.30 (0.40 since v1.3) and margin 0.10,
   fail closed on unsampled neighbours, ends (handle, replaced, reset, Stop, expiry), limits. (B) §5: `LockKeeper` in
   the flow and thread table (replaces the `lockedId` row; signatures are capture-only). (C) §6.7: the `lock:` log
   lines and the counters `locks`, `lockRelocks`, `lockRelockRejects`, `lockExpired`. (D) §7.1: the 18 `relock…`

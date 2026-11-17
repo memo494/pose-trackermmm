@@ -21,6 +21,11 @@ class TorsoRegionTest {
         boxBottomImg: Float = 220f,
         shoulderXs: FloatArray = floatArrayOf(100f, 140f),
         hipXs: FloatArray = floatArrayOf(105f, 135f),
+        rightShoulderScore: Float = 0.9f,
+        hipScore: Float = 0.9f,
+        shoulderYImg: Float = 60f,
+        rightShoulderYImg: Float = shoulderYImg,
+        hipYImg: Float = 140f,
     ): PoseDetection {
         val xy = FloatArray(keypointCount * 2)
         val scores = FloatArray(keypointCount)
@@ -36,10 +41,10 @@ class TorsoRegionTest {
             xy[k * 2 + 1] = yImg
             scores[k] = score
         }
-        put(TrackerConfig.KEYPOINT_LEFT_SHOULDER, shoulderXs[0], 60f, leftShoulderScore)
-        put(TrackerConfig.KEYPOINT_RIGHT_SHOULDER, shoulderXs[1], 60f, 0.9f)
-        put(TrackerConfig.KEYPOINT_LEFT_HIP, hipXs[0], 140f, 0.9f)
-        put(TrackerConfig.KEYPOINT_RIGHT_HIP, hipXs[1], 140f, 0.9f)
+        put(TrackerConfig.KEYPOINT_LEFT_SHOULDER, shoulderXs[0], shoulderYImg, leftShoulderScore)
+        put(TrackerConfig.KEYPOINT_RIGHT_SHOULDER, shoulderXs[1], rightShoulderYImg, rightShoulderScore)
+        put(TrackerConfig.KEYPOINT_LEFT_HIP, hipXs[0], hipYImg, hipScore)
+        put(TrackerConfig.KEYPOINT_RIGHT_HIP, hipXs[1], hipYImg, hipScore)
         return PoseDetection(boxLeftImg, boxTopImg, boxRightImg, boxBottomImg, 0.9f, xy, scores)
     }
 
@@ -98,12 +103,12 @@ class TorsoRegionTest {
     }
 
     @Test
-    fun keypointsWithNoWidth_fallBackToTheBox() {
+    fun confidentKeypointsWithNoWidth_failClosedInsteadOfUsingTheBox() {
         val detection = person(shoulderXs = floatArrayOf(120f, 120f), hipXs = floatArrayOf(120f, 120f))
 
-        assertThat(torso(detection)).isTrue()
+        assertThat(torso(detection)).isFalse()
 
-        assertThat(rect()).containsExactly(122, 82, 138, 108).inOrder()
+        assertThat(out.isEmpty).isTrue()
     }
 
     @Test
@@ -216,6 +221,130 @@ class TorsoRegionTest {
     fun anImageWithNoSize_givesNoTorso() {
         assertThat(torso(person(), widthImg = 0)).isFalse()
         assertThat(torso(person(), heightImg = 0)).isFalse()
+    }
+
+    /** Upper-body config: a quarter cut, and a torso half a shoulder width tall (exact in binary). */
+    private val upperConfig =
+        TrackerConfig(
+            relockTorsoShrink = 0.25f,
+            relockBoxBottomRatio = 0.5f,
+            relockBoxWidthRatio = 0.5f,
+            relockUpperTorsoRatio = 0.5f,
+        )
+
+    /** A person whose hips are not seen (a desk, the frame edge): a box that is not a whole body (1.2 tall per wide). */
+    private fun upperBodyOnly(
+        leftShoulderScore: Float = 0.9f,
+        rightShoulderScore: Float = 0.9f,
+        shoulderYImg: Float = 60f,
+    ): PoseDetection =
+        person(
+            leftShoulderScore = leftShoulderScore,
+            rightShoulderScore = rightShoulderScore,
+            hipScore = 0.1f,
+            boxBottomImg = 92f,
+            shoulderYImg = shoulderYImg,
+        )
+
+    @Test
+    fun withoutHips_theTorsoIsFromTheShouldersDownByTheUpperRatioTimesTheirWidth() {
+        assertThat(torso(upperBodyOnly(), upperConfig)).isTrue()
+
+        // Shoulders x 100..140 (width 40) at y 60; half of 40 down is y 80; a quarter of 40 and of 20 is cut.
+        assertThat(rect()).containsExactly(110, 65, 130, 75).inOrder()
+    }
+
+    @Test
+    fun theUpperBodyTorso_neverReachesAboveTheShoulders() {
+        assertThat(torso(upperBodyOnly(), TrackerConfig())).isTrue()
+
+        assertThat(out.topImg).isAtLeast(60)
+        assertThat(out.leftImg).isAtLeast(100)
+        assertThat(out.rightImg).isAtMost(140)
+    }
+
+    @Test
+    fun withoutHipsAndOneShoulderNotConfident_thereIsNoTorso() {
+        assertThat(torso(upperBodyOnly(leftShoulderScore = 0.4f), upperConfig)).isFalse()
+        assertThat(out.isEmpty).isTrue()
+        assertThat(torso(upperBodyOnly(rightShoulderScore = 0.4f), upperConfig)).isFalse()
+    }
+
+    @Test
+    fun withoutHipsButAWholeBodyBox_theBoxPartIsUsedNotTheUpperBody() {
+        val detection = person(hipScore = 0.1f)
+
+        assertThat(torso(detection, upperConfig)).isTrue()
+
+        // Box 100..160 x 20..220 (tall): rows 25 % to 50 % (70..120), the middle half of the width, a quarter cut.
+        assertThat(rect()).containsExactly(122, 82, 138, 108).inOrder()
+    }
+
+    @Test
+    fun shouldersWithNoWidth_giveNoUpperBodyTorso() {
+        val detection = person(hipScore = 0.1f, boxBottomImg = 92f, shoulderXs = floatArrayOf(120f, 120f))
+
+        assertThat(torso(detection, upperConfig)).isFalse()
+    }
+
+    @Test
+    fun anUpperBodyTorsoThatTheImageEdgeCuts_isMarkedClipped() {
+        assertThat(torso(upperBodyOnly(shoulderYImg = 70f), upperConfig, heightImg = 80)).isTrue()
+
+        assertThat(out.clipped).isTrue()
+    }
+
+    @Test
+    fun anUpperBodyTorsoInsideTheImage_isNotMarkedClipped() {
+        assertThat(torso(upperBodyOnly(), upperConfig)).isTrue()
+
+        assertThat(out.clipped).isFalse()
+    }
+
+    @Test
+    fun tiltedShoulders_theUpperBodyTorsoStartsAtTheLowerShoulder() {
+        val detection = person(hipScore = 0.1f, boxBottomImg = 120f, shoulderYImg = 100f, rightShoulderYImg = 70f)
+
+        assertThat(torso(detection, upperConfig)).isTrue()
+
+        // Shoulders (100, 100) and (140, 70): the torso starts at y 100, 20 down (half of the 40 between them).
+        assertThat(out.topImg).isAtLeast(100)
+        assertThat(rect()).containsExactly(110, 105, 130, 115).inOrder()
+    }
+
+    @Test
+    fun withFourConfidentKeypointsThatSpanNoRectangle_theBoxAndTheShouldersAreNotTried() {
+        // The hips are above the shoulders; the box is not a whole body, so the shoulders alone would give a torso.
+        val detection = person(hipYImg = 50f, boxBottomImg = 92f)
+
+        assertThat(torso(detection, upperConfig)).isFalse()
+
+        assertThat(out.isEmpty).isTrue()
+    }
+
+    @Test
+    fun withFourConfidentKeypointsThatSpanNoRectangle_aWholeBodyBoxIsNotUsedEither() {
+        assertThat(torso(person(hipYImg = 50f), upperConfig)).isFalse()
+    }
+
+    @Test
+    fun upperBody_aShoulderCoordinateThatIsNotFinite_givesNoTorso() {
+        for (bad in listOf(Float.NaN, Float.POSITIVE_INFINITY, Float.NEGATIVE_INFINITY)) {
+            val badX = person(hipScore = 0.1f, boxBottomImg = 92f, shoulderXs = floatArrayOf(100f, bad))
+            val badY = person(hipScore = 0.1f, boxBottomImg = 92f, shoulderYImg = bad)
+
+            assertThat(torso(badX, upperConfig)).isFalse()
+            assertThat(torso(badY, upperConfig)).isFalse()
+        }
+    }
+
+    @Test
+    fun upperBody_aBoxThatIsNotFinite_givesNoTorso() {
+        assertThat(torso(person(hipScore = 0.1f, boxBottomImg = Float.NaN), upperConfig)).isFalse()
+        val infiniteRight = person(hipScore = 0.1f, boxRightImg = Float.POSITIVE_INFINITY, boxBottomImg = 92f)
+        val nanTop = person(hipScore = 0.1f, boxTopImg = Float.NaN, boxBottomImg = 92f)
+        assertThat(torso(infiniteRight, upperConfig)).isFalse()
+        assertThat(torso(nanTop, upperConfig)).isFalse()
     }
 
     private companion object {

@@ -288,7 +288,7 @@ class AppearanceSignatureTest {
     }
 
     @Test
-    fun afterClear_aFailedReadLeavesNothingToBlendWith() {
+    fun afterClear_theFirstBlendSetsTheSignature() {
         val signature = signatureOf(solid(RED))
         signature.clear()
 

@@ -73,7 +73,13 @@ class RelockMatcherTest {
 
     @Test
     fun judge_rejectsACandidateFartherThanTheLimit() {
-        assertThat(matcher.judge(0.31f, Float.POSITIVE_INFINITY)).isEqualTo(RelockMatcher.Verdict.TOO_FAR)
+        assertThat(matcher.judge(0.41f, Float.POSITIVE_INFINITY)).isEqualTo(RelockMatcher.Verdict.TOO_FAR)
+    }
+
+    @Test
+    fun judge_withTheDefaults_acceptsAtDistance035ButNotWhenANeighbourIsWithinTheMargin() {
+        assertThat(matcher.judge(0.35f, Float.POSITIVE_INFINITY)).isEqualTo(RelockMatcher.Verdict.ACCEPT)
+        assertThat(matcher.judge(0.35f, 0.44f)).isEqualTo(RelockMatcher.Verdict.AMBIGUOUS)
     }
 
     @Test

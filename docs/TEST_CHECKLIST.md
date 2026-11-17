@@ -494,8 +494,8 @@ These checks need a cable and `adb`, or the benchmark screen of M1b, and are not
 - `summary.txt` lock fields (M4c), after `trackRemovals` and before the model fields: `locks` (locks set), `lockRelocks`
   (a pending lock moved to a returning person), `lockRelockRejects` (candidates whose 10-frame judge window ended
   without acceptance), `lockExpired` (memory ran out), cumulative since Start. The log lines are `lock: set id=N`,
-  `pending id=N`, `relocked id=N -> M d=… next=…`, `candidate id=M d=… rejected (too far | ambiguous, next=… | no
-  torso)`, `expired` and `cleared (handle | reset | stop | replaced | track removed)`. Read `d` (distance of the
-  returning person to the remembered colours; smaller is closer, accepted up to `relockMaxDistance` 0.30) and `next`
+  `pending id=N frames=K` (K = frames that filled the signature), `relocked id=N -> M d=… next=…`, `candidate id=M d=… rejected (too far | ambiguous, next=… | no
+  torso)`, `expired` and `cleared (handle | reset | stop | replaced | no signature)`. Read `d` (distance of the
+  returning person to the remembered colours; smaller is closer, accepted up to `relockMaxDistance` 0.40) and `next`
   (distance of the nearest other person; `none` = nobody else, `unsampled` = somebody could not be sampled) to tune
   `relockMaxDistance` and `relockMinMargin`.

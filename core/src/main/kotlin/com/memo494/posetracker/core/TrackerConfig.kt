@@ -168,14 +168,17 @@ package com.memo494.posetracker.core
  * @property relockMinMargin how much farther every other shown track must be than the candidate, in the same
  *   distance unit, in [0, [MAX_RELOCK_MIN_MARGIN]]; closer than that = doubt = no re-lock.
  * @property relockMinSamplePixels fewest pixels a torso sample must read, count, in
- *   [[MIN_RELOCK_MIN_SAMPLE_PIXELS], [MAX_RELOCK_MIN_SAMPLE_PIXELS]], not above [relockMaxSamplePixels]; fewer = no torso
- *   (too small to tell colours).
+ *   [[MIN_RELOCK_MIN_SAMPLE_PIXELS], [MAX_RELOCK_MIN_SAMPLE_PIXELS]], not above
+ *   [relockMaxSamplePixels] / [RELOCK_SAMPLE_GRID_SLACK]; fewer = no torso (too small to tell colours).
  * @property relockFullBodyMinAspect least height-to-width ratio (unitless) of a person box for its fixed torso part to be
  *   used when the keypoints are not all confident, in [[MIN_RELOCK_FULL_BODY_ASPECT], [MAX_RELOCK_FULL_BODY_ASPECT]]; a
  *   wider box (a half-visible or sitting person) gives no torso.
  * @property relockJudgeFrames how many of its first matched frames, count, a new track is compared with a pending lock
  *   (each frame is judged until one is accepted), in [[MIN_RELOCK_JUDGE_FRAMES], [MAX_RELOCK_JUDGE_FRAMES]]; one reject
  *   is counted and logged when the window ends without an acceptance.
+ * @property relockUpperTorsoRatio height of the upper-body torso, as a multiple of the horizontal distance between the
+ *   shoulders, below the lower shoulder, used when the hips are not confident, the box is not a whole body and both
+ *   shoulders are, unitless, in [[MIN_RELOCK_UPPER_TORSO_RATIO], [MAX_RELOCK_UPPER_TORSO_RATIO]].
  */
 data class TrackerConfig(
     val scoreThreshold: Float = DEFAULT_SCORE_THRESHOLD,
@@ -259,6 +262,7 @@ data class TrackerConfig(
     val relockMinSamplePixels: Int = DEFAULT_RELOCK_MIN_SAMPLE_PIXELS,
     val relockFullBodyMinAspect: Float = DEFAULT_RELOCK_FULL_BODY_ASPECT,
     val relockJudgeFrames: Int = DEFAULT_RELOCK_JUDGE_FRAMES,
+    val relockUpperTorsoRatio: Float = DEFAULT_RELOCK_UPPER_TORSO_RATIO,
 ) {
     init {
         require(scoreThreshold in MIN_SCORE_THRESHOLD..MAX_SCORE_THRESHOLD) {
@@ -521,8 +525,9 @@ data class TrackerConfig(
         require(relockMinSamplePixels in MIN_RELOCK_MIN_SAMPLE_PIXELS..MAX_RELOCK_MIN_SAMPLE_PIXELS) {
             "relockMinSamplePixels $relockMinSamplePixels outside [$MIN_RELOCK_MIN_SAMPLE_PIXELS, $MAX_RELOCK_MIN_SAMPLE_PIXELS]"
         }
-        require(relockMinSamplePixels <= relockMaxSamplePixels) {
-            "relockMinSamplePixels $relockMinSamplePixels above relockMaxSamplePixels $relockMaxSamplePixels"
+        require(relockMinSamplePixels <= relockMaxSamplePixels / RELOCK_SAMPLE_GRID_SLACK) {
+            "relockMinSamplePixels $relockMinSamplePixels above relockMaxSamplePixels $relockMaxSamplePixels " +
+                "/ $RELOCK_SAMPLE_GRID_SLACK (a grid sample may hold fewer points than its limit)"
         }
         require(relockFullBodyMinAspect in MIN_RELOCK_FULL_BODY_ASPECT..MAX_RELOCK_FULL_BODY_ASPECT) {
             "relockFullBodyMinAspect $relockFullBodyMinAspect outside " +
@@ -530,6 +535,10 @@ data class TrackerConfig(
         }
         require(relockJudgeFrames in MIN_RELOCK_JUDGE_FRAMES..MAX_RELOCK_JUDGE_FRAMES) {
             "relockJudgeFrames $relockJudgeFrames outside [$MIN_RELOCK_JUDGE_FRAMES, $MAX_RELOCK_JUDGE_FRAMES]"
+        }
+        require(relockUpperTorsoRatio in MIN_RELOCK_UPPER_TORSO_RATIO..MAX_RELOCK_UPPER_TORSO_RATIO) {
+            "relockUpperTorsoRatio $relockUpperTorsoRatio outside " +
+                "[$MIN_RELOCK_UPPER_TORSO_RATIO, $MAX_RELOCK_UPPER_TORSO_RATIO]"
         }
     }
 
@@ -1150,8 +1159,8 @@ data class TrackerConfig(
         /** Highest accepted [relockMemoryMs], in milliseconds: ten minutes. */
         const val MAX_RELOCK_MEMORY_MS = 600_000L
 
-        /** Default [relockMaxDistance], unitless; a guess until there is phone data (the `lock:` log lines tune it). */
-        const val DEFAULT_RELOCK_MAX_DISTANCE = 0.30f
+        /** Default [relockMaxDistance], unitless; tuned on the first phone test (re-locks 0.14-0.30, rejects from 0.3x). */
+        const val DEFAULT_RELOCK_MAX_DISTANCE = 0.40f
 
         /** Lowest accepted [relockMaxDistance]. */
         const val MIN_RELOCK_MAX_DISTANCE = 0.01f
@@ -1191,6 +1200,21 @@ data class TrackerConfig(
 
         /** Highest accepted [relockJudgeFrames]. */
         const val MAX_RELOCK_JUDGE_FRAMES = 100
+
+        /** Default [relockUpperTorsoRatio], unitless. */
+        const val DEFAULT_RELOCK_UPPER_TORSO_RATIO = 0.8f
+
+        /** Lowest accepted [relockUpperTorsoRatio]. */
+        const val MIN_RELOCK_UPPER_TORSO_RATIO = 0.2f
+
+        /** Highest accepted [relockUpperTorsoRatio]. */
+        const val MAX_RELOCK_UPPER_TORSO_RATIO = 2f
+
+        /**
+         * [relockMinSamplePixels] may be at most [relockMaxSamplePixels] divided by this: a grid over a rectangle that
+         * is just big enough holds up to this many times fewer points than the limit, and a sample must still pass.
+         */
+        const val RELOCK_SAMPLE_GRID_SLACK = 4
 
         /** COCO keypoint index of the left shoulder. */
         const val KEYPOINT_LEFT_SHOULDER = 5

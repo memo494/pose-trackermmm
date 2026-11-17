@@ -27,6 +27,7 @@ import com.memo494.posetracker.modelimport.LoadedModel
 import com.memo494.posetracker.modelimport.ModelSource
 import com.memo494.posetracker.modelimport.ModelStatusHolder
 import com.memo494.posetracker.modelimport.SessionModelLoader
+import com.memo494.posetracker.overlay.LockTarget
 import com.memo494.posetracker.overlay.OverlayWindow
 import java.util.concurrent.TimeUnit
 
@@ -41,7 +42,8 @@ import java.util.concurrent.TimeUnit
  *   any thread.
  * - **capture** (`pose-capture` [HandlerThread], created in [start]): the `ImageReader` listener, the
  *   projection callback, the display listener and the HUD tick all run on it. These fields are created,
- *   used and closed on it only and need no lock: `pipeline`, `thermalSampler`, `detector`, `imageReader`, `virtualDisplay`,
+ *   used and closed on it only and need no lock: `pipeline` (also read on main for the lock handle, `@Volatile`),
+ *   `thermalSampler`, `detector`, `imageReader`, `virtualDisplay`,
  *   `currentSize`, `contentSizeKnown`, `contentWidthPx`, `contentHeightPx`, `imageFrame`.
  * - **shared**: `captureThread` and `captureHandler` are written once by [start] on main and read by the
  *   teardown from any thread (`@Volatile`); `teardown` is thread-safe by itself.
@@ -67,7 +69,19 @@ internal class CaptureSession(
     private val onFinished: (failed: Boolean) -> Unit,
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val overlayWindow = OverlayWindow(context, config)
+    private val lockTarget =
+        object : LockTarget {
+            override val hasLock: Boolean get() = pipeline?.hasLock == true
+
+            override fun lock(id: Int) {
+                pipeline?.requestLock(id)
+            }
+
+            override fun unlock() {
+                pipeline?.clearLock()
+            }
+        }
+    private val overlayWindow = OverlayWindow(context, config, lockTarget = lockTarget)
     private val displayManager: DisplayManager? = context.getSystemService(DisplayManager::class.java)
     private val windowManager: WindowManager? = context.getSystemService(WindowManager::class.java)
     private val hudIntervalMs = TimeUnit.NANOSECONDS.toMillis(config.hudIntervalNs)
@@ -82,9 +96,15 @@ internal class CaptureSession(
     @Volatile
     private var failed = false
 
+    /**
+     * The frame pipeline: created and used on the capture thread, except that the lock handle on the main thread calls
+     * its thread-safe lock methods through [lockTarget] (hence `@Volatile`).
+     */
+    @Volatile
+    private var pipeline: FramePipeline? = null
+
     // Capture thread only (see the class KDoc).
     private val imageFrame = ImageFrame()
-    private var pipeline: FramePipeline? = null
     private var thermalSampler: ThermalSampler? = null
     private var detector: PoseDetector? = null
     private var imageReader: ImageReader? = null

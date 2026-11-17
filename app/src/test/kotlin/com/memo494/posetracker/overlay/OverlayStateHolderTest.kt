@@ -311,4 +311,42 @@ class OverlayStateHolderTest {
 
         assertThat(redraws).isEqualTo(2)
     }
+
+    @Test
+    fun aLockAppearing_requestsARedrawEvenWhenNothingElseChanged() {
+        holder.publish(state())
+        assertThat(redraws).isEqualTo(1)
+
+        holder.publish(state().copy(lockedId = 1))
+
+        assertThat(redraws).isEqualTo(2)
+    }
+
+    @Test
+    fun aLockThatStays_requestsNoFurtherRedraw() {
+        holder.publish(state().copy(lockedId = 1))
+        assertThat(redraws).isEqualTo(1)
+
+        holder.publish(state().copy(lockedId = 1))
+
+        assertThat(redraws).isEqualTo(1)
+    }
+
+    @Test
+    fun aLockEnding_requestsARedraw() {
+        holder.publish(state().copy(lockedId = 1))
+
+        holder.publish(state())
+
+        assertThat(redraws).isEqualTo(2)
+    }
+
+    @Test
+    fun aLockMovingToAnotherTrack_requestsARedraw() {
+        holder.publish(state().copy(lockedId = 1))
+
+        holder.publish(state().copy(lockedId = 2))
+
+        assertThat(redraws).isEqualTo(2)
+    }
 }

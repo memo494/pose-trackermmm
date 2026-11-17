@@ -122,6 +122,21 @@ package com.memo494.posetracker.core
  *   speed / track height; 0 = a fixed cutoff.
  * @property smoothDerivativeCutoffHz cutoff frequency, in hertz, of the filter that measures the head point's speed
  *   for the smoother, in [[MIN_SMOOTH_DERIVATIVE_CUTOFF_HZ], [MAX_SMOOTH_DERIVATIVE_CUTOFF_HZ]].
+ * @property fadeMinAlpha lowest opacity, unitless, of the marks of a `LOST` track: the opacity falls from 1 to
+ *   this as the lost time grows from 0 to [trackMaxLostMs] (`max(fadeMinAlpha, 1 - lostMs / trackMaxLostMs)`), in
+ *   [[MIN_FADE_MIN_ALPHA], [MAX_FADE_MIN_ALPHA]]; 1 = no fading.
+ * @property fadeStepAlpha smallest change of a track's opacity, unitless, that redraws the overlay (so the fade is
+ *   drawn in steps, not on every frame), in [[MIN_FADE_STEP_ALPHA], [MAX_FADE_STEP_ALPHA]].
+ * @property lockHandleSizeDp side of the small touchable handle window used to lock a person (tap-to-lock), in dp,
+ *   in [[MIN_LOCK_HANDLE_SIZE_DP], [MAX_LOCK_HANDLE_SIZE_DP]].
+ * @property lockMaxTapDistanceRatio farthest a tap may be from a track's head point to lock it, as a fraction of that
+ *   track's box height (unitless), in [[MIN_LOCK_MAX_TAP_DISTANCE_RATIO], [MAX_LOCK_MAX_TAP_DISTANCE_RATIO]]; a tap
+ *   farther from every track locks nothing.
+ * @property lockArmTimeoutMs how long, in milliseconds, the overlay stays touchable after the handle was tapped
+ *   (waiting for the tap on a person), in [[MIN_LOCK_ARM_TIMEOUT_MS], [MAX_LOCK_ARM_TIMEOUT_MS]]; see [lockArmTimeoutNs].
+ * @property lockRingStrokeDp stroke width of the locked person's rings, in dp, in [[MIN_STROKE_DP], [MAX_STROKE_DP]].
+ * @property lockOuterRingRatio radius of the second ring around the locked person's head ring, as a multiple of the
+ *   head ring's radius (unitless), in [[MIN_LOCK_OUTER_RING_RATIO], [MAX_LOCK_OUTER_RING_RATIO]].
  */
 data class TrackerConfig(
     val scoreThreshold: Float = DEFAULT_SCORE_THRESHOLD,
@@ -180,6 +195,13 @@ data class TrackerConfig(
     val smoothMinCutoffHz: Float = DEFAULT_SMOOTH_MIN_CUTOFF_HZ,
     val smoothBeta: Float = DEFAULT_SMOOTH_BETA,
     val smoothDerivativeCutoffHz: Float = DEFAULT_SMOOTH_DERIVATIVE_CUTOFF_HZ,
+    val fadeMinAlpha: Float = DEFAULT_FADE_MIN_ALPHA,
+    val fadeStepAlpha: Float = DEFAULT_FADE_STEP_ALPHA,
+    val lockHandleSizeDp: Float = DEFAULT_LOCK_HANDLE_SIZE_DP,
+    val lockMaxTapDistanceRatio: Float = DEFAULT_LOCK_MAX_TAP_DISTANCE_RATIO,
+    val lockArmTimeoutMs: Long = DEFAULT_LOCK_ARM_TIMEOUT_MS,
+    val lockRingStrokeDp: Float = DEFAULT_LOCK_RING_STROKE_DP,
+    val lockOuterRingRatio: Float = DEFAULT_LOCK_OUTER_RING_RATIO,
 ) {
     init {
         require(scoreThreshold in MIN_SCORE_THRESHOLD..MAX_SCORE_THRESHOLD) {
@@ -369,6 +391,28 @@ data class TrackerConfig(
             "smoothDerivativeCutoffHz $smoothDerivativeCutoffHz outside " +
                 "[$MIN_SMOOTH_DERIVATIVE_CUTOFF_HZ, $MAX_SMOOTH_DERIVATIVE_CUTOFF_HZ]"
         }
+        require(fadeMinAlpha in MIN_FADE_MIN_ALPHA..MAX_FADE_MIN_ALPHA) {
+            "fadeMinAlpha $fadeMinAlpha outside [$MIN_FADE_MIN_ALPHA, $MAX_FADE_MIN_ALPHA]"
+        }
+        require(fadeStepAlpha in MIN_FADE_STEP_ALPHA..MAX_FADE_STEP_ALPHA) {
+            "fadeStepAlpha $fadeStepAlpha outside [$MIN_FADE_STEP_ALPHA, $MAX_FADE_STEP_ALPHA]"
+        }
+        require(lockHandleSizeDp in MIN_LOCK_HANDLE_SIZE_DP..MAX_LOCK_HANDLE_SIZE_DP) {
+            "lockHandleSizeDp $lockHandleSizeDp outside [$MIN_LOCK_HANDLE_SIZE_DP, $MAX_LOCK_HANDLE_SIZE_DP]"
+        }
+        require(lockMaxTapDistanceRatio in MIN_LOCK_MAX_TAP_DISTANCE_RATIO..MAX_LOCK_MAX_TAP_DISTANCE_RATIO) {
+            "lockMaxTapDistanceRatio $lockMaxTapDistanceRatio outside " +
+                "[$MIN_LOCK_MAX_TAP_DISTANCE_RATIO, $MAX_LOCK_MAX_TAP_DISTANCE_RATIO]"
+        }
+        require(lockArmTimeoutMs in MIN_LOCK_ARM_TIMEOUT_MS..MAX_LOCK_ARM_TIMEOUT_MS) {
+            "lockArmTimeoutMs $lockArmTimeoutMs outside [$MIN_LOCK_ARM_TIMEOUT_MS, $MAX_LOCK_ARM_TIMEOUT_MS]"
+        }
+        require(lockRingStrokeDp in MIN_STROKE_DP..MAX_STROKE_DP) {
+            "lockRingStrokeDp $lockRingStrokeDp outside [$MIN_STROKE_DP, $MAX_STROKE_DP]"
+        }
+        require(lockOuterRingRatio in MIN_LOCK_OUTER_RING_RATIO..MAX_LOCK_OUTER_RING_RATIO) {
+            "lockOuterRingRatio $lockOuterRingRatio outside [$MIN_LOCK_OUTER_RING_RATIO, $MAX_LOCK_OUTER_RING_RATIO]"
+        }
     }
 
     /** Minimum time between two HUD text updates, in nanoseconds (duration, not a timestamp). */
@@ -378,6 +422,10 @@ data class TrackerConfig(
     /** Shortest time between two thermal reads, in nanoseconds (duration, not a timestamp). */
     val thermalSampleIntervalNs: Long
         get() = thermalSampleIntervalMs * NANOS_PER_MILLI
+
+    /** How long the overlay stays touchable after the lock handle was tapped, in nanoseconds (a duration). */
+    val lockArmTimeoutNs: Long
+        get() = lockArmTimeoutMs * NANOS_PER_MILLI
 
     /** Idle time at which tentative tracks are promoted, in nanoseconds (duration, not a timestamp). */
     val trackIdlePromoteNs: Long
@@ -829,6 +877,63 @@ data class TrackerConfig(
 
         /** Highest accepted [smoothDerivativeCutoffHz], in hertz. */
         const val MAX_SMOOTH_DERIVATIVE_CUTOFF_HZ = 30.0f
+
+        /** Default [fadeMinAlpha], unitless. */
+        const val DEFAULT_FADE_MIN_ALPHA = 0.25f
+
+        /** Lowest accepted [fadeMinAlpha]: invisible at the end of the fade. */
+        const val MIN_FADE_MIN_ALPHA = 0f
+
+        /** Highest accepted [fadeMinAlpha]: no fading. */
+        const val MAX_FADE_MIN_ALPHA = 1f
+
+        /** Default [fadeStepAlpha], unitless. */
+        const val DEFAULT_FADE_STEP_ALPHA = 0.1f
+
+        /** Lowest accepted [fadeStepAlpha]. */
+        const val MIN_FADE_STEP_ALPHA = 0.01f
+
+        /** Highest accepted [fadeStepAlpha]. */
+        const val MAX_FADE_STEP_ALPHA = 1f
+
+        /** Default [lockHandleSizeDp], in dp. */
+        const val DEFAULT_LOCK_HANDLE_SIZE_DP = 40.0f
+
+        /** Lowest accepted [lockHandleSizeDp], in dp. */
+        const val MIN_LOCK_HANDLE_SIZE_DP = 16.0f
+
+        /** Highest accepted [lockHandleSizeDp], in dp. */
+        const val MAX_LOCK_HANDLE_SIZE_DP = 96.0f
+
+        /** Default [lockMaxTapDistanceRatio], unitless: one box height. */
+        const val DEFAULT_LOCK_MAX_TAP_DISTANCE_RATIO = 1.0f
+
+        /** Lowest accepted [lockMaxTapDistanceRatio]. */
+        const val MIN_LOCK_MAX_TAP_DISTANCE_RATIO = 0.1f
+
+        /** Highest accepted [lockMaxTapDistanceRatio]. */
+        const val MAX_LOCK_MAX_TAP_DISTANCE_RATIO = 3.0f
+
+        /** Default [lockArmTimeoutMs], in milliseconds. */
+        const val DEFAULT_LOCK_ARM_TIMEOUT_MS = 5000L
+
+        /** Lowest accepted [lockArmTimeoutMs], in milliseconds. */
+        const val MIN_LOCK_ARM_TIMEOUT_MS = 1000L
+
+        /** Highest accepted [lockArmTimeoutMs], in milliseconds. */
+        const val MAX_LOCK_ARM_TIMEOUT_MS = 30_000L
+
+        /** Default [lockRingStrokeDp], in dp (thicker than the ordinary ring, [DEFAULT_DOT_STROKE_DP]). */
+        const val DEFAULT_LOCK_RING_STROKE_DP = 3.0f
+
+        /** Default [lockOuterRingRatio], unitless. */
+        const val DEFAULT_LOCK_OUTER_RING_RATIO = 1.3f
+
+        /** Lowest accepted [lockOuterRingRatio]: the second ring must lie outside the first. */
+        const val MIN_LOCK_OUTER_RING_RATIO = 1.05f
+
+        /** Highest accepted [lockOuterRingRatio]. */
+        const val MAX_LOCK_OUTER_RING_RATIO = 2.0f
 
         /** How far ahead, in seconds, the thermal headroom is forecast; 0 = the current headroom. */
         const val THERMAL_HEADROOM_FORECAST_SECONDS = 0

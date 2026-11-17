@@ -35,8 +35,11 @@ class HudFormatterTest {
         shiftXImg: Float = 0f,
     ): TrackSnapshot = TrackSnapshot.of(FakeTracks(count, 1, shiftXImg), 320, 240)
 
-    private fun warning(state: OverlayState): String {
-        val length = HudFormatter.formatWarning(state, buffer)
+    private fun warning(
+        state: OverlayState,
+        armed: Boolean = false,
+    ): String {
+        val length = HudFormatter.formatWarning(state, buffer, armed)
         return String(buffer, 0, length)
     }
 
@@ -145,6 +148,37 @@ class HudFormatterTest {
         val state = sample.copy(dotsVisible = false, warning = OverlayWarning.DETECTOR_UNAVAILABLE)
 
         assertThat(warning(state)).isEqualTo("Model not loaded: no detection")
+    }
+
+    @Test
+    fun warning_whileArmed_saysTapAPerson() {
+        assertThat(warning(sample, armed = true)).isEqualTo("tap a person")
+    }
+
+    @Test
+    fun warning_notArmed_isEmptyAsBefore() {
+        assertThat(warning(sample, armed = false)).isEmpty()
+    }
+
+    @Test
+    fun warning_armedHintFitsTheHudLine() {
+        val roomy = CharArray(TrackerConfig.HUD_LINE_CAPACITY_CHARS * 2)
+
+        val length = HudFormatter.formatWarning(sample, roomy, armed = true)
+
+        assertThat(length).isGreaterThan(0)
+        assertThat(length).isAtMost(TrackerConfig.HUD_LINE_CAPACITY_CHARS)
+    }
+
+    @Test
+    fun warning_aRealWarningWinsOverTheArmedHint() {
+        val missing = sample.copy(warning = OverlayWarning.DETECTOR_UNAVAILABLE)
+        val hidden = sample.copy(dotsVisible = false)
+        val note = sample.copy(warning = OverlayWarning.IMPORTED_MODEL_NOT_USED)
+
+        assertThat(warning(missing, armed = true)).isEqualTo("Model not loaded: no detection")
+        assertThat(warning(hidden, armed = true)).isEqualTo("Content not visible: dots hidden")
+        assertThat(warning(note, armed = true)).isEqualTo("Imported model not used: built-in model")
     }
 
     @Test

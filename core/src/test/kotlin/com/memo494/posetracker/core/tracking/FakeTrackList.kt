@@ -12,6 +12,8 @@ internal data class FakeTrack(
     val boxTopImg: Float = 40f,
     val boxRightImg: Float = 120f,
     val boxBottomImg: Float = 240f,
+    /** What `lostMs` reports; `null` = 40 ms for a lost track (alpha 0.95, under one fade step) and 0 otherwise. */
+    val lostMs: Float? = null,
 )
 
 /** A hand-built [TrackList] for tests; [state] is `TENTATIVE` when not shown, `LOST` when lost, else `CONFIRMED`. */
@@ -55,5 +57,9 @@ internal class FakeTrackList(
 
     override fun isHeadEstimated(index: Int): Boolean = entries[index].headEstimated
 
-    override fun lostMs(index: Int): Float = if (entries[index].lost) 100f else 0f
+    override fun lostMs(index: Int): Float = entries[index].lostMs ?: if (entries[index].lost) DEFAULT_LOST_MS else 0f
+
+    private companion object {
+        const val DEFAULT_LOST_MS = 40f
+    }
 }

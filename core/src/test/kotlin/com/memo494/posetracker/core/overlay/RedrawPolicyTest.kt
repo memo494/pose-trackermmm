@@ -13,6 +13,9 @@ import org.junit.jupiter.api.Test
 class RedrawPolicyTest {
     private val deadband = 0.5f
     private val minScore = 0.5f
+    private val fadeStep = 0.1f
+    private val maxLostMs = 800f
+    private val fadeMinAlpha = 0.25f
 
     private fun person(
         shiftX: Float = 0f,
@@ -294,7 +297,7 @@ class RedrawPolicyTest {
     private fun tracksChanged(
         previous: TrackSnapshot,
         current: TrackSnapshot,
-    ): Boolean = RedrawPolicy.tracksChanged(previous, current, deadband)
+    ): Boolean = RedrawPolicy.tracksChanged(previous, current, deadband, fadeStep, maxLostMs, fadeMinAlpha)
 
     @Test
     fun tracksChanged_identicalSnapshots_isFalse() {
@@ -367,6 +370,62 @@ class RedrawPolicyTest {
         assertThat(tracksChanged(tracks(FakeTrack(1)), tracks(FakeTrack(1, headEstimated = true)))).isFalse()
     }
 
+    private fun lostAt(lostMs: Float): TrackSnapshot = tracks(FakeTrack(1, lost = true, lostMs = lostMs))
+
+    @Test
+    fun tracksChanged_aFadeStepOfTheAlpha_isTrue() {
+        // 100 ms -> alpha 0.875, 200 ms -> 0.75: a step of 0.125.
+        assertThat(tracksChanged(lostAt(100f), lostAt(200f))).isTrue()
+    }
+
+    @Test
+    fun tracksChanged_aFadeBelowTheStep_isFalse() {
+        // 100 ms -> 0.875, 150 ms -> 0.8125: 0.0625.
+        assertThat(tracksChanged(lostAt(100f), lostAt(150f))).isFalse()
+    }
+
+    @Test
+    fun tracksChanged_theFadeAccumulatesAgainstThePreviousDrawnSnapshot() {
+        val drawn = lostAt(100f)
+
+        assertThat(tracksChanged(drawn, lostAt(150f))).isFalse()
+        assertThat(tracksChanged(drawn, lostAt(200f))).isTrue()
+    }
+
+    @Test
+    fun tracksChanged_aFadeInTheOtherDirection_isTrue() {
+        assertThat(tracksChanged(lostAt(200f), lostAt(100f))).isTrue()
+    }
+
+    @Test
+    fun tracksChanged_aLostTrackThatRecovered_isTrueWhenTheAlphaJumpsByAStep() {
+        assertThat(tracksChanged(lostAt(300f), tracks(FakeTrack(1)))).isTrue()
+        assertThat(tracksChanged(tracks(FakeTrack(1)), lostAt(300f))).isTrue()
+    }
+
+    @Test
+    fun tracksChanged_whereBothAlphasAreTheFloor_isFalse() {
+        assertThat(tracksChanged(lostAt(700f), lostAt(800f))).isFalse()
+    }
+
+    @Test
+    fun tracksChanged_aFadeOnTheSecondTrack_isTrue() {
+        val previous = tracks(FakeTrack(1), FakeTrack(2, lost = true, lostMs = 100f))
+        val current = tracks(FakeTrack(1), FakeTrack(2, lost = true, lostMs = 200f))
+
+        assertThat(tracksChanged(previous, current)).isTrue()
+    }
+
+    @Test
+    fun marks_aFadeStepOfALostTrack_redraws() {
+        assertThat(redrawMarks(previousTracks = lostAt(100f), currentTracks = lostAt(200f))).isTrue()
+    }
+
+    @Test
+    fun marks_aFadeBelowTheStep_doesNotRedraw() {
+        assertThat(redrawMarks(previousTracks = lostAt(100f), currentTracks = lostAt(150f))).isFalse()
+    }
+
     /** Copies of the track with id 1 in which exactly one of the six coordinates moved by [shift]. */
     private fun everyMovedCopy(shift: Float): List<FakeTrack> {
         val base = FakeTrack(1)
@@ -405,6 +464,9 @@ class RedrawPolicyTest {
             keypointMinScore = minScore,
             debugMarks = debugMarks,
             hudDue = hudDue,
+            fadeStepAlpha = fadeStep,
+            maxLostMs = maxLostMs,
+            fadeMinAlpha = fadeMinAlpha,
         )
 
     @Test

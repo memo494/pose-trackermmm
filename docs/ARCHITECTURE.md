@@ -1,4 +1,4 @@
-# pose-tracker-android — Architecture (v1.0)
+# pose-tracker-android — Architecture (v1.1)
 
 Real-time Android app: a screen-capture overlay that draws a stable, low-latency dot on each person's head
 over any other app (video, stream, game), using YOLO26n-pose on-device. Built and modified by AI coding agents (Claude Code, Codex); built only
@@ -114,7 +114,7 @@ Single-app capture mode (`MediaProjectionConfig` for a single window), gallery-v
   - the vendored decoder **allocates per frame** (`LiteRtModel.kt:198-202`, `PoseEstimator.kt:105-150`), which
     breaks AGENTS rule 8. Our own code complies from M0b; the decoder is made allocation-free in M1b (plan
     decision D2; M1 was split in M1a and M1b, §12) and the issue is logged in `third_party/ULTRALYTICS.md` until then.
-- **What upstream does not have (our work):** screen capture + overlay, tracking/IDs, smoothing and prediction,
+- **What upstream does not have (our work):** screen capture + overlay, tracking/IDs, smoothing, fading and lock,
   lock, diagnostics, benchmark, thermal policy, tests (upstream has no Android tests).
 - **Sync policy:** no automatic updates. The lead may propose a sync to a newer upstream commit as its own PR.
 
@@ -200,7 +200,10 @@ Dependencies: `app → detector → core`, `app → core`. Nothing else.
      TrackSnapshot.EMPTY
 [main thread — overlay View]
   RedrawPolicy.shouldRedrawMarks says changed → invalidate → onDraw: Img→View (FitCenter) → brackets and
-     ring per track (the head points are already smoothed; forward prediction from M4b)
+     ring per track (the head points are already smoothed; a LOST track is drawn faded, §6.5; the locked
+     track gets a double ring, §6.6)
+[main thread — lock handle window]
+  tap on the handle → LockController (§6.6) → FramePipeline.requestLock / clearLock (AtomicInteger)
 ```
 
 | Object | Owner thread | Rule |
@@ -218,7 +221,9 @@ Dependencies: `app → detector → core`, `app → core`. Nothing else.
 | Imported model file (hash check) | capture | the capture thread hashes `model-<sha16>.tflite` against its meta before loading it |
 | Imported model file (hash check after a probe trip) | IO worker / capture | `ImportedModelStore.storedFileMatches` reads the file once, only for a probe trip with a meta and a file: on `Dispatchers.IO` for the control screen and on the capture thread at Start; refuses the main thread |
 | `OverlayState` | made on capture, read on main | immutable; one new per processed frame, per HUD tick and per geometry change |
-| Overlay `View`, `WindowManager` calls, Predictor state (M4b) | main | plain classes, preallocated; no work except drawing |
+| Overlay `View`, lock handle window, `LockController` / `LockArming`, `WindowManager` calls (M4b) | main | plain classes, preallocated; no work except drawing and the lock flow; the arming timeout is a main-looper `Handler` runnable |
+| `FramePipeline.lockedId` (M4b) | UI writes, capture reads and clears | `AtomicInteger`, -1 = none; `requestLock` / `clearLock` from the UI thread; the capture thread keeps it in every published state only while that id is among the state's shown tracks, else `compareAndSet(id, -1)`, so a request made meanwhile is not lost |
+| `CaptureSession.pipeline` (M4b) | written on capture, read on main | `@Volatile`; main reads it only to call the thread-safe lock methods of `FramePipeline` through `LockTarget` |
 | TrackerConfig | DataStore → StateFlow | applied at next frame boundary |
 
 - **Copy, then close, then infer:** `maxImages = 2`; copy the frame out (`RowCopy`: handles `rowStride` padding
@@ -366,7 +371,7 @@ tracks, index loops); deterministic.
   missing for 0.5 s while moving at 2 h/s gets a new id; a person faster than about 1 h/s whose picture freezes
   without a frozen frame gets a new id afterwards.
 
-### 6.4 Smoothing (built in M4a) and prediction (M4b)
+### 6.4 Smoothing (built in M4a); no forward prediction (decided in M4b)
 - **The display smoother** (`core/tracking/HeadSmoother`, plan `docs/plans/M4.md`) runs on the capture thread
   between `Tracker.update` and the snapshot (`TrackSnapshot.ofSmoothed`, with the frame's timestamp, the one the
   tracker was given). The tracker's own state is never touched: association and lifecycle see the raw head point.
@@ -386,19 +391,23 @@ tracks, index loops); deterministic.
 - **Measured on the reference model** (`docs/plans/M4_sim/euro.py`, 8 seeds): jitter ratio of a still person
   0.51 → 0.10 at 20 fps and 0.37 → 0.05 at 30 fps; walking lag +0.37 / +0.50 frame; overshoot after an abrupt
   stop ≤ 0.04 h. In the code tests: jitter ratio ≤ 0.2 (measured 0.19), lag 0.35 frame, overshoot 0.
-- **Prediction looks forward (M4b, not built).** The detection describes the screen at `image.timestamp`; the
-  content is already on screen and has moved on by the time the result is drawn (capture → copy → inference →
-  handoff → next vsync). Render target time `t = now + displayLeadMs` (default tuned in M4b, `TrackerConfig`);
-  there is no camera-preview latency to subtract any more. Extrapolate `pos + v·clamp(t − lastUpdate, 0, 80 ms)`,
-  scaled by velocity confidence (from covariance). After an idle gap (§6.3) nothing is extrapolated.
-- Lost tracks drawn faded and removed tracks fading out over 150 ms are M4b too.
+- **No forward prediction (M4b decision, measured).** The detection describes the screen at `image.timestamp`, and the
+  content has moved on by the time the result is drawn, so a lead (`pos + v · lead`) was considered. The reference
+  model (`docs/plans/M4_sim/pred.py`: smoothed point plus the tracker's velocity times the lead; a walk then an
+  abrupt stop and a still person, 6 seeds) shows no gain: at 20 fps a lead of 30 / 50 / 70 ms leaves the mean error
+  of a walker unchanged (0.021 h → 0.021 / 0.023 / 0.023 h) because the smoother lags only a third of a frame, but
+  raises the jitter ratio of a still person from 0.10 to 0.29 / 0.43 / 0.58 and the overshoot after a stop from 0.026
+  to 0.056 / 0.081 / 0.112 h (30 fps alike). So the dot is drawn at the smoothed point of the newest frame; there is
+  no `displayLeadMs`.
+- Lost tracks are drawn faded (§6.5). Removed tracks do not fade out separately: a track is removed only after the
+  fade has ended.
 - Any redraw this needs between frames obeys the invalidate rules in §6.5 (it may only run while a dot actually
   moves by more than the deadband).
 
 ### 6.5 Overlay rules (plain `View`)
 The overlay is a plain `View` (not `ComposeView`) in a `TYPE_APPLICATION_OVERLAY` window.
 - **Window:** `FLAG_NOT_TOUCHABLE | FLAG_NOT_FOCUSABLE | FLAG_LAYOUT_IN_SCREEN | FLAG_LAYOUT_NO_LIMITS`;
-  display cutout mode `ALWAYS` (API 30+) / `SHORT_EDGES` (28–29); `setFitInsetsTypes(0)`. Taps reach the app below.
+  display cutout mode `ALWAYS` (API 30+) / `SHORT_EDGES` (28–29); `setFitInsetsTypes(0)`. Taps reach the app below, except for the one tap while the lock is armed (§6.6).
 - **Alpha cap (C1-A):** `LayoutParams.alpha` ≤ `InputManager.getMaximumObscuringOpacityForTouch()` (0.8, API 31+;
   on older versions the `TrackerConfig` fallback cap, also 0.8). Above it Android 12+ **blocks touches to the app
   below**. The on-phone check is an empty logcat for "Untrusted touch due to occlusion".
@@ -406,7 +415,8 @@ The overlay is a plain `View` (not `ComposeView`) in a `TYPE_APPLICATION_OVERLAY
   (`postInvalidateOnAnimation`) would create redraw → new frame → inference → redraw. Therefore: **no
   free-running loop**; call `invalidate()` only when a new snapshot differs from the drawn one by more than a
   sub-pixel deadband (a pure function, unit tested); HUD text updates at most 2 Hz (`TrackerConfig`).
-  Since M3b the decision is `RedrawPolicy.shouldRedrawMarks` (`OverlayStateHolder.publish`), in this order: HUD
+  Since M3b the decision is `RedrawPolicy.shouldRedrawMarks` (`OverlayStateHolder.publish`; M4b: the holder also
+  redraws whenever `OverlayState.lockedId` differs from the drawn state), in this order: HUD
   due → warning changed → tracks (`RedrawPolicy.tracksChanged`: the count or an id differs at an index, or a head
   coordinate or a box edge moved by more than the deadband; `isLost` and `isHeadEstimated` change no pixel and
   are not compared; an unshown side counts as empty) → only with `debugMarks` also the detection comparison of
@@ -437,7 +447,12 @@ The overlay is a plain `View` (not `ComposeView`) in a `TYPE_APPLICATION_OVERLAY
   corner brackets at the track's box (`core/overlay/CornerBrackets`, `boxCornerRatio` of each box side, instead
   of the full box) and a head ring at the tracked head point with radius
   `max(headRingRadiusRatio × box width, minHeadRingRadiusDp)` (`core/overlay/HeadRing`). A LOST track is drawn
-  like a CONFIRMED one until M4 (fading is M4). The raw detections (full box, keypoint dots, no ring) and the
+  faded (M4b): the brackets and the ring have the opacity `MarkFade.alpha = max(fadeMinAlpha, 1 − lostMs / trackMaxLostMs)`
+  (`fadeMinAlpha` 0.25), from the track's `lostMs` in the snapshot (0 unless LOST), so the marks fade over about
+  0.8 s instead of staying full and then vanishing. The fade is drawn in steps: `RedrawPolicy.tracksChanged` also
+  returns true when a track's opacity changed by `fadeStepAlpha` (0.1) or more. On a paused screen no frames come,
+  so the fade advances at the 2 Hz HUD tick (`TrackSnapshot.ofIdle` adds the idle time to `lostMs`, capped at
+  `trackMaxLostMs`): about two steps. The raw detections The raw detections (full box, keypoint dots, no ring) and the
   track ids (a number above the top-left corner of each track's box) are drawn only with `debugMarks`
   (`TrackerConfig`, switch **Debug marks (box and body points)** on the control screen, read when a session
   starts). Why: the marks are inside the capture, and offline the box and
@@ -445,16 +460,33 @@ The overlay is a plain `View` (not `ComposeView`) in a `TYPE_APPLICATION_OVERLAY
   was detected again: blinking); the measured table is in `docs/plans/M0c.md` ("Measured after T1"). The check on
   the phone is in `docs/TEST_CHECKLIST.md` (M0c) and the open item in §13.
 
-### 6.6 Target lock (M4)
-- The overlay window stays not touchable. Locking uses a **small touchable handle window** (separate
-  `TYPE_APPLICATION_OVERLAY`, tiny, at a screen edge). Tapping the handle **arms** the overlay for exactly one
-  tap: the overlay becomes touchable (and shows the armed state), the next tap goes to the nearest confirmed
-  track (tap View → Img via inverse `FitCenter`), then the overlay is not touchable again. Arming also times
-  out (`TrackerConfig`). While armed, the alpha cap (§6.5) still applies. No confirmed track near the tap →
-  nothing is locked (fail closed).
-- Prefer keeping the locked track alive (2 s) over re-locking.
-  Re-lock candidates: tracks born after the loss, within `R = min(0.5h + |v|·t, 1.5h)` of last prediction,
-  height ratio 0.7–1.4; else unlock. The 2 s lock timeout does not run during an idle gap (§6.3).
+### 6.6 Target lock (M4b, as built)
+Display-only: the lock changes how the overlay draws one person. The app never injects input into another app and
+uses no accessibility service.
+- **The overlay window stays not touchable.** Locking uses a **small touchable handle window** (`LockHandleView`,
+  its own `TYPE_APPLICATION_OVERLAY`, `FLAG_NOT_FOCUSABLE`, `lockHandleSizeDp` 40, at the right screen edge in the
+  vertical middle, content description in `strings.xml`). It is added after the overlay window and removed with it,
+  on the main thread; if the system refuses it the overlay still works, without locking.
+- **Flow** (`LockController`, pure Kotlin, tested; `LockArming` is the clocked state machine). A tap on the handle:
+  when a person is locked it **unlocks**; else when armed it **cancels** the arming (a toggle); else it **arms**:
+  the overlay window loses `FLAG_NOT_TOUCHABLE` (`updateViewLayout`), the HUD warning line shows the hint
+  `tap a person` (a view-local flag drawn with the lowest priority, so a real warning wins; not part of
+  `OverlayState`), and a main-looper timeout of `lockArmTimeoutMs` (5000) starts. The next finger-up on the overlay
+  is mapped View → Img with the view's current `FitCenter` (`viewToImgX/Y`) against the state drawn last, and
+  `LockPicker` returns the id of the **nearest shown track** (a LOST track counts) whose head point is within
+  `lockMaxTapDistanceRatio` (1.0) × **that track's** box height of the tap; none → nothing is locked (fail
+  closed). After that tap, after the timeout, when the handle cancels, and when the window is removed with the
+  session, the overlay gets `FLAG_NOT_TOUCHABLE` back (a failed `updateViewLayout` then removes the overlay and
+  the handle rather than leave a touchable window). While armed the alpha cap (§6.5) still applies.
+- **Threads:** the lock id travels UI → capture in `FramePipeline.lockedId` (`AtomicInteger`, -1 = none, §5). Every
+  state the pipeline publishes carries it only while that id is among the state's shown tracks; otherwise the
+  capture thread clears it. So the lock ends when its track is removed (after `trackMaxLostMs`) and on any reset
+  (rotation, new display or capture size).
+- **No keep-alive and no re-lock in M4b:** when the track is removed the lock simply ends; a new track, even of the
+  same person, has a new id and is not locked. (Later idea, not built: keep the lock for 2 s and re-lock to a track
+  born after the loss within `R = min(0.5h + |v|·t, 1.5h)` of the last position with a height ratio of 0.7 to 1.4.)
+- **Drawing:** the locked track's head ring uses `lockRingStrokeDp` (3) and a second ring at radius ×
+  `lockOuterRingRatio` (1.3); its brackets are unchanged. It fades like any LOST track.
 
 ### 6.7 Diagnostics (`app/diagnostics`) — built in M0
 - Ring-buffer logger (also to logcat) + in-app log screen.
@@ -535,7 +567,10 @@ EMA, fallback and noise ratios), Kalman (acceleration and noise ratios, initial 
 limits per stage) and lifecycle (high and birth scores, confirm hits, idle promotion, lost time, exit margin,
 `maxTracks`). M4a adds `trackTentativeMaxMisses` (frames, 0..5, default 1) to the lifecycle group and the
 smoother group (`smoothEnabled`, `smoothMinCutoffHz` 0.05..30, `smoothBeta` 0..100, `smoothDerivativeCutoffHz`
-0.05..30); defaults in §6.4.
+0.05..30); defaults in §6.4. M4b adds the fade group (`fadeMinAlpha` 0..1, default 0.25; `fadeStepAlpha` 0.01..1,
+default 0.1) and the lock group (`lockHandleSizeDp` 16..96, 40; `lockMaxTapDistanceRatio` 0.1..3, 1.0; `lockArmTimeoutMs`
+1000..30000, 5000; `lockRingStrokeDp` 0.5..6, 3; `lockOuterRingRatio` 1.05..2, 1.3). There is no `displayLeadMs`
+(no prediction, §6.4).
 
 ### 7.2 Thermal policy (M5)
 If thermal status ≥ `MODERATE` or headroom forecast > 0.9: step down the analysis fps cap 60 → 30; then 416 → 320;
@@ -677,7 +712,7 @@ Agents may not loosen asserted thresholds (protected files).
 | M1b | Later: raw-output goldens and the golden decode test, allocation-free pure-Kotlin decoder (D2), benchmark screen with CSV and soak mode, a bundled landscape model with a per-geometry choice | real numbers for fps / ms / heat; no per-frame allocation in the decoder |
 | M2 | Img→View hardening: `FitCenter` extended and checked on the phone across rotation, cutout and resize events (no camera) | green dots exactly on heads in portrait and landscape |
 | M3 | **M3a** (done): tracker + Kalman in `core`, scenario tests S1-S14 (20/30/60 fps, idle gaps); **M3b** (done): the tracker in the app (`FramePipeline` → `TrackSnapshot` → overlay; rings and brackets from tracks, `trk N` in the HUD, track ids with `debugMarks`, tracker counters in `summary.txt`); plan `docs/plans/M3.md` | rings and brackets from tracks that bridge short misses, a ring on a still picture after 0.4 to 0.9 s, `trk N` in the HUD, `track…` lines in the diagnostics |
-| M4 | **M4a** (done): tentative tracks survive one missed frame (rings come sooner), display smoother (OneEuro per shown track, box moves with the head), scenario S15; plan `docs/plans/M4.md`; **M4b**: forward prediction, fading LOST tracks, handle-window tap-to-lock, tuning sheet | M4a: rings that come sooner and do not tremble on a still person; M4b: smooth dot without lag, tap-to-lock, tuning sliders |
+| M4 | **M4a** (done): tentative tracks survive one missed frame (rings come sooner), display smoother (OneEuro per shown track, box moves with the head), scenario S15; plan `docs/plans/M4.md`; **M4b** (done except the phone check): no forward prediction (measured, §6.4), fading LOST tracks, handle-window tap-to-lock; the tuning sheet is not built | M4a: rings that come sooner and do not tremble on a still person; M4b: LOST rings fade, tap-to-lock with a double ring |
 | M5 | Thermal policy, perf pass, lifecycle/permission polish, replay mode | stable over 30 min |
 
 One session per milestone; M4 may need a second session for tuning on the phone.
@@ -715,7 +750,8 @@ One session per milestone; M4 may need a second session for tuning on the phone.
   (`third_party/ULTRALYTICS.md`).
 - **DRM / secure apps capture black** (`FLAG_SECURE`): expected and unfixable by us; no dots there. Only
   documented, plus the HUD may say "no frames".
-- `displayLeadMs` default — tuned on the phone in M4b.
+- Tuning sheet (sliders for the important `TrackerConfig` numbers): not built in M4b; later.
+- Lock keep-alive and re-lock after a loss: not built (§6.6).
 
 ## 14. Build environment (summary; details in BUILD_PLAN.md)
 Code is written in Claude Code cloud sessions (claude.ai/code) on this repo by the AI team in
@@ -725,6 +761,14 @@ answers hard questions. Each change is verified in the session with `scripts/ver
 and always by GitHub Actions, which is the source of truth. The owner's laptop is not used for builds.
 
 ## 15. Changes
+- **v1.1 (M4b, 2026-11-17):** fading and tap-to-lock, documented as built (plan `docs/plans/M4.md`). (A) §6.4: no forward
+  prediction, with the measured numbers (the lead raises jitter and overshoot and leaves the walker's error
+  unchanged); `displayLeadMs` is gone. (B) §6.5: LOST tracks fade with `MarkFade` (`fadeMinAlpha`, `fadeStepAlpha`),
+  `TrackSnapshot.lostMs` (idle adds, capped), redraw on a fade step, the paused-screen fade at the HUD tick; the
+  redraw also follows `lockedId`. (C) §6.6 rewritten to the code: handle window, `LockController` / `LockArming` /
+  `LockPicker`, arm / tap / unlock / cancel flow, no keep-alive or re-lock, double ring. (D) §5: the lock in the data
+  flow and thread table (`FramePipeline.lockedId`, `CaptureSession.pipeline` `@Volatile`, lock flow on main). (E) §7.1:
+  fade and lock fields; §12: M4b row.
 - **v1.0 (M4a, 2026-11-17):** faster confirmation and a display smoother, documented as built (plan
   `docs/plans/M4.md`). (A) §6.3: a tentative track survives `trackTentativeMaxMisses` (1) missed frames (coasts,
   not shown, hit counter kept) instead of dying on the first; scenario S15 (score 0.4, frames dropped at random,

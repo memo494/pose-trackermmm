@@ -36,6 +36,11 @@ private const val SHAKE_IMG = 6f
 private const val SHAKY_FRAMES = 40
 private const val SAME_HEAD_TOLERANCE_IMG = 0.01f
 private const val SMOOTHING_MAX_TRAVEL_RATIO = 0.5f
+private const val IDLE_MS = 400L
+private const val SMALL_IDLE_STEP_MS = 10L
+private const val BIG_IDLE_STEP_MS = 150L
+private const val REMOVAL_IDLE_MS = 2000L
+private const val LOST_MS_TOLERANCE = 1f
 
 /** An image that records its reads and closes in [events]. */
 private class FakeFrameImage(
@@ -1426,5 +1431,227 @@ class FramePipelineTest {
 
         assertThat(states.last().tracks.count).isEqualTo(1)
         assertThat(states.last().tracks.headXImg(0)).isEqualTo(trackersHeadXImg)
+    }
+
+    /** Three frames with a person (a confirmed track), then one frame without: the track is LOST; returns the time of that frame. */
+    private fun lostAfterOneMiss(pipeline: FramePipeline): Long {
+        detector.people = listOf(walker())
+        val confirmedAtMs = framesFrom(pipeline, 0, 3)
+        detector.people = emptyList()
+        val missAtMs = confirmedAtMs + FRAME_STEP_MS
+        frameAt(pipeline, missAtMs)
+        return missAtMs
+    }
+
+    @Test
+    fun aFrameThatLosesTheTrack_publishesItAsLostWithTheTrackersLostMs() {
+        val pipeline = trackingPipeline()
+
+        lostAfterOneMiss(pipeline)
+
+        val tracks = states.last().tracks
+        assertThat(tracks.count).isEqualTo(1)
+        assertThat(tracks.isLost(0)).isTrue()
+        assertThat(tracks.lostMs(0)).isWithin(LOST_MS_TOLERANCE).of(FRAME_STEP_MS.toFloat())
+    }
+
+    @Test
+    fun hudTick_onALostTrack_publishesTheLostMsPlusTheIdleTime() {
+        val pipeline = trackingPipeline()
+        val missAtMs = lostAfterOneMiss(pipeline)
+
+        tickAt(pipeline, missAtMs + IDLE_MS)
+
+        val tracks = states.last().tracks
+        assertThat(tracks.count).isEqualTo(1)
+        assertThat(tracks.isLost(0)).isTrue()
+        assertThat(tracks.lostMs(0)).isWithin(LOST_MS_TOLERANCE).of(FRAME_STEP_MS + IDLE_MS.toFloat())
+    }
+
+    @Test
+    fun hudTick_onALostTrack_republishesOnlyWhenTheFadeMovedByAStep() {
+        val pipeline = trackingPipeline()
+        val missAtMs = lostAfterOneMiss(pipeline)
+        tickAt(pipeline, missAtMs + IDLE_MS)
+        val first = states.last().tracks
+
+        tickAt(pipeline, missAtMs + IDLE_MS + SMALL_IDLE_STEP_MS)
+        assertThat(states.last().tracks).isSameInstanceAs(first)
+
+        tickAt(pipeline, missAtMs + IDLE_MS + BIG_IDLE_STEP_MS)
+        val second = states.last().tracks
+        assertThat(second).isNotSameInstanceAs(first)
+        assertThat(second.lostMs(0)).isGreaterThan(first.lostMs(0) + BIG_IDLE_STEP_MS - LOST_MS_TOLERANCE)
+    }
+
+    @Test
+    fun hudTick_onAConfirmedTrack_leavesItsLostMsAtZero() {
+        val pipeline = trackingPipeline()
+        detector.people = listOf(walker())
+        val lastMs = framesFrom(pipeline, 0, 3)
+
+        tickAt(pipeline, lastMs + IDLE_MS)
+
+        assertThat(states.last().tracks.lostMs(0)).isEqualTo(0f)
+    }
+
+    // ---- the lock (M4b T2) ----
+
+    /** Three frames of one person: a shown track; returns its id and the time of the last frame. */
+    private fun shownTrack(pipeline: FramePipeline): Pair<Int, Long> {
+        detector.people = listOf(walker())
+        val lastMs = framesFrom(pipeline, 0, 3)
+        return Pair(states.last().tracks.id(0), lastMs)
+    }
+
+    @Test
+    fun lock_isOffAtTheStart() {
+        val pipeline = trackingPipeline()
+        shownTrack(pipeline)
+
+        assertThat(pipeline.hasLock).isFalse()
+        assertThat(states.last().lockedId).isEqualTo(OverlayState.NO_LOCK)
+    }
+
+    @Test
+    fun requestLock_onAShownTrack_isCarriedByTheNextFrame() {
+        val pipeline = trackingPipeline()
+        val (id, lastMs) = shownTrack(pipeline)
+
+        pipeline.requestLock(id)
+        frameAt(pipeline, lastMs + FRAME_STEP_MS)
+
+        assertThat(states.last().lockedId).isEqualTo(id)
+        assertThat(pipeline.hasLock).isTrue()
+    }
+
+    @Test
+    fun requestLock_isCarriedByTheNextHudTickToo() {
+        val pipeline = trackingPipeline()
+        val (id, lastMs) = shownTrack(pipeline)
+
+        pipeline.requestLock(id)
+        tickAt(pipeline, lastMs + SMALL_IDLE_STEP_MS)
+
+        assertThat(states.last().lockedId).isEqualTo(id)
+    }
+
+    @Test
+    fun theLock_staysOnWhileTheTrackStaysShown() {
+        val pipeline = trackingPipeline()
+        val (id, lastMs) = shownTrack(pipeline)
+        pipeline.requestLock(id)
+
+        framesFrom(pipeline, lastMs + FRAME_STEP_MS, 5)
+
+        assertThat(states.takeLast(5).map { it.lockedId }).containsExactly(id, id, id, id, id)
+    }
+
+    @Test
+    fun theLock_staysOnWhileTheTrackIsLost() {
+        val pipeline = trackingPipeline()
+        val missAtMs = lostAfterOneMiss(pipeline)
+        val id = states.last().tracks.id(0)
+
+        pipeline.requestLock(id)
+        tickAt(pipeline, missAtMs + IDLE_MS)
+
+        assertThat(states.last().tracks.isLost(0)).isTrue()
+        assertThat(states.last().lockedId).isEqualTo(id)
+    }
+
+    @Test
+    fun clearLock_endsItAtTheNextState() {
+        val pipeline = trackingPipeline()
+        val (id, lastMs) = shownTrack(pipeline)
+        pipeline.requestLock(id)
+        frameAt(pipeline, lastMs + FRAME_STEP_MS)
+
+        pipeline.clearLock()
+        frameAt(pipeline, lastMs + 2 * FRAME_STEP_MS)
+
+        assertThat(states.last().lockedId).isEqualTo(OverlayState.NO_LOCK)
+        assertThat(pipeline.hasLock).isFalse()
+    }
+
+    @Test
+    fun requestLock_forAnIdThatIsNotShown_isDroppedAtTheNextState() {
+        val pipeline = trackingPipeline()
+        val (id, lastMs) = shownTrack(pipeline)
+
+        pipeline.requestLock(id + 100)
+        frameAt(pipeline, lastMs + FRAME_STEP_MS)
+
+        assertThat(states.last().lockedId).isEqualTo(OverlayState.NO_LOCK)
+        assertThat(pipeline.hasLock).isFalse()
+    }
+
+    @Test
+    fun theLock_endsWhenItsTrackIsRemoved_andDoesNotComeBack() {
+        val pipeline = trackingPipeline()
+        val missAtMs = lostAfterOneMiss(pipeline)
+        val id = states.last().tracks.id(0)
+        pipeline.requestLock(id)
+        tickAt(pipeline, missAtMs + IDLE_MS)
+        assertThat(states.last().lockedId).isEqualTo(id)
+
+        tickAt(pipeline, missAtMs + REMOVAL_IDLE_MS)
+
+        assertThat(states.last().tracks.count).isEqualTo(0)
+        assertThat(states.last().lockedId).isEqualTo(OverlayState.NO_LOCK)
+        assertThat(pipeline.hasLock).isFalse()
+        detector.people = listOf(walker())
+        framesFrom(pipeline, missAtMs + REMOVAL_IDLE_MS + FRAME_STEP_MS, 3)
+        assertThat(states.last().tracks.count).isEqualTo(1)
+        assertThat(states.last().lockedId).isEqualTo(OverlayState.NO_LOCK)
+    }
+
+    @Test
+    fun theLock_endsOnAReset() {
+        val pipeline = trackingPipeline()
+        val (id, lastMs) = shownTrack(pipeline)
+        pipeline.requestLock(id)
+        frameAt(pipeline, lastMs + FRAME_STEP_MS)
+        assertThat(states.last().lockedId).isEqualTo(id)
+
+        pipeline.setExpectedSize(CaptureSize(TRACK_HEIGHT, TRACK_WIDTH))
+
+        assertThat(states.last().lockedId).isEqualTo(OverlayState.NO_LOCK)
+        assertThat(pipeline.hasLock).isFalse()
+    }
+
+    @Test
+    fun aLockRequestedAfterAReset_forAnOldId_neverReachesANewTrack() {
+        val pipeline = trackingPipeline()
+        val (id, lastMs) = shownTrack(pipeline)
+        pipeline.setExpectedSize(CaptureSize(TRACK_HEIGHT, TRACK_WIDTH))
+
+        pipeline.requestLock(id)
+        framesFrom(pipeline, lastMs + FRAME_STEP_MS, 3, widthImg = TRACK_HEIGHT, heightImg = TRACK_WIDTH)
+
+        assertThat(states.last().tracks.count).isEqualTo(1)
+        assertThat(states.last().tracks.id(0)).isNotEqualTo(id)
+        assertThat(states.last().lockedId).isEqualTo(OverlayState.NO_LOCK)
+    }
+
+    @Test
+    fun aFrameWithoutDetections_carriesNoLock() {
+        val pipeline = pipeline(detector = null)
+        pipeline.requestLock(1)
+
+        pipeline.onFrame(image(), acquireNs())
+
+        assertThat(states.last().lockedId).isEqualTo(OverlayState.NO_LOCK)
+        assertThat(pipeline.hasLock).isFalse()
+    }
+
+    @Test
+    fun aNegativeLockRequest_isNoLock() {
+        val pipeline = trackingPipeline()
+        shownTrack(pipeline)
+
+        pipeline.requestLock(OverlayState.NO_LOCK)
+
+        assertThat(pipeline.hasLock).isFalse()
     }
 }

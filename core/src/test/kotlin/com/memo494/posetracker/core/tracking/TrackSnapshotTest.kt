@@ -249,7 +249,7 @@ class TrackSnapshotTest {
                 FakeTrack(2, headXImg = 400f, boxLeftImg = 380f, boxRightImg = 420f),
             )
 
-        val idle = TrackSnapshot.ofIdle(idleList, WIDTH_IMG, HEIGHT_IMG, smoother)
+        val idle = TrackSnapshot.ofIdle(idleList, WIDTH_IMG, HEIGHT_IMG, smoother, 0f, MAX_LOST_MS)
 
         assertThat(idle.count).isEqualTo(2)
         assertThat(idle.headXImg(0)).isEqualTo(lastFrame.headXImg(0))
@@ -268,13 +268,91 @@ class TrackSnapshotTest {
         val second = FakeTrackList(FakeTrack(1, headXImg = 140f))
         for (smoother in listOf(withIdle, without)) TrackSnapshot.ofSmoothed(first, WIDTH_IMG, HEIGHT_IMG, smoother, 0L)
 
-        TrackSnapshot.ofIdle(second, WIDTH_IMG, HEIGHT_IMG, withIdle)
-        TrackSnapshot.ofIdle(FakeTrackList(), WIDTH_IMG, HEIGHT_IMG, withIdle)
+        TrackSnapshot.ofIdle(second, WIDTH_IMG, HEIGHT_IMG, withIdle, 0f, MAX_LOST_MS)
+        TrackSnapshot.ofIdle(FakeTrackList(), WIDTH_IMG, HEIGHT_IMG, withIdle, 0f, MAX_LOST_MS)
 
         val a = TrackSnapshot.ofSmoothed(second, WIDTH_IMG, HEIGHT_IMG, withIdle, FRAME_NS)
         val b = TrackSnapshot.ofSmoothed(second, WIDTH_IMG, HEIGHT_IMG, without, FRAME_NS)
         assertSameContent(a, b)
         assertThat(withIdle.activeCount).isEqualTo(1)
+    }
+
+    @Test
+    fun of_aLostTrack_carriesTheLostMsOfTheTracker() {
+        val list = FakeTrackList(FakeTrack(1, lost = true, lostMs = 250f), FakeTrack(2))
+
+        val snapshot = TrackSnapshot.of(list, WIDTH_IMG, HEIGHT_IMG)
+
+        assertThat(snapshot.lostMs(0)).isEqualTo(250f)
+        assertThat(snapshot.lostMs(1)).isEqualTo(0f)
+    }
+
+    @Test
+    fun of_aTrackThatIsNotLost_hasLostMsZeroWhateverTheListReports() {
+        val list = FakeTrackList(FakeTrack(1, lostMs = 300f))
+
+        assertThat(TrackSnapshot.of(list, WIDTH_IMG, HEIGHT_IMG).lostMs(0)).isEqualTo(0f)
+    }
+
+    @Test
+    fun lostMs_withAnIndexOutsideTheSnapshot_throws() {
+        val snapshot = TrackSnapshot.of(FakeTrackList(FakeTrack(1, lost = true)), WIDTH_IMG, HEIGHT_IMG)
+
+        assertThrows(IndexOutOfBoundsException::class.java) { snapshot.lostMs(1) }
+        assertThrows(IndexOutOfBoundsException::class.java) { snapshot.lostMs(-1) }
+    }
+
+    @Test
+    fun ofSmoothed_aLostTrack_carriesTheLostMsOfTheTracker() {
+        val smoother = HeadSmoother(TrackerConfig())
+        val list = FakeTrackList(FakeTrack(1, lost = true, lostMs = 250f), FakeTrack(2))
+
+        val snapshot = TrackSnapshot.ofSmoothed(list, WIDTH_IMG, HEIGHT_IMG, smoother, 0L)
+
+        assertThat(snapshot.lostMs(0)).isEqualTo(250f)
+        assertThat(snapshot.lostMs(1)).isEqualTo(0f)
+    }
+
+    @Test
+    fun ofIdle_aLostTrack_addsTheIdleTimeToTheLostMs() {
+        val smoother = HeadSmoother(TrackerConfig())
+        val list = FakeTrackList(FakeTrack(1, lost = true, lostMs = 250f), FakeTrack(2))
+
+        val idle = TrackSnapshot.ofIdle(list, WIDTH_IMG, HEIGHT_IMG, smoother, 300f, MAX_LOST_MS)
+
+        assertThat(idle.lostMs(0)).isWithin(TOLERANCE_IMG).of(550f)
+        assertThat(idle.isLost(0)).isTrue()
+    }
+
+    @Test
+    fun ofIdle_aTrackThatIsNotLost_staysAtZero() {
+        val smoother = HeadSmoother(TrackerConfig())
+        val list = FakeTrackList(FakeTrack(1), FakeTrack(2, lost = true, lostMs = 100f))
+
+        val idle = TrackSnapshot.ofIdle(list, WIDTH_IMG, HEIGHT_IMG, smoother, 300f, MAX_LOST_MS)
+
+        assertThat(idle.lostMs(0)).isEqualTo(0f)
+        assertThat(idle.lostMs(1)).isWithin(TOLERANCE_IMG).of(400f)
+    }
+
+    @Test
+    fun ofIdle_capsTheLostMsAtTheLimit() {
+        val smoother = HeadSmoother(TrackerConfig())
+        val list = FakeTrackList(FakeTrack(1, lost = true, lostMs = 700f))
+
+        val idle = TrackSnapshot.ofIdle(list, WIDTH_IMG, HEIGHT_IMG, smoother, 500f, MAX_LOST_MS)
+
+        assertThat(idle.lostMs(0)).isEqualTo(MAX_LOST_MS)
+    }
+
+    @Test
+    fun ofIdle_withNoIdleTime_keepsTheLostMsOfTheTracker() {
+        val smoother = HeadSmoother(TrackerConfig())
+        val list = FakeTrackList(FakeTrack(1, lost = true, lostMs = 250f))
+
+        assertThat(TrackSnapshot.ofIdle(list, WIDTH_IMG, HEIGHT_IMG, smoother, 0f, MAX_LOST_MS).lostMs(0)).isEqualTo(250f)
+        assertThat(TrackSnapshot.ofIdle(list, WIDTH_IMG, HEIGHT_IMG, smoother, -40f, MAX_LOST_MS).lostMs(0)).isEqualTo(250f)
+        assertThat(TrackSnapshot.ofIdle(list, WIDTH_IMG, HEIGHT_IMG, smoother, Float.NaN, MAX_LOST_MS).lostMs(0)).isEqualTo(250f)
     }
 
     private fun assertSameContent(
@@ -287,6 +365,7 @@ class TrackSnapshotTest {
         for (i in 0 until expected.count) {
             assertThat(actual.id(i)).isEqualTo(expected.id(i))
             assertThat(actual.isLost(i)).isEqualTo(expected.isLost(i))
+            assertThat(actual.lostMs(i)).isEqualTo(expected.lostMs(i))
             assertThat(actual.isHeadEstimated(i)).isEqualTo(expected.isHeadEstimated(i))
             assertThat(actual.headXImg(i)).isEqualTo(expected.headXImg(i))
             assertThat(actual.headYImg(i)).isEqualTo(expected.headYImg(i))
@@ -297,10 +376,29 @@ class TrackSnapshotTest {
         }
     }
 
+    @Test
+    fun indexOfId_findsTheIndexOfAShownTrack() {
+        val snapshot = TrackSnapshot.of(FakeTrackList(FakeTrack(5), FakeTrack(9, shown = false), FakeTrack(12)), WIDTH_IMG, HEIGHT_IMG)
+
+        assertThat(snapshot.indexOfId(5)).isEqualTo(0)
+        assertThat(snapshot.indexOfId(12)).isEqualTo(1)
+    }
+
+    @Test
+    fun indexOfId_anIdThatIsNotInTheSnapshot_isMinusOne() {
+        val snapshot = TrackSnapshot.of(FakeTrackList(FakeTrack(5), FakeTrack(9, shown = false)), WIDTH_IMG, HEIGHT_IMG)
+
+        assertThat(snapshot.indexOfId(9)).isEqualTo(-1)
+        assertThat(snapshot.indexOfId(77)).isEqualTo(-1)
+        assertThat(snapshot.indexOfId(-1)).isEqualTo(-1)
+        assertThat(TrackSnapshot.EMPTY.indexOfId(5)).isEqualTo(-1)
+    }
+
     private companion object {
         const val WIDTH_IMG = 1356
         const val HEIGHT_IMG = 610
         const val FRAME_NS = 50_000_000L
         const val TOLERANCE_IMG = 1e-3f
+        const val MAX_LOST_MS = 800f
     }
 }

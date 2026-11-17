@@ -38,6 +38,13 @@ class OverlayStateTest {
         assertThat(state.tracksMatchCapture).isFalse()
     }
 
+    @Test
+    fun lockedId_isMinusOneByDefault() {
+        assertThat(OverlayState().lockedId).isEqualTo(-1)
+        assertThat(OverlayState.EMPTY.lockedId).isEqualTo(OverlayState.NO_LOCK)
+        assertThat(OverlayState.NO_LOCK).isEqualTo(-1)
+    }
+
     private companion object {
         const val WIDTH_IMG = 320
         const val HEIGHT_IMG = 240

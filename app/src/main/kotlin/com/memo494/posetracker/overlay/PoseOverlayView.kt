@@ -5,6 +5,7 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.util.TypedValue
+import android.view.MotionEvent
 import android.view.View
 import com.memo494.posetracker.R
 import com.memo494.posetracker.core.TrackerConfig
@@ -13,6 +14,7 @@ import com.memo494.posetracker.core.model.PoseDetection
 import com.memo494.posetracker.core.overlay.CornerBrackets
 import com.memo494.posetracker.core.overlay.HeadRing
 import com.memo494.posetracker.core.overlay.LabelPlacement
+import com.memo494.posetracker.core.overlay.LockPicker
 import com.memo494.posetracker.core.overlay.MarkFade
 import com.memo494.posetracker.core.tracking.TrackSnapshot
 import com.memo494.posetracker.detector.Accelerator
@@ -27,6 +29,11 @@ import kotlin.math.max
  * detections are drawn too (full box and keypoint dots, no ring) and each track's id is written above its
  * box, so raw and tracked marks can be compared. A corner HUD strip and a red banner when the detector runs
  * on the CPU are always drawn.
+ *
+ * Lock (ARCHITECTURE §6.6): the track named by [OverlayState.lockedId] gets a thicker ring (`lockRingStrokeDp`) and a
+ * second ring at `lockOuterRingRatio` times the radius. While [armed] (set by [OverlayWindow] after a tap on the lock
+ * handle; the window is touchable then) the HUD shows `tap a person` and the next tap is mapped with the Img -> View
+ * mapping of the state that was drawn last, picked with [LockPicker] and reported to [armedTapListener].
  *
  * It never schedules its own redraw: [OverlayStateHolder] calls `postInvalidateOnAnimation()` only when
  * the picture changed (Consult C1-B; the overlay is part of the capture, so a redraw loop would feed
@@ -68,8 +75,15 @@ class PoseOverlayView(
             strokeWidth = config.dotStrokeDp * density
             color = context.getColor(R.color.overlay_keypoint_green)
         }
+    private val lockRingPaint =
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = config.lockRingStrokeDp * density
+            color = context.getColor(R.color.overlay_keypoint_green)
+        }
     private val boxBaseAlpha = boxPaint.alpha
     private val ringBaseAlpha = ringPaint.alpha
+    private val lockRingBaseAlpha = lockRingPaint.alpha
     private val keypointPaint =
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.FILL
@@ -114,6 +128,27 @@ class PoseOverlayView(
     private var mapTopOnScreenPx = 0
     private var fitCenter: FitCenter? = null
 
+    // The state and mapping of the last draw that drew marks, for mapping a tap (cleared when nothing was drawn).
+    private var tapState: OverlayState? = null
+    private var tapFit: FitCenter? = null
+
+    /** Receives the track id picked by the one tap while [armed] (-1 = nobody close enough). Main thread. */
+    var armedTapListener: ArmedTapListener? = null
+
+    /** Whether the overlay waits for the tap that locks a person: shows the HUD hint and takes the next tap. Main thread. */
+    var armed: Boolean = false
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
+        }
+
+    /** Called with the track id a tap picked; see [armedTapListener]. */
+    fun interface ArmedTapListener {
+        /** [trackId] is the id of the track nearest to the tap within the lock distance, or -1. */
+        fun onArmedTap(trackId: Int)
+    }
+
     init {
         val metrics = Paint.FontMetrics()
         hudTextPaint.getFontMetrics(metrics)
@@ -135,7 +170,34 @@ class PoseOverlayView(
 
     override fun onDraw(canvas: Canvas) {
         drawMarks(canvas, holder.latest())
-        drawHud(canvas, holder.hud())
+        drawHud(canvas, holder.hud(), armed)
+    }
+
+    /**
+     * While [armed] the window is touchable: the finger-up of the tap picks a track (or nobody) and reports it; every
+     * touch is consumed then. Not armed, the view takes nothing (and the window is not touchable anyway).
+     */
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (!armed) return false
+        if (event.actionMasked == MotionEvent.ACTION_UP) {
+            val trackId = pickTrackAt(event.x, event.y)
+            performClick()
+            armedTapListener?.onArmedTap(trackId)
+        }
+        return true
+    }
+
+    override fun performClick(): Boolean = super.performClick()
+
+    /** The track nearest to the view point ([xView], [yView]) in the state drawn last, or -1 (fail closed). */
+    private fun pickTrackAt(
+        xView: Float,
+        yView: Float,
+    ): Int {
+        val fit = tapFit ?: return LockPicker.NONE
+        val state = tapState ?: return LockPicker.NONE
+        if (!state.tracksMatchCapture) return LockPicker.NONE
+        return LockPicker.pick(state.tracks, fit.viewToImgX(xView), fit.viewToImgY(yView), config.lockMaxTapDistanceRatio)
     }
 
     /**
@@ -148,13 +210,17 @@ class PoseOverlayView(
         canvas: Canvas,
         state: OverlayState,
     ) {
+        tapState = null
+        tapFit = null
         if (!state.detectionsShown) return
         val fit = mappingFor(state) ?: return
+        tapState = state
+        tapFit = fit
         if (config.debugMarks) drawRawDetections(canvas, fit, state)
         if (!state.tracksMatchCapture) return
         val tracks = state.tracks
         for (i in 0 until tracks.count) {
-            drawTrack(canvas, fit, tracks, i)
+            drawTrack(canvas, fit, tracks, i, state.lockedId)
         }
     }
 
@@ -198,12 +264,16 @@ class PoseOverlayView(
         }
     }
 
-    /** Track [index] of [tracks]: corner brackets at its box, the ring at its head point and, in debug, its id. */
+    /**
+     * Track [index] of [tracks]: corner brackets at its box, the ring at its head point (the double ring when its id is
+     * [lockedId]) and, in debug, its id.
+     */
     private fun drawTrack(
         canvas: Canvas,
         fit: FitCenter,
         tracks: TrackSnapshot,
         index: Int,
+        lockedId: Int,
     ) {
         val leftView = fit.imgToViewX(tracks.boxLeftImg(index))
         val rightView = fit.imgToViewX(tracks.boxRightImg(index))
@@ -214,21 +284,25 @@ class PoseOverlayView(
         drawCornerBrackets(canvas, leftView, topView, rightView, bottomView)
 
         val ringRadiusView = HeadRing.radius(rightView - leftView, config.headRingRadiusRatio, minHeadRingRadiusPx)
-        canvas.drawCircle(
-            fit.imgToViewX(tracks.headXImg(index)),
-            fit.imgToViewY(tracks.headYImg(index)),
-            ringRadiusView,
-            ringPaint,
-        )
+        val headXView = fit.imgToViewX(tracks.headXImg(index))
+        val headYView = fit.imgToViewY(tracks.headYImg(index))
+        if (tracks.id(index) == lockedId) {
+            // the locked person: a thicker ring and a second one around it
+            canvas.drawCircle(headXView, headYView, ringRadiusView, lockRingPaint)
+            canvas.drawCircle(headXView, headYView, ringRadiusView * config.lockOuterRingRatio, lockRingPaint)
+        } else {
+            canvas.drawCircle(headXView, headYView, ringRadiusView, ringPaint)
+        }
 
         if (lost) setMarkAlpha(1f)
         if (config.debugMarks) drawTrackId(canvas, tracks.id(index), leftView, topView)
     }
 
-    /** Scales the opacity of the box and ring paints to [alpha] (0..1) of their own; 1 restores them. No allocation. */
+    /** Scales the opacity of the box, ring and lock ring paints to [alpha] (0..1) of their own; 1 restores them. No allocation. */
     private fun setMarkAlpha(alpha: Float) {
         boxPaint.alpha = (boxBaseAlpha * alpha + ALPHA_ROUNDING).toInt()
         ringPaint.alpha = (ringBaseAlpha * alpha + ALPHA_ROUNDING).toInt()
+        lockRingPaint.alpha = (lockRingBaseAlpha * alpha + ALPHA_ROUNDING).toInt()
     }
 
     /** Debug only: the [trackId] as a number above the top-left corner of its box, kept inside the view. */
@@ -277,10 +351,11 @@ class PoseOverlayView(
     private fun drawHud(
         canvas: Canvas,
         hud: OverlayState,
+        armed: Boolean,
     ) {
         val statsLength = HudFormatter.formatStats(hud, statsLine, config.hudIdleFps)
         val detectionsLength = HudFormatter.formatDetections(hud, detectionsLine)
-        val warningLength = HudFormatter.formatWarning(hud, warningLine)
+        val warningLength = HudFormatter.formatWarning(hud, warningLine, armed)
         var widest = max(hudTextPaint.measureText(versionLine, 0, versionLine.size), hudTextPaint.measureText(statsLine, 0, statsLength))
         widest = max(widest, hudTextPaint.measureText(detectionsLine, 0, detectionsLength))
         var lines = HUD_BASE_LINES

@@ -9,8 +9,8 @@ import java.util.concurrent.atomic.AtomicReference
  *
  * The capture thread (or any non-main thread) calls [publish] with an immutable [OverlayState]. The
  * holder keeps the newest one for the view's `onDraw` ([latest]) and asks the view to redraw only when
- * [RedrawPolicy] says the picture changed (Consult C1-B: the overlay is part of the capture, so a
- * redraw loop would feed itself). The view's redraw request is `postInvalidateOnAnimation()`, which is
+ * [RedrawPolicy] says the picture changed or the locked track changed (Consult C1-B: the overlay is part of the
+ * capture, so a redraw loop would feed itself). The view's redraw request is `postInvalidateOnAnimation()`, which is
  * safe to call from any thread.
  *
  * The HUD is a second, slower view of the same data: [hud] only moves to the newest state when the HUD
@@ -68,6 +68,8 @@ class OverlayStateHolder(
             lastHudNs = nowNs
         }
         val drawn = drawnState
+        // A lock that starts, moves or ends changes the rings, whatever else did (ARCHITECTURE §6.6).
+        val lockChanged = state.lockedId != drawn.lockedId
         val redraw =
             RedrawPolicy.shouldRedrawMarks(
                 previousTracks = drawn.tracks,
@@ -86,7 +88,7 @@ class OverlayStateHolder(
                 maxLostMs = config.trackMaxLostMs,
                 fadeMinAlpha = config.fadeMinAlpha,
             )
-        if (redraw) {
+        if (redraw || lockChanged) {
             drawnState = state
             redrawRequester?.run()
         }

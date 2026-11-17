@@ -6,6 +6,9 @@
     <string name="capture_notification_text">Tracking people on your screen</string>
     <string name="capture_notification_stop">Stop</string>
 
+    <!-- Lock handle (LockHandleView): the small touchable button at the screen edge. -->
+    <string name="lock_handle_description">Lock a person: tap, then tap the person. Tap again to unlock.</string>
+
     <!-- Control screen (MainActivity). -->
     <string name="control_title">Pose Tracker</string>
     <string name="control_status_running">Running: tracking people on your screen</string>

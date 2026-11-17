@@ -701,7 +701,11 @@ class TrackerConfigTest {
         val config = TrackerConfig()
 
         assertWithin(config.lockHandleSizeDp, TrackerConfig.MIN_LOCK_HANDLE_SIZE_DP, TrackerConfig.MAX_LOCK_HANDLE_SIZE_DP)
-        assertWithin(config.lockMaxTapDistanceRatio, TrackerConfig.MIN_LOCK_MAX_TAP_DISTANCE_RATIO, TrackerConfig.MAX_LOCK_MAX_TAP_DISTANCE_RATIO)
+        assertWithin(
+            config.lockMaxTapDistanceRatio,
+            TrackerConfig.MIN_LOCK_MAX_TAP_DISTANCE_RATIO,
+            TrackerConfig.MAX_LOCK_MAX_TAP_DISTANCE_RATIO,
+        )
         assertThat(config.lockArmTimeoutMs).isAtLeast(TrackerConfig.MIN_LOCK_ARM_TIMEOUT_MS)
         assertThat(config.lockArmTimeoutMs).isAtMost(TrackerConfig.MAX_LOCK_ARM_TIMEOUT_MS)
         assertWithin(config.lockRingStrokeDp, TrackerConfig.MIN_STROKE_DP, TrackerConfig.MAX_STROKE_DP)

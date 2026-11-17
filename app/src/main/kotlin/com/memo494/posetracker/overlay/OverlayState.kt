@@ -34,6 +34,8 @@ import com.memo494.posetracker.detector.Accelerator
  * @property modelImported whether the running model is the imported one, not the built-in one.
  * @property tracks the shown tracks of the tracker for [frame] (or for the idle time since it), Img space, an
  *   immutable copy made on the capture thread; [TrackSnapshot.EMPTY] when there is no tracked frame.
+ * @property lockedId id of the locked track (ARCHITECTURE §6.6), or [NO_LOCK]; the pipeline sets it only while that
+ *   id is among [tracks], so a locked id always names a drawn track.
  */
 data class OverlayState(
     val frame: DetectionFrame? = null,
@@ -53,6 +55,7 @@ data class OverlayState(
     val modelInputHeight: Int = 0,
     val modelImported: Boolean = false,
     val tracks: TrackSnapshot = TrackSnapshot.EMPTY,
+    val lockedId: Int = NO_LOCK,
 ) {
     /** Whether [frame] may be drawn: content visible and no warning that hides the detections. */
     val detectionsShown: Boolean
@@ -67,6 +70,9 @@ data class OverlayState(
         get() = tracks.widthImg == captureWidthImg && tracks.heightImg == captureHeightImg
 
     companion object {
+        /** [lockedId] when no track is locked (track ids start at 1). */
+        const val NO_LOCK = -1
+
         /** [maxRawScore] when the detector did not measure it. */
         const val NOT_MEASURED_SCORE = -1f
 

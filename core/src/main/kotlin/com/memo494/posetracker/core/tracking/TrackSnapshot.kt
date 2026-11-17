@@ -125,7 +125,9 @@ class TrackSnapshot private constructor(
             if (mode == SMOOTHED) smoother?.begin(timestampNs)
             var shown = 0
             for (i in 0 until tracks.size) {
-                if (tracks.isShown(i)) shown++
+                if (!tracks.isShown(i)) continue
+                shown++
+                if (mode == SMOOTHED) smoother?.mark(tracks.id(i))
             }
             if (shown == 0) {
                 if (mode == SMOOTHED) smoother?.end()

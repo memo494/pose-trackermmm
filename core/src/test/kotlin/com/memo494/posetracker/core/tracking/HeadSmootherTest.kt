@@ -276,6 +276,26 @@ class HeadSmootherTest {
     }
 
     @Test
+    fun aMarkedId_isNeverEvictedByTheFullPoolFallback() {
+        val smoother = HeadSmoother(TrackerConfig(maxTracks = 2))
+        smoother.begin(0L)
+        smoother.smooth(2, 200f, 100f, HEIGHT_IMG)
+        smoother.smooth(1, 100f, 100f, HEIGHT_IMG)
+        smoother.end()
+
+        smoother.begin(STEP_20_FPS_NS)
+        smoother.mark(3)
+        smoother.mark(2)
+        smoother.smooth(3, 300f, 100f, HEIGHT_IMG)
+        smoother.smooth(2, 240f, 100f, HEIGHT_IMG)
+        smoother.end()
+
+        assertThat(smoother.outXImg).isGreaterThan(200f)
+        assertThat(smoother.outXImg).isLessThan(240f)
+        assertThat(smoother.activeCount).isEqualTo(2)
+    }
+
+    @Test
     fun disabled_isTheIdentity_andHoldsNoState() {
         val smoother = HeadSmoother(TrackerConfig(smoothEnabled = false))
 

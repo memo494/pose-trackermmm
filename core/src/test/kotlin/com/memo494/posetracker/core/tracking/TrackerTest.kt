@@ -396,16 +396,16 @@ class TrackerTest {
     }
 
     @Test
-    fun onIdle_stillPromotesATentativeTrackThatHasMissedAFrame() {
+    fun onIdle_leavesATentativeTrackThatHasMissedAFrameTentativeAndHidden() {
         feed(tracker, 0, person(600f))
         feed(tracker, 1)
 
         val list = tracker.onIdle(config.trackIdlePromoteNs)
 
         assertThat(list.size).isEqualTo(1)
-        assertThat(list.state(0)).isEqualTo(TrackState.CONFIRMED)
-        assertThat(list.isShown(0)).isTrue()
-        assertThat(tracker.idlePromoteCount).isEqualTo(1)
+        assertThat(list.state(0)).isEqualTo(TrackState.TENTATIVE)
+        assertThat(list.isShown(0)).isFalse()
+        assertThat(tracker.idlePromoteCount).isEqualTo(0)
         assertThat(tracker.confirmCount).isEqualTo(0)
     }
 

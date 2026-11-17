@@ -83,6 +83,10 @@ internal class FramePipeline(
         OverlayState(modelInputWidth = modelInputWidth, modelInputHeight = modelInputHeight, modelImported = modelImported)
     private val tracker = Tracker(config)
     private val smoother = HeadSmoother(config)
+
+    /** Number of ids the display smoother holds (read-only, for tests). */
+    internal val smootherActiveCount: Int
+        get() = smoother.activeCount
     private var trackedFrameNewest = false
 
     /** Clock reading after the newest tracked frame was published (not its arrival): idle time starts here. */

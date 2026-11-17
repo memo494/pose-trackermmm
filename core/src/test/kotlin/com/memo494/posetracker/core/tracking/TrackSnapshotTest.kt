@@ -186,6 +186,21 @@ class TrackSnapshotTest {
     }
 
     @Test
+    fun ofSmoothed_aFullPool_neverEvictsAnIdThatIsStillShown() {
+        val smoother = HeadSmoother(TrackerConfig(maxTracks = 2))
+        val first = FakeTrackList(FakeTrack(2, headXImg = 200f), FakeTrack(1, headXImg = 100f))
+        TrackSnapshot.ofSmoothed(first, WIDTH_IMG, HEIGHT_IMG, smoother, 0L)
+
+        val second = FakeTrackList(FakeTrack(3, headXImg = 300f), FakeTrack(2, headXImg = 240f))
+        val snapshot = TrackSnapshot.ofSmoothed(second, WIDTH_IMG, HEIGHT_IMG, smoother, FRAME_NS)
+
+        assertThat(snapshot.headXImg(0)).isEqualTo(300f)
+        assertThat(snapshot.headXImg(1)).isGreaterThan(200f)
+        assertThat(snapshot.headXImg(1)).isLessThan(240f)
+        assertThat(smoother.activeCount).isEqualTo(2)
+    }
+
+    @Test
     fun ofSmoothed_withoutShownTracks_returnsEmptyAndFreesTheSlots() {
         val smoother = HeadSmoother(TrackerConfig())
         TrackSnapshot.ofSmoothed(FakeTrackList(FakeTrack(1)), WIDTH_IMG, HEIGHT_IMG, smoother, 0L)

@@ -116,6 +116,15 @@ class HeadSmoother(
         outYImg = storedYImg[slot].toFloat()
     }
 
+    /**
+     * Marks [id] as shown in this frame before any [smooth], so the full-pool fallback never takes its slot. An id
+     * without a slot is ignored.
+     */
+    fun mark(id: Int) {
+        val slot = find(id)
+        if (slot >= 0) seen[slot] = true
+    }
+
     /** Frees the slot of every id that was not smoothed since [begin]. */
     fun end() {
         for (i in 0 until capacity) {

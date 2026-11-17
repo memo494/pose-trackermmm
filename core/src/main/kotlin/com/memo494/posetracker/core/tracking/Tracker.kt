@@ -162,7 +162,7 @@ class Tracker(
     /**
      * Tells the tracker that [idleNs] nanoseconds have passed since the newest frame arrived (measured by the
      * caller) and returns the tracks afterwards. At or above `trackIdlePromoteMs` every tentative track
-     * becomes confirmed. A LOST track whose `lostMs` plus the idle time exceeds `trackMaxLostMs` is removed
+     * that was hit on the newest frame (no miss since) becomes confirmed; one that has missed stays tentative. A LOST track whose `lostMs` plus the idle time exceeds `trackMaxLostMs` is removed
      * (counted in [removeCount]); `lostMs` itself is not changed, so repeated calls with a growing [idleNs] stay
      * consistent and the next [update] goes on as before. A CONFIRMED track is never touched (a paused video
      * keeps its rings); nothing else changes.
@@ -179,7 +179,7 @@ class Tracker(
                 inUse[slot] = false
                 continue
             }
-            if (promote && track.state == TrackState.TENTATIVE) {
+            if (promote && track.state == TrackState.TENTATIVE && track.misses == 0) {
                 track.state = TrackState.CONFIRMED
                 idlePromoteCount++
             }

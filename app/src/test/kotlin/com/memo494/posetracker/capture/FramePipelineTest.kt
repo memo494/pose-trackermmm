@@ -1388,7 +1388,9 @@ class FramePipelineTest {
         for (i in 0 until 10) shakyFrameAt(pipeline, i * FRAME_STEP_MS, i)
         assertThat(states.last().tracks.count).isEqualTo(1)
 
+        assertThat(pipeline.smootherActiveCount).isEqualTo(1)
         pipeline.setDisplaySized(false)
+        assertThat(pipeline.smootherActiveCount).isEqualTo(0)
         pipeline.setDisplaySized(true)
         assertThat(states.last().tracks.count).isEqualTo(0)
         for (i in 0 until 3) shakyFrameAt(pipeline, (20 + i) * FRAME_STEP_MS, i)

@@ -26,4 +26,4 @@ opens; it has `summary.txt`.
 ## Progress
 | Task | Status | Commit | Notes |
 |---|---|---|---|
-| T1 | — | | |
+| T1 | done | 7ef7c9c, 417fa5c | CI green (run 44023334914), `@Test` 1292. Review OK WITH FIXES, all six fixed: `Throwable` catch and output opened first, own temp zip for Save (deleted after), `"wt"`, empty document deleted on failure, Save dismisses the crash notice, copy tests. |

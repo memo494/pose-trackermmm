@@ -97,6 +97,7 @@ internal class FramePipeline(
         get() = smoother.activeCount
     private var trackedFrameNewest = false
     private val lockKeeper = LockKeeper(config) { message -> safeLog(message, null) }
+    private val missLog = AssociationMissLog(config.assocMissLogPerMin) { message -> safeLog(message, null) }
 
     /** Clock reading after the newest tracked frame was published (not its arrival): idle time starts here. */
     private var trackedArrivalNs = 0L
@@ -185,6 +186,27 @@ internal class FramePipeline(
 
     /** Most tracks shown at once since the start; see [trackBirths]. */
     val tracksMostAtOnce: Int get() = tracker.mostShownAtOnce
+
+    /** Tracks born next to a LOST track (association misses), count; see [trackBirths]. */
+    val assocMisses: Int get() = tracker.assocMisses
+
+    /** Association misses whose pair was outside the gate, count; see [trackBirths]. */
+    val assocMissGate: Int get() = tracker.assocMissGate
+
+    /** Association misses whose pair passed the gate but cost too much, count; see [trackBirths]. */
+    val assocMissCost: Int get() = tracker.assocMissCost
+
+    /** Association misses whose pair the matcher would have accepted, count; see [trackBirths]. */
+    val assocMissTaken: Int get() = tracker.assocMissTaken
+
+    /** Unmatched detections below the birth score next to a LOST track, count; see [trackBirths]. */
+    val assocMissLowBirth: Int get() = tracker.assocMissLowBirth
+
+    /** Births next to a track that is not LOST, count; see [trackBirths]. */
+    val assocBirthNearLive: Int get() = tracker.assocBirthNearLive
+
+    /** Births next to a track removed in the same frame, count; see [trackBirths]. */
+    val assocBirthAfterRemoval: Int get() = tracker.assocBirthAfterRemoval
 
     /**
      * Whether a lock exists: a track is locked, a lock waits for its person to come back (pending), or a lock was
@@ -371,6 +393,7 @@ internal class FramePipeline(
         if (!captureFrame.set(rgba, widthImg, heightImg, timestampNs, source)) error("capture frame rejected the copy")
         val result = detector.detect(captureFrame)
         val list = tracker.update(result)
+        logMisses(nowNs)
         val tracks = TrackSnapshot.ofSmoothed(list, widthImg, heightImg, smoother, result.timestampNs)
         followLock(list, tracks, result)
         trackedFrameNewest = true
@@ -402,6 +425,15 @@ internal class FramePipeline(
         recordTimings(detector, copyStartNs, nowNs, acquireNs, timestampNs, source == TimestampSource.IMAGE)
         frames++
         failureStreak = 0L
+    }
+
+    /** Writes the association-miss lines of the newest tracker update (at most `assocMissLogPerMin` a minute). */
+    private fun logMisses(nowNs: Long) {
+        try {
+            for (i in 0 until tracker.missCount) missLog.report(tracker.miss(i), nowNs)
+        } catch (e: Throwable) {
+            safeLog("logging association misses failed", e)
+        }
     }
 
     /**

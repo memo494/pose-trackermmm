@@ -1,4 +1,4 @@
-# pose-tracker-android — Architecture (v1.2)
+# pose-tracker-android — Architecture (v1.4)
 
 Real-time Android app: a screen-capture overlay that draws a stable, low-latency dot on each person's head
 over any other app (video, stream, game), using YOLO26n-pose on-device. Built and modified by AI coding agents (Claude Code, Codex); built only
@@ -10,6 +10,14 @@ Ultralytics Flutter plugin (§2.1). Screen capture, overlay, tracking, smoothing
 and tests are ours.
 
 How the app gets built step by step is in `docs/BUILD_PLAN.md`. Changes per version are in §15.
+
+**v1.4 (M4e):** association-miss diagnostics (no behaviour change): when a track is born next to a LOST one (or next to
+a live or just removed one), the tracker records the values the matcher uses for that pair, the app logs them (rate
+limited) and `summary.txt` counts them (§6.3, §6.7, §7.1, §15).
+
+**v1.3 (M4d):** re-lock tuning from the first phone test: `relockMaxDistance` 0.40, upper-body torsos from the
+shoulders, a lock with an empty signature ends at once (`cleared (no signature)`), and `lock: pending id=N frames=K`
+(§6.6, §6.7, §7.1, §15).
 
 **v1.2 (M4c):** a lock survives the person leaving the picture: while the locked person is tracked the pipeline
 keeps a colour histogram of their torso, and when they come back (a new track) the lock moves to them if the colours
@@ -372,6 +380,29 @@ tracks, index loops); deterministic.
 - **Ids** start at 1 and are never reused in a session; `reset()` (geometry change) drops the tracks and keeps
   the id counter. Counters for the diagnostics, cumulative, kept by `reset()`: `birthCount`, `confirmCount`,
   `idlePromoteCount`, `recoverCount`, `removeCount` (confirmed tracks only), `mostShownAtOnce`.
+- **Association-miss diagnostics (M4e, no effect on any track).** Why: on the phone one person got 30+ ids in 3
+  minutes with the new id born in the same frame the old track was coasting, so the person was detected but not
+  associated, and the offline walk simulation did not reproduce it. When step "birth" starts a track while a
+  CONFIRMED track is LOST and the new head is within `assocMissNearRatio` (1.0) × the lost track's height of the lost
+  track's predicted head (the nearest such track), the tracker fills one fixed `AssociationMiss` record (`missCount`
+  records after an `update`, `miss(i)`; cleared by the next `update` or `reset`; at most one per birth, so at most
+  30): `lostId`, `newId`, `lostMs` (including this frame), `score`, `highStage`, `gateChi2` (the Mahalanobis value, compare with
+  `trackGateChi2`), `iou`, `headRatio` (head distance / (`assocHeadScaleRatio` × h), not capped), `hRatio` (detection
+  height / track height), `cost` (the §6.3 cost, also for a gated pair) and `reason`: `GATE` (value above
+  `trackGateChi2`), `COST` (cost at or above the limit of the detection's stage) or `TAKEN` (the matcher would have
+  accepted the pair and did not make it; by the Hungarian optimum this only happens when a match was refused after
+  assignment, so a non-zero count is a bug signal). With no LOST track near, the nearest track that is not LOST (and
+  was not born in this frame) gives `reason=LIVE` (the new box overlapped a track that took another detection, or a
+  tentative track; `trackState`, and `detIou` = IoU of the new box with that track's matched detection box), and with
+  none, the nearest track removed in this frame (copied into scratch arrays in `updateTracks`) gives `reason=REMOVED`
+  with the removal cause (`LOST_TIME`, `EXIT`, `OTHER`); for these two the numbers use the track's state after the
+  frame. The gate value and the cost come from `AssociationCost.mahalanobis2` and `ungatedCost`, the same functions the
+  matcher uses (a test asserts exact equality). Cumulative counters (kept by `reset()`): `assocMisses` (= gate +
+  cost + taken), `assocMissGate`, `assocMissCost`, `assocMissTaken`, `assocBirthNearLive`, `assocBirthAfterRemoval`, and `assocMissLowBirth` (an unmatched detection
+  below `trackBirthScore` next to a LOST track, counted once per frame it appears, no record). The values come from
+  scratch fields and the tracks' own state; the loop over the tracks runs only for such a detection, nothing is
+  allocated and no track, id or counter other than these changes (test: three trackers with different
+  `assocMissNearRatio`, one read and two not, give identical tracks on a scripted run).
 - Works identically at 20, 30 and 60 fps and with irregular frame spacing (everything uses `dtEff` from frame
   timestamps; the scenarios of §9 run at several rates and with idle gaps).
 - **Known limits (not asserted):** slow crossings in one row can swap ids (no appearance model); a person
@@ -569,6 +600,15 @@ uses no accessibility service.
   `relockMinMargin`. Four counters follow `trackRemovals` in `summary.txt`: `locks` (locks set), `lockRelocks`,
   `lockRelockRejects` (candidates whose window ended without acceptance), `lockExpired`; since Start, read on the
   capture thread at the HUD tick, 0 before the first lock.
+- **Association misses in the log and in `summary.txt` (M4e).** One line per miss (§6.3), on the capture thread, at
+  most `assocMissLogPerMin` (30) per minute (fixed one-minute windows; the counters count every miss):
+  `track: miss id=L -> new id=N lostMs=250 score=0.88 stage=high|low gateChi2=123.46 iou=0.00 headRatio=1.50
+  hRatio=1.05 cost=1.00 reason=gate|cost|taken` (two decimals, `lostMs` whole milliseconds, `n/a` for a number that
+  cannot be computed); a birth next to a live track ends `reason=live state=confirmed|tentative detIou=0.23`, one
+  after a removal `reason=removed cause=lostTime|exit|other`. When a window ends with dropped lines, the next line
+  written is `track: miss suppressed N`. Read it with the limits: `gateChi2` above 9.21 = gated, `cost` at or above 0.7 (high) / 0.6
+  (low) = too expensive. Seven counters follow `lockExpired` in `summary.txt`: `assocMisses`, `assocMissGate`,
+  `assocMissCost`, `assocMissTaken`, `assocMissLowBirth`, `assocBirthNearLive`, `assocBirthAfterRemoval`; since Start, read at the HUD tick, 0 before the first miss.
 - **Timing in `summary.txt` (M1a).** After the model fields, in this order: `timingSamples`, then `copyMsP50`,
   `copyMsP95`, `preMsP50`, `preMsP95`, `inferMsP50`, `inferMsP95`, `postMsP50`, `postMsP95`, `frameMsP50`,
   `frameMsP95`, `resultAgeMsP50`, `resultAgeMsP95` (twelve keys, milliseconds with one decimal), then
@@ -627,7 +667,8 @@ default 0.1) and the lock group (`lockHandleSizeDp` 16..96, 40; `lockMaxTapDista
 `relockKeypointMinScore` 0.5, `relockFullBodyMinAspect` 1.8), sampling (`relockMaxSamplePixels` 2000,
 `relockMinSamplePixels` 150) and decision (`relockMemoryMs` 60000, `relockMaxDistance` 0.40, `relockMinMargin` 0.10,
 `relockJudgeFrames` 10); M4d adds `relockUpperTorsoRatio` 0.8 (0.2..2) and the check `relockMinSamplePixels` ≤
-`relockMaxSamplePixels` / `RELOCK_SAMPLE_GRID_SLACK` (4). There is no `displayLeadMs`
+`relockMaxSamplePixels` / `RELOCK_SAMPLE_GRID_SLACK` (4); M4e adds the diagnostics `assocMissNearRatio` (0.1..5,
+default 1.0) and `assocMissLogPerMin` (0..600, default 30), which change no track. There is no `displayLeadMs`
 (no prediction, §6.4).
 
 ### 7.2 Thermal policy (M5)
@@ -824,6 +865,10 @@ answers hard questions. Each change is verified in the session with `scripts/ver
 and always by GitHub Actions, which is the source of truth. The owner's laptop is not used for builds.
 
 ## 15. Changes
+- **v1.4 (M4e, 2026-11-18):** association-miss diagnostics from the second phone test (plan `docs/plans/M4.md`), no
+  behaviour change. §6.3: `AssociationMiss` records and the counters `assocMisses`, `assocMissGate`, `assocMissCost`,
+  `assocMissTaken`, `assocMissLowBirth`, `assocBirthNearLive`, `assocBirthAfterRemoval`. §6.7: the `track: miss …` log
+  line (at most `assocMissLogPerMin` a minute, then `track: miss suppressed N`) and the seven `summary.txt` counters. §7.1: `assocMissNearRatio`, `assocMissLogPerMin`.
 - **v1.3 (M4d, 2026-11-17):** re-lock tuning from the first phone test (plan `docs/plans/M4.md`). §6.6: `relockMaxDistance`
   0.30 → 0.40; upper-body torso from the shoulders (`relockUpperTorsoRatio` 0.8) when the hips are not confident and the
   box is not a standing body; four confident keypoints with no area fail closed; a lock with an empty signature ends

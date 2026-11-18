@@ -46,6 +46,13 @@ import com.memo494.posetracker.overlay.OverlayState
  * @property lockRelockRejects new tracks compared with a pending lock and not accepted (too different, or not clearly
  *   the closest) since Start, count.
  * @property lockExpired pending locks whose memory ran out since Start, count.
+ * @property assocMisses tracks born next to a LOST track (association misses) since Start, count.
+ * @property assocMissGate misses whose pair was outside the gate since Start, count.
+ * @property assocMissCost misses whose pair passed the gate but cost too much since Start, count.
+ * @property assocMissTaken misses whose pair the matcher would have accepted since Start, count.
+ * @property assocMissLowBirth unmatched detections below the birth score next to a LOST track since Start, count.
+ * @property assocBirthNearLive tracks born next to a track that was not LOST since Start, count.
+ * @property assocBirthAfterRemoval tracks born next to a track removed in the same frame since Start, count.
  * @property model the model of the session (source, file, fallback, input size); `null` = not known.
  * @property timing percentiles of the per-frame timings over the newest frames; [TimingSummary.EMPTY] = none yet.
  * @property thermalStatus name of the device's thermal status (`NONE` to `SHUTDOWN`); `n/a` = not known.
@@ -86,6 +93,13 @@ internal data class CaptureStats(
     val lockRelocks: Int = 0,
     val lockRelockRejects: Int = 0,
     val lockExpired: Int = 0,
+    val assocMisses: Int = 0,
+    val assocMissGate: Int = 0,
+    val assocMissCost: Int = 0,
+    val assocMissTaken: Int = 0,
+    val assocMissLowBirth: Int = 0,
+    val assocBirthNearLive: Int = 0,
+    val assocBirthAfterRemoval: Int = 0,
     val model: ModelStatus? = null,
     val timing: TimingSummary = TimingSummary.EMPTY,
     val thermalStatus: String = ThermalStatusText.NOT_AVAILABLE,

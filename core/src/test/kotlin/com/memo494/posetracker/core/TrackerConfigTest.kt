@@ -584,6 +584,46 @@ class TrackerConfigTest {
     }
 
     @Test
+    fun assocMissFields_haveTheDocumentedDefaults() {
+        val config = TrackerConfig()
+
+        assertThat(config.assocMissNearRatio).isEqualTo(1.0f)
+        assertThat(config.assocMissLogPerMin).isEqualTo(30)
+        assertWithin(
+            config.assocMissNearRatio,
+            TrackerConfig.MIN_ASSOC_MISS_NEAR_RATIO,
+            TrackerConfig.MAX_ASSOC_MISS_NEAR_RATIO,
+        )
+        assertThat(config.assocMissLogPerMin).isAtLeast(TrackerConfig.MIN_ASSOC_MISS_LOG_PER_MIN)
+        assertThat(config.assocMissLogPerMin).isAtMost(TrackerConfig.MAX_ASSOC_MISS_LOG_PER_MIN)
+    }
+
+    @Test
+    fun assocMissFields_atTheirBounds_areAccepted() {
+        TrackerConfig(
+            assocMissNearRatio = TrackerConfig.MIN_ASSOC_MISS_NEAR_RATIO,
+            assocMissLogPerMin = TrackerConfig.MIN_ASSOC_MISS_LOG_PER_MIN,
+        )
+        TrackerConfig(
+            assocMissNearRatio = TrackerConfig.MAX_ASSOC_MISS_NEAR_RATIO,
+            assocMissLogPerMin = TrackerConfig.MAX_ASSOC_MISS_LOG_PER_MIN,
+        )
+    }
+
+    @Test
+    fun assocMissFields_outsideTheirBounds_areRejected() {
+        val rejected: List<() -> TrackerConfig> =
+            listOf(
+                { TrackerConfig(assocMissNearRatio = TrackerConfig.MIN_ASSOC_MISS_NEAR_RATIO / 2f) },
+                { TrackerConfig(assocMissNearRatio = TrackerConfig.MAX_ASSOC_MISS_NEAR_RATIO * 2f) },
+                { TrackerConfig(assocMissNearRatio = Float.NaN) },
+                { TrackerConfig(assocMissLogPerMin = TrackerConfig.MIN_ASSOC_MISS_LOG_PER_MIN - 1) },
+                { TrackerConfig(assocMissLogPerMin = TrackerConfig.MAX_ASSOC_MISS_LOG_PER_MIN + 1) },
+            )
+        for (build in rejected) assertThrows(IllegalArgumentException::class.java) { build() }
+    }
+
+    @Test
     fun smoothFields_haveTheDocumentedDefaults() {
         val config = TrackerConfig()
 

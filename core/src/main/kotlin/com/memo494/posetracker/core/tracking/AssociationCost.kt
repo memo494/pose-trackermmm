@@ -51,8 +51,7 @@ object AssociationCost {
 
         val dxImg = measHeadXImg - predHeadXImg
         val dyImg = measHeadYImg - predHeadYImg
-        val mahalanobis2 = dxImg * dxImg / innovVarXImg2 + dyImg * dyImg / innovVarYImg2
-        if (!(mahalanobis2 <= config.trackGateChi2)) return Assigner.FORBIDDEN
+        if (!(mahalanobis2(dxImg, dyImg, innovVarXImg2, innovVarYImg2) <= config.trackGateChi2)) return Assigner.FORBIDDEN
 
         val iou =
             BoxOverlap.iou(
@@ -65,6 +64,33 @@ object AssociationCost {
                 detRightImg,
                 detBottomImg,
             )
+        return ungatedCost(iou, dxImg, dyImg, trackHeightImg, config)
+    }
+
+    /**
+     * Squared Mahalanobis distance of the head innovation (`dxImg`, `dyImg`; Img px) with the variances
+     * `innovVarXImg2` and `innovVarYImg2` (Img px^2, both positive): `dx^2 / varX + dy^2 / varY`. The matcher's gate
+     * compares it with `trackGateChi2`; the miss diagnostics use the same function.
+     */
+    fun mahalanobis2(
+        dxImg: Float,
+        dyImg: Float,
+        innovVarXImg2: Float,
+        innovVarYImg2: Float,
+    ): Float = dxImg * dxImg / innovVarXImg2 + dyImg * dyImg / innovVarYImg2
+
+    /**
+     * The cost of a pair without the gate: `assocIouWeight * (1 - iou) + assocHeadWeight * min(1, dHead /
+     * (assocHeadScaleRatio * h))` with `dHead` from (`dxImg`, `dyImg`) and `h` = `trackHeightImg`. The caller makes
+     * sure the inputs are finite and the height is positive.
+     */
+    fun ungatedCost(
+        iou: Float,
+        dxImg: Float,
+        dyImg: Float,
+        trackHeightImg: Float,
+        config: TrackerConfig,
+    ): Float {
         val headTerm = minOf(1f, sqrt(dxImg * dxImg + dyImg * dyImg) / (config.assocHeadScaleRatio * trackHeightImg))
         return config.assocIouWeight * (1f - iou) + config.assocHeadWeight * headTerm
     }

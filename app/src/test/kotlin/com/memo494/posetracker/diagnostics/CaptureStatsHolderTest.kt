@@ -171,6 +171,20 @@ class CaptureStatsHolderTest {
     }
 
     @Test
+    fun publish_beforeAnyFrame_hasZeroAssocMissCounters() {
+        CaptureStatsHolder.publish(OverlayState(), pipelineWithDetector(), null)
+
+        val stats = CaptureStatsHolder.latest!!
+        assertThat(stats.assocMisses).isEqualTo(0)
+        assertThat(stats.assocMissGate).isEqualTo(0)
+        assertThat(stats.assocMissCost).isEqualTo(0)
+        assertThat(stats.assocMissTaken).isEqualTo(0)
+        assertThat(stats.assocMissLowBirth).isEqualTo(0)
+        assertThat(stats.assocBirthNearLive).isEqualTo(0)
+        assertThat(stats.assocBirthAfterRemoval).isEqualTo(0)
+    }
+
+    @Test
     fun publish_afterALockedFrame_carriesTheLockCountOfThePipeline() {
         val pipeline = pipelineWithOnePerson()
         for (k in 0 until 3) pipeline.onFrame(SolidImage(TRACK_WIDTH, TRACK_HEIGHT, 0L), NOW_NS + k * FRAME_GAP_NS)

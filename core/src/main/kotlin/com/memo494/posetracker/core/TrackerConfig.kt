@@ -179,6 +179,11 @@ package com.memo494.posetracker.core
  * @property relockUpperTorsoRatio height of the upper-body torso, as a multiple of the horizontal distance between the
  *   shoulders, below the lower shoulder, used when the hips are not confident, the box is not a whole body and both
  *   shoulders are, unitless, in [[MIN_RELOCK_UPPER_TORSO_RATIO], [MAX_RELOCK_UPPER_TORSO_RATIO]].
+ * @property assocMissNearRatio diagnostics only (no effect on the tracks): a track born while a LOST track's predicted
+ *   head is within this multiple of the lost track's height of the new head is recorded as an association miss,
+ *   unitless, in [[MIN_ASSOC_MISS_NEAR_RATIO], [MAX_ASSOC_MISS_NEAR_RATIO]].
+ * @property assocMissLogPerMin most association-miss log lines the app writes per minute (the counters always
+ *   count), count, in [[MIN_ASSOC_MISS_LOG_PER_MIN], [MAX_ASSOC_MISS_LOG_PER_MIN]]; 0 writes none.
  */
 data class TrackerConfig(
     val scoreThreshold: Float = DEFAULT_SCORE_THRESHOLD,
@@ -263,6 +268,8 @@ data class TrackerConfig(
     val relockFullBodyMinAspect: Float = DEFAULT_RELOCK_FULL_BODY_ASPECT,
     val relockJudgeFrames: Int = DEFAULT_RELOCK_JUDGE_FRAMES,
     val relockUpperTorsoRatio: Float = DEFAULT_RELOCK_UPPER_TORSO_RATIO,
+    val assocMissNearRatio: Float = DEFAULT_ASSOC_MISS_NEAR_RATIO,
+    val assocMissLogPerMin: Int = DEFAULT_ASSOC_MISS_LOG_PER_MIN,
 ) {
     init {
         require(scoreThreshold in MIN_SCORE_THRESHOLD..MAX_SCORE_THRESHOLD) {
@@ -539,6 +546,12 @@ data class TrackerConfig(
         require(relockUpperTorsoRatio in MIN_RELOCK_UPPER_TORSO_RATIO..MAX_RELOCK_UPPER_TORSO_RATIO) {
             "relockUpperTorsoRatio $relockUpperTorsoRatio outside " +
                 "[$MIN_RELOCK_UPPER_TORSO_RATIO, $MAX_RELOCK_UPPER_TORSO_RATIO]"
+        }
+        require(assocMissNearRatio in MIN_ASSOC_MISS_NEAR_RATIO..MAX_ASSOC_MISS_NEAR_RATIO) {
+            "assocMissNearRatio $assocMissNearRatio outside [$MIN_ASSOC_MISS_NEAR_RATIO, $MAX_ASSOC_MISS_NEAR_RATIO]"
+        }
+        require(assocMissLogPerMin in MIN_ASSOC_MISS_LOG_PER_MIN..MAX_ASSOC_MISS_LOG_PER_MIN) {
+            "assocMissLogPerMin $assocMissLogPerMin outside [$MIN_ASSOC_MISS_LOG_PER_MIN, $MAX_ASSOC_MISS_LOG_PER_MIN]"
         }
     }
 
@@ -1209,6 +1222,27 @@ data class TrackerConfig(
 
         /** Highest accepted [relockUpperTorsoRatio]. */
         const val MAX_RELOCK_UPPER_TORSO_RATIO = 2f
+
+        /** Default [assocMissNearRatio], unitless (M4e: one track height). */
+        const val DEFAULT_ASSOC_MISS_NEAR_RATIO = 1.0f
+
+        /** Lowest accepted [assocMissNearRatio]. */
+        const val MIN_ASSOC_MISS_NEAR_RATIO = 0.1f
+
+        /** Highest accepted [assocMissNearRatio]. */
+        const val MAX_ASSOC_MISS_NEAR_RATIO = 5.0f
+
+        /** Length of the window [assocMissLogPerMin] counts in, nanoseconds (one minute). */
+        const val ASSOC_MISS_LOG_WINDOW_NS = 60_000_000_000L
+
+        /** Default [assocMissLogPerMin], lines per minute. */
+        const val DEFAULT_ASSOC_MISS_LOG_PER_MIN = 30
+
+        /** Lowest accepted [assocMissLogPerMin] (0 = no log lines). */
+        const val MIN_ASSOC_MISS_LOG_PER_MIN = 0
+
+        /** Highest accepted [assocMissLogPerMin]. */
+        const val MAX_ASSOC_MISS_LOG_PER_MIN = 600
 
         /**
          * [relockMinSamplePixels] may be at most [relockMaxSamplePixels] divided by this: a grid over a rectangle that

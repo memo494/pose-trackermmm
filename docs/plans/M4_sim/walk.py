@@ -2,7 +2,7 @@
 """M4e: id switches of one walking person on the reference tracker (M3_sim) by capture rate, speed and turns.
 Not production code, not run by CI. Run: python3 walk.py"""
 import sys, os, random, math
-sys.path.insert(0, '/home/claude/pose-trackermmm/docs/plans/M3_sim')
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'M3_sim'))
 from tracker_ref import *
 # a person walking on a security-camera picture: speed v (heights/s), direction change every turnS, captured at fps
 def walker(v, turnS, dur, seed, H=120.0, W=1356, Hh=610):

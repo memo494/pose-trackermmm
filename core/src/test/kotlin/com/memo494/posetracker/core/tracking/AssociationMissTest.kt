@@ -69,6 +69,112 @@ class AssociationMissTest {
     }
 
     @Test
+    fun theRecordedCost_isExactlyTheCostTheMatcherComputes() {
+        confirmedThenLost(tracker, birthFrame = LONG_BIRTH_FRAME)
+        val detection = person(600f + COST_OFFSET_IMG)
+
+        val list = feed(tracker, LONG_BIRTH_FRAME, detection)
+
+        val miss = tracker.miss(0)
+        val lost = (0 until list.size).first { list.id(it) == miss.lostId }
+        val head = HeadPoint()
+        HeadMeasurement.of(detection, config, head)
+        val matcherCost =
+            AssociationCost.cost(
+                list.boxLeftImg(lost),
+                list.boxTopImg(lost),
+                list.boxRightImg(lost),
+                list.boxBottomImg(lost),
+                detection.boxLeftImg,
+                detection.boxTopImg,
+                detection.boxRightImg,
+                detection.boxBottomImg,
+                list.headXImg(lost),
+                list.headYImg(lost),
+                head.headXImg,
+                head.headYImg,
+                HUGE_VARIANCE_IMG2,
+                HUGE_VARIANCE_IMG2,
+                list.heightImg(lost),
+                config,
+            )
+        assertThat(matcherCost).isNotEqualTo(Assigner.FORBIDDEN)
+        assertThat(miss.cost).isEqualTo(matcherCost)
+    }
+
+    @Test
+    fun aBirthNextToAConfirmedTrackThatTookAnotherDetection_isRecordedAsLive() {
+        for (k in 0 until HITS) feed(tracker, k, person(600f))
+
+        feed(tracker, HITS, person(600f), person(600f + LIVE_OFFSET_IMG))
+
+        assertThat(tracker.missCount).isEqualTo(1)
+        val record = tracker.miss(0)
+        assertThat(record.reason).isEqualTo(AssociationMissReason.LIVE)
+        assertThat(record.trackState).isEqualTo(TrackState.CONFIRMED)
+        assertThat(record.lostId).isEqualTo(1)
+        assertThat(record.newId).isEqualTo(2)
+        assertThat(record.detIou).isWithin(IOU_TOLERANCE).of(LIVE_EXPECTED_IOU)
+        assertThat(tracker.assocBirthNearLive).isEqualTo(1)
+        assertThat(tracker.assocMisses).isEqualTo(0)
+        assertThat(tracker.assocBirthAfterRemoval).isEqualTo(0)
+    }
+
+    @Test
+    fun aBirthNextToATentativeTrack_isRecordedAsLiveWithThatState() {
+        feed(tracker, 0, person(600f))
+
+        feed(tracker, 1, person(600f), person(600f + LIVE_OFFSET_IMG))
+
+        assertThat(tracker.missCount).isEqualTo(1)
+        assertThat(tracker.miss(0).reason).isEqualTo(AssociationMissReason.LIVE)
+        assertThat(tracker.miss(0).trackState).isEqualTo(TrackState.TENTATIVE)
+        assertThat(tracker.assocBirthNearLive).isEqualTo(1)
+    }
+
+    @Test
+    fun aBirthFarFromEveryTrack_isNotALiveBirth() {
+        for (k in 0 until HITS) feed(tracker, k, person(600f))
+
+        feed(tracker, HITS, person(600f), person(600f + FAR_OFFSET_IMG))
+
+        assertThat(tracker.missCount).isEqualTo(0)
+        assertThat(tracker.assocBirthNearLive).isEqualTo(0)
+    }
+
+    @Test
+    fun aBirthInTheFrameATrackIsRemoved_isRecordedWithTheRemovalCause() {
+        for (k in 0 until HITS) feed(tracker, k, person(600f))
+        for (k in HITS until REMOVAL_FRAME) feed(tracker, k)
+        assertThat(tracker.removeCount).isEqualTo(0)
+
+        feed(tracker, REMOVAL_FRAME, person(600f + COST_OFFSET_IMG))
+
+        assertThat(tracker.removeCount).isEqualTo(1)
+        assertThat(tracker.missCount).isEqualTo(1)
+        val record = tracker.miss(0)
+        assertThat(record.reason).isEqualTo(AssociationMissReason.REMOVED)
+        assertThat(record.cause).isEqualTo(RemovalCause.LOST_TIME)
+        assertThat(record.lostId).isEqualTo(1)
+        assertThat(record.lostMs).isGreaterThan(config.trackMaxLostMs)
+        assertThat(tracker.assocBirthAfterRemoval).isEqualTo(1)
+        assertThat(tracker.assocMisses).isEqualTo(0)
+        assertThat(tracker.assocBirthNearLive).isEqualTo(0)
+    }
+
+    @Test
+    fun aRemovedTrackIsOnlyRemembered_forTheFrameItWasRemovedIn() {
+        for (k in 0 until HITS) feed(tracker, k, person(600f))
+        for (k in HITS until REMOVAL_FRAME) feed(tracker, k)
+        feed(tracker, REMOVAL_FRAME)
+
+        feed(tracker, REMOVAL_FRAME + 1, person(600f + COST_OFFSET_IMG))
+
+        assertThat(tracker.missCount).isEqualTo(0)
+        assertThat(tracker.assocBirthAfterRemoval).isEqualTo(0)
+    }
+
+    @Test
     fun aLowScoreBirth_isRecordedWithTheLowStage_andTheLowLimitDecides() {
         confirmedThenLost(tracker)
 
@@ -198,16 +304,23 @@ class AssociationMissTest {
             }
             assertThat(b).isEqualTo(a)
             assertThat(c).isEqualTo(a)
+            val idleNs = if (k % IDLE_EVERY == 0) config.trackIdlePromoteNs else 0L
+            val idleA = snapshot(reading.onIdle(idleNs))
+            assertThat(snapshot(narrow.onIdle(idleNs))).isEqualTo(idleA)
+            assertThat(snapshot(wide.onIdle(idleNs))).isEqualTo(idleA)
         }
 
         assertThat(recordsRead).isGreaterThan(0)
-        assertThat(reading.assocMisses).isEqualTo(recordsRead)
-        assertThat(narrow.assocMisses).isAtMost(reading.assocMisses)
+        assertThat(reading.assocMisses).isGreaterThan(0)
+        assertThat(reading.assocBirthNearLive).isGreaterThan(0)
+        assertThat(reading.assocMisses + reading.assocBirthNearLive + reading.assocBirthAfterRemoval).isEqualTo(recordsRead)
+        assertThat(narrow.assocMisses).isEqualTo(0)
         assertThat(wide.assocMisses).isAtLeast(reading.assocMisses)
         for (other in listOf(narrow, wide)) {
             assertThat(other.birthCount).isEqualTo(reading.birthCount)
             assertThat(other.confirmCount).isEqualTo(reading.confirmCount)
             assertThat(other.recoverCount).isEqualTo(reading.recoverCount)
+            assertThat(other.idlePromoteCount).isEqualTo(reading.idlePromoteCount)
             assertThat(other.removeCount).isEqualTo(reading.removeCount)
             assertThat(other.mostShownAtOnce).isEqualTo(reading.mostShownAtOnce)
         }
@@ -222,6 +335,9 @@ class AssociationMissTest {
             list.add(person(SCRIPT_START_X + phase * SCRIPT_STEP_X + (cycle % 2) * NEAR_OFFSET_IMG))
         }
         if (frame % FLICKER_PERIOD != 0) list.add(person(FLICKER_X, score = LOW_STAGE_SCORE))
+        if (frame % NEIGHBOUR_PERIOD == NEIGHBOUR_PHASE) {
+            list.add(person(SCRIPT_START_X + phase * SCRIPT_STEP_X + (cycle % 2) * NEAR_OFFSET_IMG + LIVE_OFFSET_IMG))
+        }
         return list.toTypedArray()
     }
 
@@ -299,5 +415,17 @@ class AssociationMissTest {
         const val SCRIPT_STEP_X = 4f
         const val FLICKER_PERIOD = 7
         const val FLICKER_X = 1100f
+        const val NEIGHBOUR_PERIOD = 11
+        const val NEIGHBOUR_PHASE = 5
+        const val IDLE_EVERY = 5
+        const val HUGE_VARIANCE_IMG2 = 1e9f
+
+        /** A second person this far right of the first: boxes 80 wide overlap by 30 px, IoU 6000 / 26000. */
+        const val LIVE_OFFSET_IMG = 50f
+        const val LIVE_EXPECTED_IOU = 6000f / 26000f
+        const val IOU_TOLERANCE = 0.01f
+
+        /** Frame 3 is the first without people: lost time 850 ms at frame 19 is above the 800 ms limit. */
+        const val REMOVAL_FRAME = 19
     }
 }

@@ -320,19 +320,44 @@ class DiagnosticsReportTest {
 
     // ---- association misses (M4e T1) ----
 
-    private val assocKeys = listOf("assocMisses", "assocMissGate", "assocMissCost", "assocMissTaken", "assocMissLowBirth")
+    private val assocKeys =
+        listOf(
+            "assocMisses",
+            "assocMissGate",
+            "assocMissCost",
+            "assocMissTaken",
+            "assocMissLowBirth",
+            "assocBirthNearLive",
+            "assocBirthAfterRemoval",
+        )
 
     @Test
     fun summary_assocMissLines_showTheNumbersAfterTheLockLinesInTheDocumentedOrder() {
-        val missed = stats.copy(assocMisses = 6, assocMissGate = 3, assocMissCost = 2, assocMissTaken = 1, assocMissLowBirth = 4)
+        val missed =
+            stats.copy(
+                assocMisses = 6,
+                assocMissGate = 3,
+                assocMissCost = 2,
+                assocMissTaken = 1,
+                assocMissLowBirth = 4,
+                assocBirthNearLive = 5,
+                assocBirthAfterRemoval = 7,
+            )
 
         val lines = build(stats = missed).text("summary.txt").trimEnd('\n').split("\n")
         val first = lines.indexOf("assocMisses=6")
 
         assertThat(first).isEqualTo(lines.indexOf("lockExpired=0") + 1)
         assertThat(lines.subList(first, first + assocKeys.size))
-            .containsExactly("assocMisses=6", "assocMissGate=3", "assocMissCost=2", "assocMissTaken=1", "assocMissLowBirth=4")
-            .inOrder()
+            .containsExactly(
+                "assocMisses=6",
+                "assocMissGate=3",
+                "assocMissCost=2",
+                "assocMissTaken=1",
+                "assocMissLowBirth=4",
+                "assocBirthNearLive=5",
+                "assocBirthAfterRemoval=7",
+            ).inOrder()
         assertThat(first + assocKeys.size).isEqualTo(lines.indexOf("modelSource=unknown"))
     }
 
@@ -342,8 +367,15 @@ class DiagnosticsReportTest {
         val without = summaryLines(null)
 
         assertThat(assocKeys.map { key -> withStats.first { it.startsWith("$key=") } })
-            .containsExactly("assocMisses=0", "assocMissGate=0", "assocMissCost=0", "assocMissTaken=0", "assocMissLowBirth=0")
-            .inOrder()
+            .containsExactly(
+                "assocMisses=0",
+                "assocMissGate=0",
+                "assocMissCost=0",
+                "assocMissTaken=0",
+                "assocMissLowBirth=0",
+                "assocBirthNearLive=0",
+                "assocBirthAfterRemoval=0",
+            ).inOrder()
         assertThat(without.none { line -> assocKeys.any { line.startsWith("$it=") } }).isTrue()
     }
 

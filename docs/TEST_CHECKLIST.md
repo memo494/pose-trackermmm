@@ -471,9 +471,12 @@ two people** for about **three minutes**.
 
 **Pass:** the report is saved. (There is no pass or fail for the ids here.) The log has lines like
 `track: miss id=3 -> new id=4 lostMs=100 score=0.81 stage=high gateChi2=35.20 iou=0.00 headRatio=0.90 hRatio=1.05
-cost=0.95 reason=gate`, at most 30 a minute; `summary.txt` has `assocMisses`, `assocMissGate`, `assocMissCost`,
-`assocMissTaken` and `assocMissLowBirth`.
-**If it fails:** the app crashes or the lines never appear while the ring changed ids: Share diagnostics and say so.
+cost=0.95 reason=gate`, at most 30 a minute (then one `track: miss suppressed N`); a new id next to a ring that was not
+fading ends `reason=live state=… detIou=…` and one next to a ring that had just disappeared `reason=removed cause=…`.
+`summary.txt` has `assocMisses`, `assocMissGate`, `assocMissCost`, `assocMissTaken`, `assocMissLowBirth`,
+`assocBirthNearLive` and `assocBirthAfterRemoval`.
+**If it fails:** the app crashes, or the ring got a new id but the log has no `track: miss` line near it (no `gate`,
+`cost`, `live` or `removed` reason) and the counters stayed 0: Share diagnostics and say what happened.
 
 Send the zip also when the ring stayed on the person the whole time.
 
@@ -522,6 +525,8 @@ These checks need a cable and `adb`, or the benchmark screen of M1b, and are not
 - `summary.txt` association-miss fields (M4e), after `lockExpired` and before the model fields: `assocMisses` (tracks
   born next to a LOST one), `assocMissGate` (value above `trackGateChi2`), `assocMissCost` (cost at or above the
   stage limit), `assocMissTaken` (the matcher would have taken the pair: should stay 0), `assocMissLowBirth`
-  (unmatched detections below `trackBirthScore` next to a LOST track, once per frame). The log line is
+  (unmatched detections below `trackBirthScore` next to a LOST track, once per frame), `assocBirthNearLive` (born next
+  to a track that was not LOST, e.g. one that took a duplicate or neighbour box) and `assocBirthAfterRemoval` (born in
+  the frame a track was removed). The log line is
   `track: miss id=L -> new id=N lostMs=… score=… stage=… gateChi2=… iou=… headRatio=… hRatio=… cost=… reason=…`
   (at most `assocMissLogPerMin` 30 a minute). Read `reason` first, then which number is far from its limit.

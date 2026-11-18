@@ -4,6 +4,8 @@ import com.google.common.truth.Truth.assertThat
 import com.memo494.posetracker.core.TrackerConfig
 import com.memo494.posetracker.core.tracking.AssociationMiss
 import com.memo494.posetracker.core.tracking.AssociationMissReason
+import com.memo494.posetracker.core.tracking.RemovalCause
+import com.memo494.posetracker.core.tracking.TrackState
 import org.junit.Test
 
 class AssociationMissLogTest {
@@ -13,6 +15,9 @@ class AssociationMissLogTest {
         reason: AssociationMissReason = AssociationMissReason.GATE,
         highStage: Boolean = true,
         gateChi2: Float = 123.456f,
+        trackState: TrackState = TrackState.CONFIRMED,
+        detIou: Float = Float.NaN,
+        cause: RemovalCause = RemovalCause.NONE,
     ): AssociationMiss {
         val miss = AssociationMiss()
         miss.set(
@@ -27,6 +32,9 @@ class AssociationMissLogTest {
             hRatio = 1.0456f,
             cost = 0.9999f,
             reason = reason,
+            trackState = trackState,
+            detIou = detIou,
+            cause = cause,
         )
         return miss
     }
@@ -55,6 +63,26 @@ class AssociationMissLogTest {
     }
 
     @Test
+    fun format_aLiveBirth_endsWithTheStateAndTheDetectionIou() {
+        val text = AssociationMissLog.format(miss(AssociationMissReason.LIVE, trackState = TrackState.TENTATIVE, detIou = 0.2308f))
+
+        assertThat(text).endsWith(" reason=live state=tentative detIou=0.23")
+        assertThat(AssociationMissLog.format(miss(AssociationMissReason.LIVE, detIou = Float.NaN)))
+            .endsWith(" reason=live state=confirmed detIou=n/a")
+    }
+
+    @Test
+    fun format_aBirthAfterARemoval_endsWithTheCause() {
+        val text = AssociationMissLog.format(miss(AssociationMissReason.REMOVED, cause = RemovalCause.LOST_TIME))
+
+        assertThat(text).endsWith(" reason=removed cause=lostTime")
+        assertThat(AssociationMissLog.format(miss(AssociationMissReason.REMOVED, cause = RemovalCause.EXIT)))
+            .endsWith(" reason=removed cause=exit")
+        assertThat(AssociationMissLog.format(miss(AssociationMissReason.REMOVED, cause = RemovalCause.OTHER)))
+            .endsWith(" reason=removed cause=other")
+    }
+
+    @Test
     fun report_writesAtMostTheLimitPerMinute_andAnewWindowStartsAfterAMinute() {
         val log = AssociationMissLog(2) { lines.add(it) }
 
@@ -67,7 +95,34 @@ class AssociationMissLogTest {
         log.report(miss(), TrackerConfig.ASSOC_MISS_LOG_WINDOW_NS)
         log.report(miss(), TrackerConfig.ASSOC_MISS_LOG_WINDOW_NS + 1L)
         log.report(miss(), TrackerConfig.ASSOC_MISS_LOG_WINDOW_NS + 2L)
-        assertThat(lines).hasSize(4)
+        assertThat(lines.count { it.startsWith("track: miss id=") }).isEqualTo(4)
+    }
+
+    @Test
+    fun report_aWindowThatDroppedLines_writesOneSuppressedLineWhenTheNextWindowStarts() {
+        val log = AssociationMissLog(1) { lines.add(it) }
+
+        log.report(miss(), 0L)
+        log.report(miss(), 1L)
+        log.report(miss(), 2L)
+        assertThat(lines).hasSize(1)
+
+        log.report(miss(), TrackerConfig.ASSOC_MISS_LOG_WINDOW_NS)
+
+        assertThat(lines).hasSize(3)
+        assertThat(lines[1]).isEqualTo("track: miss suppressed 2")
+        assertThat(lines[2]).startsWith("track: miss id=")
+    }
+
+    @Test
+    fun report_aWindowThatDroppedNothing_writesNoSuppressedLine() {
+        val log = AssociationMissLog(2) { lines.add(it) }
+
+        log.report(miss(), 0L)
+        log.report(miss(), TrackerConfig.ASSOC_MISS_LOG_WINDOW_NS)
+
+        assertThat(lines).hasSize(2)
+        assertThat(lines.none { it.contains("suppressed") }).isTrue()
     }
 
     @Test

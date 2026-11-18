@@ -202,6 +202,12 @@ internal class FramePipeline(
     /** Unmatched detections below the birth score next to a LOST track, count; see [trackBirths]. */
     val assocMissLowBirth: Int get() = tracker.assocMissLowBirth
 
+    /** Births next to a track that is not LOST, count; see [trackBirths]. */
+    val assocBirthNearLive: Int get() = tracker.assocBirthNearLive
+
+    /** Births next to a track removed in the same frame, count; see [trackBirths]. */
+    val assocBirthAfterRemoval: Int get() = tracker.assocBirthAfterRemoval
+
     /**
      * Whether a lock exists: a track is locked, a lock waits for its person to come back (pending), or a lock was
      * requested and the next state has not dropped it yet. Any thread.

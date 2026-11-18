@@ -1232,6 +1232,9 @@ data class TrackerConfig(
         /** Highest accepted [assocMissNearRatio]. */
         const val MAX_ASSOC_MISS_NEAR_RATIO = 5.0f
 
+        /** Length of the window [assocMissLogPerMin] counts in, nanoseconds (one minute). */
+        const val ASSOC_MISS_LOG_WINDOW_NS = 60_000_000_000L
+
         /** Default [assocMissLogPerMin], lines per minute. */
         const val DEFAULT_ASSOC_MISS_LOG_PER_MIN = 30
 

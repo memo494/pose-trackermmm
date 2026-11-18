@@ -2313,4 +2313,66 @@ class FramePipelineTest {
         assertThat(pipeline.lockRelockCount).isEqualTo(1)
         assertThat(lockLogs().last()).isEqualTo("lock: relocked id=1 -> 2 d=0.00 next=none")
     }
+
+    // ---- association misses (M4e T1) ----
+
+    private fun missLogs(): List<String> = logs.filter { it.startsWith("track: miss") }
+
+    /** A walker confirmed in three frames, then a person [NEW_PERSON_SHIFT_X_IMG] to the right and nobody at the old place. */
+    private fun confirmedWalkerThenANewPersonNextToIt(pipeline: FramePipeline) {
+        detector.people = listOf(walker())
+        val confirmedAtMs = framesFrom(pipeline, 0, 3)
+        detector.people = listOf(walker(shiftXImg = NEW_PERSON_SHIFT_X_IMG))
+        frameAt(pipeline, confirmedAtMs + FRAME_STEP_MS)
+    }
+
+    @Test
+    fun aTrackBornNextToALostOne_writesOneMissLineAndCountsIt() {
+        val pipeline = trackingPipeline()
+
+        confirmedWalkerThenANewPersonNextToIt(pipeline)
+
+        assertThat(missLogs()).hasSize(1)
+        assertThat(missLogs()[0]).startsWith("track: miss id=1 -> new id=2 lostMs=50 ")
+        assertThat(missLogs()[0]).contains(" stage=high ")
+        assertThat(missLogs()[0]).contains(" iou=0.00 ")
+        assertThat(missLogs()[0]).endsWith(" reason=gate")
+        assertThat(pipeline.assocMisses).isEqualTo(1)
+        assertThat(pipeline.assocMissGate).isEqualTo(1)
+        assertThat(pipeline.assocMissCost).isEqualTo(0)
+        assertThat(pipeline.assocMissTaken).isEqualTo(0)
+        assertThat(pipeline.assocMissLowBirth).isEqualTo(0)
+    }
+
+    @Test
+    fun withZeroLinesPerMinute_theMissIsCountedButNotWritten() {
+        val pipeline = trackingPipeline(TrackerConfig(assocMissLogPerMin = 0))
+
+        confirmedWalkerThenANewPersonNextToIt(pipeline)
+
+        assertThat(missLogs()).isEmpty()
+        assertThat(pipeline.assocMisses).isEqualTo(1)
+    }
+
+    @Test
+    fun aFailingLogger_doesNotStopTheMissFromBeingCounted() {
+        val pipeline = trackingPipeline()
+        loggerError = IllegalStateException("log broke")
+
+        confirmedWalkerThenANewPersonNextToIt(pipeline)
+
+        assertThat(pipeline.assocMisses).isEqualTo(1)
+        assertThat(pipeline.failures).isEqualTo(0L)
+    }
+
+    @Test
+    fun withoutAMiss_theCountersAreZeroAndNothingIsWritten() {
+        val pipeline = trackingPipeline()
+        detector.people = listOf(walker())
+
+        framesFrom(pipeline, 0, 5)
+
+        assertThat(missLogs()).isEmpty()
+        assertThat(pipeline.assocMisses).isEqualTo(0)
+    }
 }

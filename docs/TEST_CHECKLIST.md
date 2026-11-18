@@ -457,6 +457,26 @@ wait.
 not accepted, `lock: candidate id=… d=… rejected (…)`; `summary.txt` has `locks`, `lockRelocks`, `lockRelockRejects` and
 `lockExpired`. Send the zip even when everything passed: the `d=` and `next=` numbers tune the colour limits.
 
+## M4e — why a person gets a new id (numbers only, nothing changes on the screen)
+
+Nothing looks different in this build. It writes down **why** the app gave a person a new id when the old ring was
+still fading next to them, so the next change can fix the right thing. Use a video or the camera app with **one or
+two people** for about **three minutes**.
+
+### 1. Walk, turn, sit, with a lock on
+1. Press **Start**, tap the handle and tap one person: they get the double ring.
+2. Let that person **walk across the picture**, then **turn around** (or walk back), then **sit down or stand still**
+   for a while, then walk again. Keep it going for about three minutes.
+3. Press **Save diagnostics** (or Share) right after, even if the ring never jumped.
+
+**Pass:** the report is saved. (There is no pass or fail for the ids here.) The log has lines like
+`track: miss id=3 -> new id=4 lostMs=100 score=0.81 stage=high gateChi2=35.20 iou=0.00 headRatio=0.90 hRatio=1.05
+cost=0.95 reason=gate`, at most 30 a minute; `summary.txt` has `assocMisses`, `assocMissGate`, `assocMissCost`,
+`assocMissTaken` and `assocMissLowBirth`.
+**If it fails:** the app crashes or the lines never appear while the ring changed ids: Share diagnostics and say so.
+
+Send the zip also when the ring stayed on the person the whole time.
+
 ---
 
 ---
@@ -499,3 +519,9 @@ These checks need a cable and `adb`, or the benchmark screen of M1b, and are not
   returning person to the remembered colours; smaller is closer, accepted up to `relockMaxDistance` 0.40) and `next`
   (distance of the nearest other person; `none` = nobody else, `unsampled` = somebody could not be sampled) to tune
   `relockMaxDistance` and `relockMinMargin`.
+- `summary.txt` association-miss fields (M4e), after `lockExpired` and before the model fields: `assocMisses` (tracks
+  born next to a LOST one), `assocMissGate` (value above `trackGateChi2`), `assocMissCost` (cost at or above the
+  stage limit), `assocMissTaken` (the matcher would have taken the pair: should stay 0), `assocMissLowBirth`
+  (unmatched detections below `trackBirthScore` next to a LOST track, once per frame). The log line is
+  `track: miss id=L -> new id=N lostMs=… score=… stage=… gateChi2=… iou=… headRatio=… hRatio=… cost=… reason=…`
+  (at most `assocMissLogPerMin` 30 a minute). Read `reason` first, then which number is far from its limit.

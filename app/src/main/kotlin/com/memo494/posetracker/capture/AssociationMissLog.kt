@@ -69,11 +69,18 @@ internal class AssociationMissLog(
 
         private fun extra(miss: AssociationMiss): String =
             when (miss.reason) {
-                AssociationMissReason.LIVE ->
+                AssociationMissReason.LIVE -> {
                     " state=${if (miss.trackState == TrackState.TENTATIVE) "tentative" else "confirmed"} " +
                         "detIou=${number(miss.detIou, TWO_DECIMALS)}"
-                AssociationMissReason.REMOVED -> " cause=${causeText(miss.cause)}"
-                else -> ""
+                }
+
+                AssociationMissReason.REMOVED -> {
+                    " cause=${causeText(miss.cause)}"
+                }
+
+                else -> {
+                    ""
+                }
             }
 
         private fun causeText(cause: RemovalCause): String =

@@ -3,6 +3,7 @@ package com.memo494.posetracker.core.tracking
 import com.memo494.posetracker.core.TrackerConfig
 import com.memo494.posetracker.core.model.DetectionFrame
 import com.memo494.posetracker.core.model.PoseDetection
+import kotlin.math.sqrt
 
 /**
  * Multi-person tracker: detections in, stable tracks with ids and a smoothed head point out. The algorithm is
@@ -26,6 +27,12 @@ import com.memo494.posetracker.core.model.PoseDetection
  *    than `maxTracks` tracks exist (confirmed at once when `trackConfirmHits` is 1);
  * 8. [onIdle] promotes the tentative tracks after `trackIdlePromoteMs` without a frame and removes a LOST track
  *    whose lost time plus the idle time exceeds `trackMaxLostMs` (so a still screen does not keep a ring for ever).
+ *
+ * Association-miss diagnostics (M4e, no effect on any track): when step 7 starts a track while a LOST track's predicted
+ * head is within `assocMissNearRatio` heights of the new head, the pair is recorded ([missCount], [miss]) with the
+ * values the matcher used, and the counters [assocMisses] (by reason [assocMissGate], [assocMissCost],
+ * [assocMissTaken]) go up; an unmatched detection below `trackBirthScore` next to a LOST track adds to
+ * [assocMissLowBirth]. The work is a loop over the tracks and runs only for such a detection.
  *
  * Thread rule: not thread-safe, one capture thread calls everything. **Allocation-free after construction**
  * (AGENTS rule 8): the pool of `maxTracks` tracks, the order array and every scratch array are made in the
@@ -140,8 +147,41 @@ class Tracker(
     var mostShownAtOnce: Int = 0
         private set
 
+    /** Tracks born next to a LOST track (an association miss, see the class doc) since construction. */
+    var assocMisses: Int = 0
+        private set
+
+    /** Misses whose pair was outside the gate; part of [assocMisses]. */
+    var assocMissGate: Int = 0
+        private set
+
+    /** Misses whose pair passed the gate but cost too much; part of [assocMisses]. */
+    var assocMissCost: Int = 0
+        private set
+
+    /** Misses whose pair the matcher would have accepted; part of [assocMisses]. */
+    var assocMissTaken: Int = 0
+        private set
+
+    /** Unmatched detections below the birth score next to a LOST track, counted once per frame they appear (no record). */
+    var assocMissLowBirth: Int = 0
+        private set
+
+    private val misses = Array(TrackerConfig.MAX_DETECTIONS_PER_FRAME) { AssociationMiss() }
+
+    /** Number of records the newest [update] made (valid until the next call to [update] or [reset]). */
+    var missCount: Int = 0
+        private set
+
+    /** The record [index] of the newest [update], `0 until missCount`; throws `IndexOutOfBoundsException` otherwise. */
+    fun miss(index: Int): AssociationMiss {
+        if (index < 0 || index >= missCount) throw IndexOutOfBoundsException("index $index, size $missCount")
+        return misses[index]
+    }
+
     /** Feeds one frame of detections and returns the tracks afterwards (the same list object every call). */
     fun update(frame: DetectionFrame): TrackList {
+        missCount = 0
         var dteNs = 0.0
         if (hasLastFrame) {
             val dtNs = frame.timestampNs - lastTimestampNs
@@ -200,6 +240,7 @@ class Tracker(
     fun reset() {
         inUse.fill(false)
         activeCount = 0
+        missCount = 0
         hasLastFrame = false
     }
 
@@ -400,7 +441,11 @@ class Tracker(
         for (k in 0 until keepCount) {
             val index = keep[k]
             val detection = detections[index]
-            if (detUsed[index] || detection.score < config.trackBirthScore) continue
+            if (detUsed[index]) continue
+            if (detection.score < config.trackBirthScore) {
+                if (nearestLostSlot(heads[index]) >= 0) assocMissLowBirth++
+                continue
+            }
             if (activeCount >= maxTracks) return
             val slot = freeSlot()
             if (slot < 0) return
@@ -409,8 +454,85 @@ class Tracker(
                 inUse[slot] = true
                 order[activeCount++] = slot
                 birthCount++
+                noteMiss(index, detection, tracks[slot].id)
             }
         }
+    }
+
+    /**
+     * Records the pair of the detection [index] (just given the track [newId]) and the nearest LOST track within
+     * `assocMissNearRatio` heights, if there is one. Only reads tracks and detections; writes the diagnostics.
+     */
+    private fun noteMiss(
+        index: Int,
+        detection: PoseDetection,
+        newId: Int,
+    ) {
+        val head = heads[index]
+        val lostSlot = nearestLostSlot(head)
+        if (lostSlot < 0) return
+        val lost = tracks[lostSlot]
+        val heightImg = lost.height.position
+        val dxImg = head.headXImg - lost.x.position
+        val dyImg = head.headYImg - lost.y.position
+        val varXImg2 = lost.x.pPos + head.varianceImg2
+        val varYImg2 = lost.y.pPos + head.varianceImg2
+        val gateValue = if (varXImg2 > 0f && varYImg2 > 0f) dxImg * dxImg / varXImg2 + dyImg * dyImg / varYImg2 else Float.NaN
+        val iou =
+            BoxOverlap.iou(
+                lost.boxLeftImg(),
+                lost.boxTopImg(),
+                lost.boxRightImg(),
+                lost.boxBottomImg(),
+                detection.boxLeftImg,
+                detection.boxTopImg,
+                detection.boxRightImg,
+                detection.boxBottomImg,
+            )
+        val headRatio = sqrt(dxImg * dxImg + dyImg * dyImg) / (config.assocHeadScaleRatio * heightImg)
+        val cost = config.assocIouWeight * (1f - iou) + config.assocHeadWeight * minOf(1f, headRatio)
+        val highStage = detection.score >= config.trackHighScore
+        val maxCost = if (highStage) config.trackMatchMaxCost else config.trackLowMatchMaxCost
+        val reason = AssociationMissReason.classify(gateValue, cost, maxCost, config.trackGateChi2)
+        misses[missCount++].set(
+            lostId = lost.id,
+            newId = newId,
+            lostMs = lost.lostMs,
+            score = detection.score,
+            highStage = highStage,
+            gateChi2 = gateValue,
+            iou = iou,
+            headRatio = headRatio,
+            hRatio = (detection.boxBottomImg - detection.boxTopImg) / heightImg,
+            cost = cost,
+            reason = reason,
+        )
+        assocMisses++
+        when (reason) {
+            AssociationMissReason.GATE -> assocMissGate++
+            AssociationMissReason.COST -> assocMissCost++
+            AssociationMissReason.TAKEN -> assocMissTaken++
+        }
+    }
+
+    /** Pool index of the LOST track whose head is nearest to [head] and within `assocMissNearRatio` heights, or -1. */
+    private fun nearestLostSlot(head: HeadPoint): Int {
+        var best = -1
+        var bestDistance2 = Float.MAX_VALUE
+        for (pos in 0 until activeCount) {
+            val slot = order[pos]
+            val track = tracks[slot]
+            if (track.state != TrackState.LOST || !(track.height.position > 0f)) continue
+            val dxImg = head.headXImg - track.x.position
+            val dyImg = head.headYImg - track.y.position
+            val distance2 = dxImg * dxImg + dyImg * dyImg
+            val reachImg = config.assocMissNearRatio * track.height.position
+            if (distance2 <= reachImg * reachImg && distance2 < bestDistance2) {
+                best = slot
+                bestDistance2 = distance2
+            }
+        }
+        return best
     }
 
     private fun freeSlot(): Int {

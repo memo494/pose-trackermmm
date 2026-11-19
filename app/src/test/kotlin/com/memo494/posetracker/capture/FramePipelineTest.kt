@@ -69,6 +69,7 @@ private const val EDGE_STAY_FRAMES = 11
 private const val FRAMES_WHILE_HIDDEN = 2
 private const val FRAMES_UNTIL_REMOVED = 22
 private const val MORE_FRAMES_HIDDEN = 8
+
 /** Inside the default early radius of 0.6 heights (120 px for the 200 px walker); [NEW_PERSON_SHIFT_X_IMG] is outside it. */
 private const val EARLY_NEAR_SHIFT_X_IMG = 90f
 private const val EARLY_JUST_OUTSIDE_SHIFT_X_IMG = 130f

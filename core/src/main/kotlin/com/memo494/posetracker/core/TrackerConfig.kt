@@ -63,6 +63,10 @@ package com.memo494.posetracker.core
  *   Mahalanobis distance of its head point from the track's predicted head point (the two axes taken
  *   independently, using the innovation variances) is at most this value; chi-square with 2 degrees of
  *   freedom, unitless, in [[MIN_TRACK_GATE_CHI2], [MAX_TRACK_GATE_CHI2]]; 9.21 is the 99 % point.
+ * @property trackGateMinSigmaRatio floor of the gate's per-axis standard deviation, as a fraction of the track box
+ *   height (unitless), in [[MIN_TRACK_GATE_MIN_SIGMA_RATIO], [MAX_TRACK_GATE_MIN_SIGMA_RATIO]]: in the gate only, each
+ *   axis variance is `max(P + R, (ratio * h)^2)`, because the filter's variance is far below the real jitter of the
+ *   detector (M4f). The cost and its limits are unchanged; 0 switches the floor off (the M3 gate).
  * @property assocIouWeight weight of `1 - IoU` of the track box and the detection box in the association cost,
  *   unitless in [[MIN_ASSOC_WEIGHT], [MAX_ASSOC_WEIGHT]].
  * @property assocHeadWeight weight of the head distance term in the association cost, unitless in
@@ -218,6 +222,7 @@ data class TrackerConfig(
     val minBoxHeightImg: Float = DEFAULT_MIN_BOX_HEIGHT_IMG,
     val maxTracks: Int = DEFAULT_MAX_TRACKS,
     val trackGateChi2: Float = DEFAULT_TRACK_GATE_CHI2,
+    val trackGateMinSigmaRatio: Float = DEFAULT_TRACK_GATE_MIN_SIGMA_RATIO,
     val assocIouWeight: Float = DEFAULT_ASSOC_WEIGHT,
     val assocHeadWeight: Float = DEFAULT_ASSOC_WEIGHT,
     val assocHeadScaleRatio: Float = DEFAULT_ASSOC_HEAD_SCALE_RATIO,
@@ -391,6 +396,10 @@ data class TrackerConfig(
         }
         require(assocHeadWeight in MIN_ASSOC_WEIGHT..MAX_ASSOC_WEIGHT) {
             "assocHeadWeight $assocHeadWeight outside [$MIN_ASSOC_WEIGHT, $MAX_ASSOC_WEIGHT]"
+        }
+        require(trackGateMinSigmaRatio in MIN_TRACK_GATE_MIN_SIGMA_RATIO..MAX_TRACK_GATE_MIN_SIGMA_RATIO) {
+            "trackGateMinSigmaRatio $trackGateMinSigmaRatio outside " +
+                "[$MIN_TRACK_GATE_MIN_SIGMA_RATIO, $MAX_TRACK_GATE_MIN_SIGMA_RATIO]"
         }
         require(assocHeadScaleRatio in MIN_ASSOC_HEAD_SCALE_RATIO..MAX_ASSOC_HEAD_SCALE_RATIO) {
             "assocHeadScaleRatio $assocHeadScaleRatio outside [$MIN_ASSOC_HEAD_SCALE_RATIO, $MAX_ASSOC_HEAD_SCALE_RATIO]"
@@ -844,6 +853,15 @@ data class TrackerConfig(
 
         /** Highest accepted [trackGateChi2]. */
         const val MAX_TRACK_GATE_CHI2 = 30.0f
+
+        /** Default [trackGateMinSigmaRatio], unitless (M4f: 0.2 of the track height). */
+        const val DEFAULT_TRACK_GATE_MIN_SIGMA_RATIO = 0.2f
+
+        /** Lowest accepted [trackGateMinSigmaRatio]; 0 = no floor. */
+        const val MIN_TRACK_GATE_MIN_SIGMA_RATIO = 0.0f
+
+        /** Highest accepted [trackGateMinSigmaRatio]. */
+        const val MAX_TRACK_GATE_MIN_SIGMA_RATIO = 1.0f
 
         /** Default [assocIouWeight] and [assocHeadWeight]: the two cost terms count equally, unitless. */
         const val DEFAULT_ASSOC_WEIGHT = 0.5f

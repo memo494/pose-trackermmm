@@ -14,7 +14,8 @@ import kotlin.math.sqrt
  *
  * The pair is [Assigner.FORBIDDEN] when the squared Mahalanobis distance of the head innovation,
  * `dx^2 / varX + dy^2 / varY` (the two axes independent), is above [TrackerConfig.trackGateChi2], and, failing
- * closed, when any input is not finite or a variance or the height is not positive.
+ * closed, when any input is not finite or a variance or the height is not positive. In the gate only, each variance
+ * is at least `(trackGateMinSigmaRatio * h)^2` (M4f); the cost itself and its limits do not use the floor.
  */
 object AssociationCost {
     /**
@@ -51,7 +52,8 @@ object AssociationCost {
 
         val dxImg = measHeadXImg - predHeadXImg
         val dyImg = measHeadYImg - predHeadYImg
-        if (!(mahalanobis2(dxImg, dyImg, innovVarXImg2, innovVarYImg2) <= config.trackGateChi2)) return Assigner.FORBIDDEN
+        val gateChi2 = mahalanobis2(dxImg, dyImg, innovVarXImg2, innovVarYImg2, config.trackGateMinSigmaRatio * trackHeightImg)
+        if (!(gateChi2 <= config.trackGateChi2)) return Assigner.FORBIDDEN
 
         val iou =
             BoxOverlap.iou(
@@ -69,15 +71,21 @@ object AssociationCost {
 
     /**
      * Squared Mahalanobis distance of the head innovation (`dxImg`, `dyImg`; Img px) with the variances
-     * `innovVarXImg2` and `innovVarYImg2` (Img px^2, both positive): `dx^2 / varX + dy^2 / varY`. The matcher's gate
-     * compares it with `trackGateChi2`; the miss diagnostics use the same function.
+     * `innovVarXImg2` and `innovVarYImg2` (Img px^2, both positive): `dx^2 / varX + dy^2 / varY`, where each variance
+     * is first raised to at least `minSigmaImg^2` (the gate floor, Img px; a `minSigmaImg` that is not above 0 or not
+     * a number means no floor). The matcher's gate compares it with `trackGateChi2`; the miss diagnostics use the
+     * same function with the same arguments.
      */
     fun mahalanobis2(
         dxImg: Float,
         dyImg: Float,
         innovVarXImg2: Float,
         innovVarYImg2: Float,
-    ): Float = dxImg * dxImg / innovVarXImg2 + dyImg * dyImg / innovVarYImg2
+        minSigmaImg: Float,
+    ): Float {
+        val floorVarImg2 = if (minSigmaImg > 0f) minSigmaImg * minSigmaImg else 0f
+        return dxImg * dxImg / maxOf(innovVarXImg2, floorVarImg2) + dyImg * dyImg / maxOf(innovVarYImg2, floorVarImg2)
+    }
 
     /**
      * The cost of a pair without the gate: `assocIouWeight * (1 - iou) + assocHeadWeight * min(1, dHead /

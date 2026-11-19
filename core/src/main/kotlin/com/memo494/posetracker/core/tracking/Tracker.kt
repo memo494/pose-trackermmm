@@ -588,8 +588,13 @@ class Tracker(
         val dyImg = head.headYImg - pair.yImg
         val varXImg2 = pair.varXImg2 + head.varianceImg2
         val varYImg2 = pair.varYImg2 + head.varianceImg2
+        val minSigmaImg = config.trackGateMinSigmaRatio * heightImg
         val gateChi2 =
-            if (varXImg2 > 0f && varYImg2 > 0f) AssociationCost.mahalanobis2(dxImg, dyImg, varXImg2, varYImg2) else Float.NaN
+            if (varXImg2 > 0f && varYImg2 > 0f) {
+                AssociationCost.mahalanobis2(dxImg, dyImg, varXImg2, varYImg2, minSigmaImg)
+            } else {
+                Float.NaN
+            }
         val iou =
             BoxOverlap.iou(
                 pair.leftImg,

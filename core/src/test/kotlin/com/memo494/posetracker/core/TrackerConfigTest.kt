@@ -563,6 +563,32 @@ class TrackerConfigTest {
     }
 
     @Test
+    fun trackGateMinSigmaRatio_defaultsToTwoTenths_andAcceptsItsBounds() {
+        assertThat(TrackerConfig().trackGateMinSigmaRatio).isEqualTo(0.2f)
+        assertThat(TrackerConfig.MIN_TRACK_GATE_MIN_SIGMA_RATIO).isEqualTo(0f)
+        assertThat(TrackerConfig.MAX_TRACK_GATE_MIN_SIGMA_RATIO).isEqualTo(1f)
+        assertThat(TrackerConfig(trackGateMinSigmaRatio = TrackerConfig.MIN_TRACK_GATE_MIN_SIGMA_RATIO).trackGateMinSigmaRatio)
+            .isEqualTo(0f)
+        assertThat(TrackerConfig(trackGateMinSigmaRatio = TrackerConfig.MAX_TRACK_GATE_MIN_SIGMA_RATIO).trackGateMinSigmaRatio)
+            .isEqualTo(1f)
+    }
+
+    @Test
+    fun trackGateMinSigmaRatio_outsideItsBoundsOrNotFinite_isRejected() {
+        val bad =
+            listOf(
+                TrackerConfig.MIN_TRACK_GATE_MIN_SIGMA_RATIO - 0.01f,
+                TrackerConfig.MAX_TRACK_GATE_MIN_SIGMA_RATIO + 0.01f,
+                Float.NaN,
+                Float.POSITIVE_INFINITY,
+                Float.NEGATIVE_INFINITY,
+            )
+        for (value in bad) {
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(trackGateMinSigmaRatio = value) }
+        }
+    }
+
+    @Test
     fun trackTentativeMaxMisses_defaultsToOne_andAcceptsItsBounds() {
         assertThat(TrackerConfig().trackTentativeMaxMisses).isEqualTo(1)
         assertThat(TrackerConfig.DEFAULT_TRACK_TENTATIVE_MAX_MISSES).isAtLeast(TrackerConfig.MIN_TRACK_TENTATIVE_MAX_MISSES)

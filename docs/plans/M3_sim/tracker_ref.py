@@ -28,7 +28,7 @@ class Cfg:
         s.matchMaxCost = 0.7; s.lowMatchMaxCost = 0.6; s.exitMargin = 0.1
         s.recover = False      # M4f: third stage, unmatched CONFIRMED tracks vs leftover detections by the last OBSERVED head/box
         s.recoverMaxCost = 0.7; s.recoverResetVel = False; s.recoverIsolation = 0.0  # >0: skip unless alone within this many heights
-        s.gateMinSigma = 0.0   # M4f: floor of the gate's per-axis sigma, in track heights (0 = off, the M3 behaviour)
+        s.gateMinSigma = 0.0   # M4f: floor of the gate's per-axis sigma, in track heights (0 = off, the M3 behaviour); the app default is 0.2
         for k, v in kw.items():
             assert hasattr(s, k), k
             setattr(s, k, v)

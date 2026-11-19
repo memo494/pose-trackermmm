@@ -8,6 +8,9 @@ import org.junit.jupiter.api.Test
 class AssociationCostTest {
     private val config = TrackerConfig()
 
+    /** The M3 gate: no floor on the per-axis sigma. */
+    private val noFloor = TrackerConfig(trackGateMinSigmaRatio = 0f)
+
     @Test
     fun identicalBoxesAndHeads_costZero() {
         assertThat(costOf(scene())).isWithin(TOLERANCE).of(0f)
@@ -93,13 +96,13 @@ class AssociationCostTest {
         val outside = inside.copyOf()
         outside[MEAS_X] = outside[PRED_X] + 31f
 
-        assertThat(costOf(inside)).isLessThan(Assigner.FORBIDDEN)
-        assertThat(costOf(outside)).isEqualTo(Assigner.FORBIDDEN)
+        assertThat(costOf(inside, noFloor)).isLessThan(Assigner.FORBIDDEN)
+        assertThat(costOf(outside, noFloor)).isEqualTo(Assigner.FORBIDDEN)
     }
 
     @Test
     fun mahalanobisExactlyAtTheGate_isAllowed() {
-        val gate9 = TrackerConfig(trackGateChi2 = 9.0f)
+        val gate9 = TrackerConfig(trackGateChi2 = 9.0f, trackGateMinSigmaRatio = 0f)
         val values = scene()
         values[MEAS_X] = values[PRED_X] + 30f
         values[VAR_X] = 100f
@@ -119,8 +122,81 @@ class AssociationCostTest {
         tightY[VAR_Y] = 100f
 
         // 20^2 / 100 = 4 passes; 20^2 / 1 = 400 does not.
-        assertThat(costOf(tightX)).isLessThan(Assigner.FORBIDDEN)
-        assertThat(costOf(tightY)).isEqualTo(Assigner.FORBIDDEN)
+        assertThat(costOf(tightX, noFloor)).isLessThan(Assigner.FORBIDDEN)
+        assertThat(costOf(tightY, noFloor)).isEqualTo(Assigner.FORBIDDEN)
+    }
+
+    @Test
+    fun gateFloor_letsAJumpOfThreeTenthsOfTheHeightThrough_whenTheVarianceIsTiny() {
+        // h = 100, floor sigma 0.2 * 100 = 20 px; 30 px away with variance 25 px^2: chi2 36 without, 2.25 with.
+        val values = scene()
+        values[MEAS_X] = values[PRED_X] + 30f
+
+        assertThat(costOf(values, noFloor)).isEqualTo(Assigner.FORBIDDEN)
+        assertThat(costOf(values)).isLessThan(Assigner.FORBIDDEN)
+    }
+
+    @Test
+    fun gateFloor_isStillBoundedByTheGate() {
+        // 20 px floor sigma: 61 px away is chi2 9.30 > 9.21, 60 px is 9.0.
+        val inside = scene()
+        inside[MEAS_X] = inside[PRED_X] + 60f
+        val outside = scene()
+        outside[MEAS_X] = outside[PRED_X] + 61f
+
+        assertThat(costOf(inside)).isLessThan(Assigner.FORBIDDEN)
+        assertThat(costOf(outside)).isEqualTo(Assigner.FORBIDDEN)
+    }
+
+    @Test
+    fun gateFloor_neverLowersAVarianceThatIsAlreadyLarger() {
+        // variance 900 (sigma 30) is above the floor 400: 90 px is chi2 9.0 (allowed), 93 px is 9.61 (forbidden).
+        val inside = scene()
+        inside[MEAS_X] = inside[PRED_X] + 90f
+        inside[VAR_X] = 900f
+        val outside = scene()
+        outside[MEAS_X] = outside[PRED_X] + 93f
+        outside[VAR_X] = 900f
+
+        assertThat(costOf(inside)).isLessThan(Assigner.FORBIDDEN)
+        assertThat(costOf(outside)).isEqualTo(Assigner.FORBIDDEN)
+    }
+
+    @Test
+    fun gateFloor_doesNotChangeTheCostOfAPairThatPassesBoth() {
+        val values = scene()
+        values[MEAS_X] = values[PRED_X] + 10f
+        values[VAR_X] = LARGE_VARIANCE
+        values[VAR_Y] = LARGE_VARIANCE
+
+        assertThat(costOf(values)).isEqualTo(costOf(values, noFloor))
+    }
+
+    @Test
+    fun gateFloor_scalesWithTheTrackHeight() {
+        // 130 px away with variance 25 px^2: at h = 400 the floor sigma is 80 px (chi2 2.64, allowed); at h = 100 it is
+        // 20 px (chi2 42, forbidden).
+        val tall = scene()
+        tall[TRACK_HEIGHT] = 400f
+        tall[MEAS_X] = tall[PRED_X] + 130f
+        val short = scene()
+        short[MEAS_X] = short[PRED_X] + 130f
+
+        assertThat(costOf(tall)).isLessThan(Assigner.FORBIDDEN)
+        assertThat(costOf(short)).isEqualTo(Assigner.FORBIDDEN)
+    }
+
+    @Test
+    fun mahalanobis2_usesTheFloorOnEachAxisSeparately() {
+        // x: variance 4 raised to 25 (floor sigma 5) -> 100 / 25 = 4; y: variance 100 above 25 -> 100 / 100 = 1.
+        assertThat(AssociationCost.mahalanobis2(10f, 10f, 4f, 100f, 5f)).isWithin(TOLERANCE).of(5f)
+        assertThat(AssociationCost.mahalanobis2(10f, 10f, 4f, 100f, 0f)).isWithin(TOLERANCE).of(26f)
+    }
+
+    @Test
+    fun mahalanobis2_aNegativeOrNotANumberSigma_isNoFloor() {
+        assertThat(AssociationCost.mahalanobis2(10f, 0f, 4f, 4f, -5f)).isWithin(TOLERANCE).of(25f)
+        assertThat(AssociationCost.mahalanobis2(10f, 0f, 4f, 4f, Float.NaN)).isWithin(TOLERANCE).of(25f)
     }
 
     @Test

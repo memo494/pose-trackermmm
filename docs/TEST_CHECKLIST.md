@@ -482,6 +482,29 @@ Send the zip also when the ring stayed on the person the whole time.
 
 ---
 
+## M4f — fewer new ids, and the lock moves sooner
+
+Same test as M4e, on the new build: the app now lets a head that moved a lot between two frames keep its id (gate
+floor), and the lock moves to the returning person **while the old ring is still fading** instead of waiting for it to
+go. Use a video or the camera app with **one or two people** for about **three minutes**.
+
+### 1. Walk, turn, sit, with a lock on
+1. Press **Start**, tap the handle and tap one person: they get the double ring.
+2. Let that person **walk across the picture**, then **turn around** (or walk back), then **sit down or stand still**
+   for a while, then walk again; also let them **leave the picture and come back** once or twice. About three minutes.
+3. Press **Save diagnostics** (or Share) right after.
+
+**Pass:** the ring stays on the same person more often than in M4e (`assocMissGate` in `summary.txt` clearly lower, at
+least half, and fewer births per minute); the ring never goes to a different person. When the person comes back the
+double ring may return **before** the old ring has faded: the log then has `lock: relocked id=… -> … d=… next=…
+early`. `lockRelocks` counts those too.
+**If it fails:** the double ring jumps to **another person** (say how similar the clothes were), the ring is lost where
+it was not before, or the app crashes: Share diagnostics and say what happened.
+
+Send the zip also when everything passed.
+
+---
+
 ---
 
 ## What to send back
@@ -489,7 +512,7 @@ Send the zip also when the ring stayed on the person the whole time.
    later; a saved zip can be sent later).
 2. **One sentence** about what was on the screen (which app, how many people, what you did).
 3. The **block number** of this checklist that failed (for example "block 5"; for the M0c section say "M0c block 5",
-   for M1a "M1a block 3", for M3 "M3 block 3", for M4a "M4a block 2", for M4b "M4b block 2", for M4c "M4c block 2").
+   for M1a "M1a block 3", for M3 "M3 block 3", for M4a "M4a block 2", for M4b "M4b block 2", for M4c "M4c block 2", for M4f "M4f block 1").
 4. A **screenshot** if the corner text or a warning looked strange.
 5. If everything passed: say "all blocks passed" and the build id from the top of the app.
 

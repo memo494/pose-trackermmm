@@ -11,6 +11,10 @@ and tests are ours.
 
 How the app gets built step by step is in `docs/BUILD_PLAN.md`. Changes per version are in §15.
 
+**v1.5 (M4f):** fewer id switches: the association gate has a floor on its per-axis sigma
+(`trackGateMinSigmaRatio` 0.2 × track height), and the lock moves to a returning person while the old track is still
+LOST (`early` re-lock) (§6.3, §6.6, §7.1, §15).
+
 **v1.4 (M4e):** association-miss diagnostics (no behaviour change): when a track is born next to a LOST one (or next to
 a live or just removed one), the tracker records the values the matcher uses for that pair, the app logs them (rate
 limited) and `summary.txt` counts them (§6.3, §6.7, §7.1, §15).

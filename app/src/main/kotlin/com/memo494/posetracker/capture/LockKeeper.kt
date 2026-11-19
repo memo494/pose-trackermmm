@@ -9,6 +9,7 @@ import com.memo494.posetracker.core.relock.TorsoRect
 import com.memo494.posetracker.core.relock.TorsoRegion
 import com.memo494.posetracker.core.tracking.TrackList
 import com.memo494.posetracker.core.tracking.TrackSnapshot
+import com.memo494.posetracker.core.tracking.TrackState
 import com.memo494.posetracker.overlay.OverlayState
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicInteger
@@ -45,6 +46,11 @@ import kotlin.math.min
  *   and the nearest of the others go to [RelockMatcher.judge], and the lock moves at the first acceptance. A
  *   candidate that is not accepted in its window is counted and logged once, when the window ends. Another track
  *   that cannot be sampled makes every candidate ambiguous (`next=unsampled`: fail closed);
+ * - **early re-lock** (M4f): the same judging, with the same rules, already while the held track is LOST (coasting, not
+ *   yet removed) and a signature exists, so the ring does not wait for the old track to be removed. At the first
+ *   acceptance the lock moves at once, the old track is no longer held, and the line ends with `early`. When the held
+ *   track is matched again first, the candidates are forgotten (no move). Whatever was judged before the removal
+ *   carries over into the pending step;
  * - **end**: a tap on the handle (also one that replaces a pending lock with a new one), a reset ([onReset]), the end
  *   of the session ([onStop]) or the end of the memory.
  *
@@ -163,7 +169,7 @@ internal class LockKeeper(
         lastFrameNs = frame.timestampNs
         resolve(tracks)
         if (matcher.isPending) {
-            if (matcher.isExpired(lastFrameNs)) expire() else tryRelock(list, detections, frame)
+            if (matcher.isExpired(lastFrameNs)) expire() else tryRelock(list, detections, frame, early = false)
         } else if (heldId != OverlayState.NO_LOCK) {
             followHeld(list, detections, frame)
         }
@@ -222,16 +228,23 @@ internal class LockKeeper(
         frame: CaptureFrame,
     ) {
         val index = indexOfId(list, heldId)
-        if (index < 0 || list.matchedDetectionIndex(index) < 0) return
+        if (index < 0) return
+        if (list.matchedDetectionIndex(index) < 0) {
+            if (list.state(index) == TrackState.LOST && signature.hasData) tryRelock(list, detections, frame, early = true)
+            return
+        }
+        candidateCount = 0
         maxIdAtLastMatch = highestId(list)
         if (!torsoOf(list, index, detections, frame) || torso.clipped) return
         if (signature.blend(frame.rgba, frame.widthImg, frame.heightImg, torso)) signatureFrames++
     }
 
+    /** Judges the new tracks against the signature; [early] = the held track is still LOST, not yet removed. */
     private fun tryRelock(
         list: TrackList,
         detections: List<PoseDetection>,
         frame: CaptureFrame,
+        early: Boolean,
     ) {
         forgetCandidatesNotInList(list)
         var sampled = false
@@ -243,7 +256,7 @@ internal class LockKeeper(
                 sampleAll(list, detections, frame)
                 sampled = true
             }
-            if (!judge(list, i, slot)) return
+            if (!judge(list, i, slot, early)) return
         }
     }
 
@@ -252,6 +265,7 @@ internal class LockKeeper(
         list: TrackList,
         index: Int,
         slot: Int,
+        early: Boolean,
     ): Boolean {
         candidateFrames[slot]++
         if (sampleStatus[index] != STATUS_OK) {
@@ -261,7 +275,7 @@ internal class LockKeeper(
             val next = nearestOther(list, index)
             when (matcher.judge(distance, next)) {
                 RelockMatcher.Verdict.ACCEPT -> {
-                    moveTo(list.id(index), distance, next)
+                    moveTo(list.id(index), distance, next, early)
                     return false
                 }
 
@@ -387,6 +401,7 @@ internal class LockKeeper(
         newId: Int,
         distance: Float,
         nextDistance: Float,
+        early: Boolean,
     ): Boolean {
         val oldId = heldId
         if (!requestedId.compareAndSet(oldId, newId)) return false
@@ -395,7 +410,8 @@ internal class LockKeeper(
         candidateCount = 0
         maxIdAtLastMatch = maxOf(maxIdAtLastMatch, newId)
         relockCount++
-        log("lock: relocked id=$oldId -> $newId d=${format(distance)} next=${format(nextDistance)}")
+        val suffix = if (early) " early" else ""
+        log("lock: relocked id=$oldId -> $newId d=${format(distance)} next=${format(nextDistance)}$suffix")
         return true
     }
 

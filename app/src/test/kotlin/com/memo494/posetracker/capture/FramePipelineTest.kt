@@ -68,6 +68,7 @@ private const val EDGE_CLIPPED_SHIFT_X_IMG = -120f
 private const val EDGE_STAY_FRAMES = 11
 private const val FRAMES_WHILE_HIDDEN = 2
 private const val FRAMES_UNTIL_REMOVED = 22
+private const val MORE_FRAMES_HIDDEN = 8
 
 /** An image that records its reads and closes in [events]. */
 private class FakeFrameImage(
@@ -2061,9 +2062,8 @@ class FramePipelineTest {
         assertThat(states.last().tracks.count).isEqualTo(0)
     }
 
-    @Test
-    fun relock_aPersonBornUnderANewIdWhileTheOldTrackIsStillLost_isFoundOnceTheOldOneIsRemoved() {
-        val pipeline = trackingPipeline()
+    /** Red person 1 is locked and seen for six frames, then hidden for [FRAMES_WHILE_HIDDEN] frames; returns the time of the last one. */
+    private fun lockedPersonHiddenForAWhile(pipeline: FramePipeline): Long {
         val first = Look(walker(), RED_SHIRT)
         lookFramesFrom(pipeline, 0, 3, first)
         pipeline.requestLock(1)
@@ -2072,18 +2072,115 @@ class FramePipelineTest {
             atMs += FRAME_STEP_MS
             lookFrameAt(pipeline, atMs)
         }
+        return atMs
+    }
+
+    @Test
+    fun relock_early_aPersonBornUnderANewIdWhileTheOldTrackIsStillLost_getsTheLockAtOnce() {
+        val pipeline = trackingPipeline()
+        val atMs = lockedPersonHiddenForAWhile(pipeline)
         val returned = Look(walker(shiftXImg = NEW_PERSON_SHIFT_X_IMG), RED_SHIRT)
 
         lookFramesFrom(pipeline, atMs + FRAME_STEP_MS, 4, returned)
+
         assertThat(states.last().tracks.count).isEqualTo(2)
         assertThat(states.last().tracks.isLost(0)).isTrue()
-        assertThat(states.last().lockedId).isEqualTo(1)
+        assertThat(states.last().tracks.id(0)).isEqualTo(1)
+        assertThat(states.last().lockedId).isEqualTo(2)
+        assertThat(pipeline.lockRelockCount).isEqualTo(1)
+        assertThat(pipeline.lockRelockRejectCount).isEqualTo(0)
+        assertThat(pipeline.lockCount).isEqualTo(1)
+        assertThat(lockLogs()).containsExactly("lock: set id=1", "lock: relocked id=1 -> 2 d=0.00 next=none early").inOrder()
+    }
+
+    @Test
+    fun relock_early_theOldTrackBeingRemovedLater_changesNothing() {
+        val pipeline = trackingPipeline()
+        val atMs = lockedPersonHiddenForAWhile(pipeline)
+        val returned = Look(walker(shiftXImg = NEW_PERSON_SHIFT_X_IMG), RED_SHIRT)
+        lookFramesFrom(pipeline, atMs + FRAME_STEP_MS, 4, returned)
+        assertThat(states.last().lockedId).isEqualTo(2)
+
         lookFramesFrom(pipeline, atMs + 5 * FRAME_STEP_MS, FRAMES_UNTIL_REMOVED, returned)
 
         assertThat(states.last().tracks.count).isEqualTo(1)
         assertThat(states.last().tracks.id(0)).isEqualTo(2)
         assertThat(states.last().lockedId).isEqualTo(2)
         assertThat(pipeline.lockRelockCount).isEqualTo(1)
+        assertThat(pipeline.lockRelockRejectCount).isEqualTo(0)
+        assertThat(lockLogs()).hasSize(2)
+    }
+
+    @Test
+    fun relock_early_aDifferentlyColouredPersonWhileTheOldTrackIsLost_doesNotMoveTheLock() {
+        val pipeline = trackingPipeline()
+        val atMs = lockedPersonHiddenForAWhile(pipeline)
+
+        lookFramesFrom(pipeline, atMs + FRAME_STEP_MS, 5, Look(walker(shiftXImg = NEW_PERSON_SHIFT_X_IMG), BLUE_SHIRT))
+
+        assertThat(states.last().tracks.count).isEqualTo(2)
+        assertThat(states.last().lockedId).isEqualTo(1)
+        assertThat(pipeline.lockRelockCount).isEqualTo(0)
+        assertThat(lockLogs()).containsExactly("lock: set id=1")
+    }
+
+    @Test
+    fun relock_early_theOldTrackMatchedAgainBeforeTheNewOneIsShown_keepsTheLock() {
+        val pipeline = trackingPipeline()
+        val atMs = lockedPersonHiddenForAWhile(pipeline)
+        val back = Look(walker(), RED_SHIRT)
+        val other = Look(walker(shiftXImg = NEW_PERSON_SHIFT_X_IMG), RED_SHIRT)
+
+        // The new person is only tentative (born in the first frame) when the old track is matched again.
+        lookFrameAt(pipeline, atMs + FRAME_STEP_MS, other)
+        lookFramesFrom(pipeline, atMs + 2 * FRAME_STEP_MS, WINDOW_END_FRAMES, back, other)
+
+        assertThat(states.last().tracks.count).isEqualTo(2)
+        assertThat(states.last().lockedId).isEqualTo(1)
+        assertThat(pipeline.lockRelockCount).isEqualTo(0)
+        assertThat(pipeline.lockRelockRejectCount).isEqualTo(0)
+        assertThat(lockLogs()).containsExactly("lock: set id=1")
+    }
+
+    @Test
+    fun relock_early_aTrackThatWasThereWhenTheHeldTrackWasLastMatched_isNeverACandidate() {
+        val pipeline = trackingPipeline()
+        val left = Look(walker(), RED_SHIRT)
+        val right = Look(walker(shiftXImg = NEW_PERSON_SHIFT_X_IMG), RED_SHIRT)
+        lookFramesFrom(pipeline, 0, 3, left, right)
+        val leftId = idOfTheTrackLeftOf(RIGHT_GROUP_MIN_X_IMG)
+        pipeline.requestLock(leftId)
+        val atMs = lookFramesFrom(pipeline, 3 * FRAME_STEP_MS, 3, left, right)
+        assertThat(states.last().lockedId).isEqualTo(leftId)
+
+        // The locked person leaves; the other one, in the same colours and with a lower or equal id, stays.
+        lookFramesFrom(pipeline, atMs + FRAME_STEP_MS, WINDOW_END_FRAMES, right)
+
+        assertThat(states.last().lockedId).isEqualTo(leftId)
+        assertThat(pipeline.lockRelockCount).isEqualTo(0)
+        assertThat(pipeline.lockRelockRejectCount).isEqualTo(0)
+        assertThat(lockLogs()).containsExactly("lock: set id=$leftId")
+    }
+
+    @Test
+    fun relock_early_aWindowThatStartedWhileTheOldTrackWasLost_goesOnAfterItsRemoval() {
+        val pipeline = trackingPipeline()
+        var atMs = lockedPersonHiddenForAWhile(pipeline)
+        for (i in 0 until MORE_FRAMES_HIDDEN) {
+            atMs += FRAME_STEP_MS
+            lookFrameAt(pipeline, atMs)
+        }
+        val blue = Look(walker(shiftXImg = NEW_PERSON_SHIFT_X_IMG), BLUE_SHIRT)
+
+        // The candidate is shown and judged a few frames before the old track is removed, and its window ends after.
+        lookFramesFrom(pipeline, atMs + FRAME_STEP_MS, WINDOW_END_FRAMES + 2, blue)
+
+        assertThat(pipeline.lockRelockCount).isEqualTo(0)
+        assertThat(pipeline.lockRelockRejectCount).isEqualTo(1)
+        assertThat(lockLogs().filter { it.contains("rejected") }).hasSize(1)
+        assertThat(states.last().tracks.count).isEqualTo(1)
+        assertThat(states.last().lockedId).isEqualTo(OverlayState.NO_LOCK)
+        assertThat(pipeline.hasLock).isTrue()
     }
 
     @Test

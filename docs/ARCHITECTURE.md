@@ -1,4 +1,4 @@
-# pose-tracker-android — Architecture (v1.4)
+# pose-tracker-android — Architecture (v1.5)
 
 Real-time Android app: a screen-capture overlay that draws a stable, low-latency dot on each person's head
 over any other app (video, stream, game), using YOLO26n-pose on-device. Built and modified by AI coding agents (Claude Code, Codex); built only
@@ -355,7 +355,11 @@ tracks, index loops); deterministic.
 - **Association** (ByteTrack two-stage): stage 1 = all tracks × detections with score ≥ `trackHighScore` (0.5);
   stage 2 = the still unmatched tracks × the low ones (down to `scoreThreshold`). Cost
   `assocIouWeight·(1 − IoU) + assocHeadWeight·min(1, d_head / (assocHeadScaleRatio·h))` (0.5, 0.5, 0.5);
-  Mahalanobis gate `trackGateChi2` (9.21) on the head innovation. **Hungarian** (`HungarianAssigner`) behind an
+  Mahalanobis gate `trackGateChi2` (9.21) on the head innovation, where (M4f) each axis variance is `max(P + R,
+  (trackGateMinSigmaRatio × h)²)` with `trackGateMinSigmaRatio` 0.2 (0..1, 0 = off, the M3 gate): the filter's
+  variance is far below the real jitter of the detector (phone data: a gate sigma of 0.066 h against heads that
+  move 0.3 h between matches). The floor is in the gate only; the cost, the cost limits and the filter are
+  unchanged. **Hungarian** (`HungarianAssigner`) behind an
   `Assigner` interface, deterministic tie-break, with a **cost limit** per stage: `trackMatchMaxCost` 0.7,
   `trackLowMatchMaxCost` 0.6. It maximises `sum(limit − cost)` over pairs below the limit; it does not maximise
   the number of pairs (a missing person must not shift the ids of the others).
@@ -396,8 +400,8 @@ tracks, index loops); deterministic.
   tentative track; `trackState`, and `detIou` = IoU of the new box with that track's matched detection box), and with
   none, the nearest track removed in this frame (copied into scratch arrays in `updateTracks`) gives `reason=REMOVED`
   with the removal cause (`LOST_TIME`, `EXIT`, `OTHER`); for these two the numbers use the track's state after the
-  frame. The gate value and the cost come from `AssociationCost.mahalanobis2` and `ungatedCost`, the same functions the
-  matcher uses (a test asserts exact equality). Cumulative counters (kept by `reset()`): `assocMisses` (= gate +
+  frame. The gate value and the cost come from `AssociationCost.mahalanobis2` (with the same floor argument as the
+  matcher) and `ungatedCost`, the same functions the matcher uses (a test asserts exact equality). Cumulative counters (kept by `reset()`): `assocMisses` (= gate +
   cost + taken), `assocMissGate`, `assocMissCost`, `assocMissTaken`, `assocBirthNearLive`, `assocBirthAfterRemoval`, and `assocMissLowBirth` (an unmatched detection
   below `trackBirthScore` next to a LOST track, counted once per frame it appears, no record). The values come from
   scratch fields and the tracks' own state; the loop over the tracks runs only for such a detection, nothing is
@@ -551,6 +555,12 @@ uses no accessibility service.
   state). A candidate that is not accepted in its window is counted (`lockRelockRejects`) and logged once, when the
   window ends. **Fail closed:** another shown, matched track that cannot be sampled makes the candidate ambiguous
   (`next=unsampled`); a tie or doubt is no re-lock.
+  *Early re-lock (M4f):* the same judging already **while the held track is LOST** (coasting, not yet removed) and a
+  signature exists: the candidates (id above `maxIdAtLastMatch`), the window, distance, margin and sample rules are
+  exactly the ones above. At the first acceptance the lock moves at once and the old track is no longer held
+  (`lock: relocked id=A -> B d=… next=… early`; `lockRelocks` counts it like any re-lock). If the held track is
+  matched again first, judging stops and the candidates are forgotten (the lock stays). What was judged before the
+  removal carries over into *pending*, which is unchanged. Only when a person is accepted changes, never who.
   *Ends:* reset, Stop, a handle tap (also one that replaces a pending lock with a new one) or the memory running
   out. The signature is a colour histogram in memory on the capture thread only (no face, no image), dropped at each
   of these.
@@ -668,7 +678,8 @@ default 0.1) and the lock group (`lockHandleSizeDp` 16..96, 40; `lockMaxTapDista
 `relockMinSamplePixels` 150) and decision (`relockMemoryMs` 60000, `relockMaxDistance` 0.40, `relockMinMargin` 0.10,
 `relockJudgeFrames` 10); M4d adds `relockUpperTorsoRatio` 0.8 (0.2..2) and the check `relockMinSamplePixels` ≤
 `relockMaxSamplePixels` / `RELOCK_SAMPLE_GRID_SLACK` (4); M4e adds the diagnostics `assocMissNearRatio` (0.1..5,
-default 1.0) and `assocMissLogPerMin` (0..600, default 30), which change no track. There is no `displayLeadMs`
+default 1.0) and `assocMissLogPerMin` (0..600, default 30), which change no track; M4f adds `trackGateMinSigmaRatio`
+(0..1, default 0.2; 0 = no floor on the gate's sigma). There is no `displayLeadMs`
 (no prediction, §6.4).
 
 ### 7.2 Thermal policy (M5)
@@ -865,6 +876,9 @@ answers hard questions. Each change is verified in the session with `scripts/ver
 and always by GitHub Actions, which is the source of truth. The owner's laptop is not used for builds.
 
 ## 15. Changes
+- **v1.5 (M4f, 2026-11-19):** fewer id switches from the third phone test (plan `docs/plans/M4.md`). §6.3: the gate's
+  per-axis variance is at least `(trackGateMinSigmaRatio × h)²`; §6.6: early re-lock while the held track is LOST
+  (log suffix `early`); §7.1: `trackGateMinSigmaRatio` 0.2 (0..1).
 - **v1.4 (M4e, 2026-11-18):** association-miss diagnostics from the second phone test (plan `docs/plans/M4.md`), no
   behaviour change. §6.3: `AssociationMiss` records and the counters `assocMisses`, `assocMissGate`, `assocMissCost`,
   `assocMissTaken`, `assocMissLowBirth`, `assocBirthNearLive`, `assocBirthAfterRemoval`. §6.7: the `track: miss …` log

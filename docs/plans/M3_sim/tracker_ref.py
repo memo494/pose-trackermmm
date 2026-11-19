@@ -26,6 +26,9 @@ class Cfg:
         s.maxLostMs = 800.0; s.maxDtMs = 250.0; s.inflate = 10.0; s.missTauMs = 300.0
         s.accelSigma = 8.0; s.heightAccelSigma = 2.0; s.heightNoise = 0.05; s.initVelSigma = 2.0
         s.matchMaxCost = 0.7; s.lowMatchMaxCost = 0.6; s.exitMargin = 0.1
+        s.recover = False      # M4f: third stage, unmatched CONFIRMED tracks vs leftover detections by the last OBSERVED head/box
+        s.recoverMaxCost = 0.7; s.recoverResetVel = False; s.recoverIsolation = 0.0  # >0: skip unless alone within this many heights
+        s.gateMinSigma = 0.0   # M4f: floor of the gate's per-axis sigma, in track heights (0 = off, the M3 behaviour)
         for k, v in kw.items():
             assert hasattr(s, k), k
             setattr(s, k, v)
@@ -162,6 +165,7 @@ def iou(a, b):
 
 def assoc_cost(tb, db, px, py, mx, my, sx, sy, th, c):
     if sx <= 0 or sy <= 0 or th <= 0: return INF
+    fl = (c.gateMinSigma * th) ** 2; sx = max(sx, fl); sy = max(sy, fl)
     dx = mx - px; dy = my - py
     if not (dx * dx / sx + dy * dy / sy <= c.gateChi2): return INF
     return c.wIou * (1 - iou(tb, db)) + c.wHead * min(1.0, math.hypot(dx, dy) / (c.headScale * th))
@@ -222,20 +226,40 @@ class Tracker:
         high = [i for i in keep if dets[i]['s'] >= c.highScore]; low = [i for i in keep if dets[i]['s'] < c.highScore]
         matched = {}
 
-        def stage(tidx, didx, maxCost):
+        def stage(tidx, didx, maxCost, last=False):
             if not tidx or not didx: return
             cm = []
             for ti in tidx:
-                t = s.tracks[ti]; tb = s.box(t); row = []
+                t = s.tracks[ti]; row = []
+                tb = t.lbox if last else s.box(t); px = t.lx if last else t.kx.x; py = t.ly if last else t.ky.x
                 for di in didx:
                     m = meas[di]
-                    row.append(assoc_cost(tb, bx(dets[di]), t.kx.x, t.ky.x, m[0], m[1], t.kx.a + m[2], t.ky.a + m[2], t.kh.x, c))
+                    row.append(assoc_cost(tb, bx(dets[di]), px, py, m[0], m[1], t.kx.a + m[2], t.ky.a + m[2], t.kh.x, c))
                 cm.append(row)
             for a, j in enumerate(assign(cm, len(tidx), len(didx), maxCost)):
                 if j >= 0: matched[tidx[a]] = didx[j]; s.log.append((f['i'], s.tracks[tidx[a]].id, cm[a][j]))
 
         stage(list(range(len(s.tracks))), high, c.matchMaxCost)
         stage([ti for ti in range(len(s.tracks)) if ti not in matched], low, c.lowMatchMaxCost)
+        rec = set()
+        if c.recover:
+            used = set(matched.values())
+            before = set(matched)
+            tl = [ti for ti in range(len(s.tracks)) if ti not in matched and s.tracks[ti].state == 'C']
+            dl = [i for i in keep if i not in used]
+            if c.recoverIsolation > 0:
+                def alone_d(i):   # no other track's head near this detection, except recover candidates themselves
+                    m = meas[i]; n = 0
+                    for t in s.tracks:
+                        if math.hypot(t.kx.x - m[0], t.ky.x - m[1]) < c.recoverIsolation * t.kh.x or math.hypot(t.lx - m[0], t.ly - m[1]) < c.recoverIsolation * t.kh.x: n += 1
+                    return n <= 1
+                def alone_t(ti):  # one leftover detection near this track's last observation, and no other detection at all near it
+                    t = s.tracks[ti]
+                    near = [i for i in keep if math.hypot(meas[i][0] - t.lx, meas[i][1] - t.ly) < c.recoverIsolation * t.kh.x]
+                    return len(near) <= 1
+                dl = [i for i in dl if alone_d(i)]; tl = [ti for ti in tl if alone_t(ti)]
+            stage(tl, dl, c.recoverMaxCost, last=True)
+            rec = set(matched) - before
         usedD = set(matched.values()); survivors = []
         for ti, t in enumerate(s.tracks):
             if ti in matched:
@@ -243,6 +267,8 @@ class Tracker:
                 t.kx.update(p[0], p[2]); t.ky.update(p[1], p[2]); t.kh.update(h, (c.heightNoise * t.kh.x) ** 2)
                 t.ol = (d['l'] - p[0]) / h; t.ot = (d['t'] - p[1]) / h; t.orr = (d['r'] - p[0]) / h; t.ob = (d['b'] - p[1]) / h
                 t.hits += 1; t.lostMs = 0.0; t.lost = False; t.score = d['s']; t.est_flag = p[3]
+                if ti in rec and c.recoverResetVel: t.kx.v = 0.0; t.ky.v = 0.0
+                t.lx = p[0]; t.ly = p[1]; t.lbox = bx(d)
                 if t.state == 'T' and t.hits >= c.confirmHits: t.state = 'C'
                 survivors.append(t)
             else:
@@ -262,7 +288,7 @@ class Tracker:
             t.kx = K(); t.ky = K(); t.kh = K()
             t.kx.reset(p[0], p[2], vv); t.ky.reset(p[1], p[2], vv); t.kh.reset(h, (c.heightNoise * h) ** 2, vv)
             t.ol = (d['l'] - p[0]) / h; t.ot = (d['t'] - p[1]) / h; t.orr = (d['r'] - p[0]) / h; t.ob = (d['b'] - p[1]) / h
-            t.score = d['s']; t.est_flag = p[3]
+            t.score = d['s']; t.est_flag = p[3]; t.lx = p[0]; t.ly = p[1]; t.lbox = bx(d)
             s.tracks.append(t)
         return s.view()
 

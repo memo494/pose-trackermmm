@@ -31,5 +31,6 @@ def table(c, label, drop=0.0):
                     a,b = trial(fps, v, turn, 0.3, s, c, drop=drop); sw+=a; ids+=b
                 row.append(f"v{v}/t{turn}:{sw/20:.1f}")
         print(f"  {fps:>2}fps", " ".join(row))
-table(Cfg(), "base: id switches per 20 s walk (mean of 20 seeds)")
-table(Cfg(), "base + 10% missed detections", drop=0.1)
+if __name__ == "__main__":
+    table(Cfg(), "base: id switches per 20 s walk (mean of 20 seeds)")
+    table(Cfg(), "base + 10% missed detections", drop=0.1)

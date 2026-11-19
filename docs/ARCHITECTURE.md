@@ -562,9 +562,9 @@ uses no accessibility service.
   *Early re-lock (M4f):* the same judging already **while the held track is LOST** (coasting, not yet removed) and a
   signature exists: the candidates (id above `maxIdAtLastMatch`), the window, distance, margin and sample rules are
   the ones above, **plus spatial evidence** of an id switch (appearance alone cannot tell a look-alike from the
-  person while the person may still come back): the candidate's head must be within `relockEarlyMaxHeadRatio` (1.0)
-  × the held track's height of the held track's **predicted head**, and **no other shown track** (not the held one, not
-  the candidate) may be within that radius. A candidate without it is not judged at all (no window used, no reject, no
+  person while the person may still come back): the candidate's head must be within `relockEarlyMaxHeadRatio` (0.6)
+  × the held track's height of the held track's **predicted head**, and **no other track at all, tentative ones included** (not the held one, not
+  the candidate) may be within that radius (a person about to be shown counts). A candidate without it is not judged at all (no window used, no reject, no
   log), so it is still judged in full when the held track is removed (*pending*, unchanged). At the first acceptance
   the lock moves at once and the old track is no longer held (`lock: relocked id=A -> B d=… next=… early`;
   `lockRelocks` and `lockRelockRejects` count early moves and early rejects like the others). If the held track is
@@ -689,7 +689,7 @@ default 0.1) and the lock group (`lockHandleSizeDp` 16..96, 40; `lockMaxTapDista
 `relockJudgeFrames` 10); M4d adds `relockUpperTorsoRatio` 0.8 (0.2..2) and the check `relockMinSamplePixels` ≤
 `relockMaxSamplePixels` / `RELOCK_SAMPLE_GRID_SLACK` (4); M4e adds the diagnostics `assocMissNearRatio` (0.1..5,
 default 1.0) and `assocMissLogPerMin` (0..600, default 30), which change no track; M4f adds `trackGateMinSigmaRatio`
-(0..1, default 0.2; 0 = no floor on the gate's sigma) and `relockEarlyMaxHeadRatio` (0.1..3, default 1.0). There is no `displayLeadMs`
+(0..1, default 0.2; 0 = no floor on the gate's sigma) and `relockEarlyMaxHeadRatio` (0.1..3, default 0.6). There is no `displayLeadMs`
 (no prediction, §6.4).
 
 ### 7.2 Thermal policy (M5)
@@ -888,7 +888,7 @@ and always by GitHub Actions, which is the source of truth. The owner's laptop i
 ## 15. Changes
 - **v1.5 (M4f, 2026-11-19):** fewer id switches from the third phone test (plan `docs/plans/M4.md`). §6.3: the gate's
   per-axis variance is at least `(trackGateMinSigmaRatio × h)²`; §6.6: early re-lock while the held track is LOST,
-  only with spatial evidence (log suffix `early`); §7.1: `trackGateMinSigmaRatio` 0.2 (0..1), `relockEarlyMaxHeadRatio` 1.0 (0.1..3).
+  only with spatial evidence (log suffix `early`); §7.1: `trackGateMinSigmaRatio` 0.2 (0..1), `relockEarlyMaxHeadRatio` 0.6 (0.1..3).
 - **v1.4 (M4e, 2026-11-18):** association-miss diagnostics from the second phone test (plan `docs/plans/M4.md`), no
   behaviour change. §6.3: `AssociationMiss` records and the counters `assocMisses`, `assocMissGate`, `assocMissCost`,
   `assocMissTaken`, `assocMissLowBirth`, `assocBirthNearLive`, `assocBirthAfterRemoval`. §6.7: the `track: miss …` log

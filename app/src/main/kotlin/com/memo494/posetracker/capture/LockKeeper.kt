@@ -50,7 +50,7 @@ import kotlin.math.min
  *   yet removed) and a signature exists, so the ring does not wait for the old track to be removed. At the first
  *   acceptance the lock moves at once, the old track is no longer held, and the line ends with `early`. An early accept
  *   also needs spatial evidence: the candidate's head within `relockEarlyMaxHeadRatio` of the held track's height from
- *   the held track's predicted head and no other shown track within that radius; a candidate without it is not judged
+ *   the held track's predicted head and no other track (tentative ones count) within that radius; a candidate without it is not judged
  *   (no window used, no reject) and waits for pending. When the held
  *   track is matched again first, the candidates are forgotten (no move). Whatever was judged before the removal
  *   carries over into the pending step;
@@ -270,8 +270,8 @@ internal class LockKeeper(
 
     /**
      * Early re-lock only: true when the candidate at list index [candidate] is within `relockEarlyMaxHeadRatio` times
-     * the held track's height of the held track's predicted head and no other shown track (not the held one, not the
-     * candidate) is. A candidate that fails is not judged at all (no slot, no window, no reject): pending decides later.
+     * the held track's height of the held track's predicted head and no other track in the list, tentative or not (not the
+     * held one, not the candidate), is. A candidate that fails is not judged at all (no slot, no window, no reject): pending decides later.
      * Fails closed on any value that is not a number.
      */
     private fun hasSpatialEvidence(
@@ -283,7 +283,7 @@ internal class LockKeeper(
         val radius2Img2 = radiusImg * radiusImg
         if (!(distance2Img2(list, heldIndex, candidate) <= radius2Img2)) return false
         for (j in 0 until list.size) {
-            if (j == heldIndex || j == candidate || !list.isShown(j)) continue
+            if (j == heldIndex || j == candidate) continue
             if (!(distance2Img2(list, heldIndex, j) > radius2Img2)) return false
         }
         return true

@@ -190,8 +190,8 @@ package com.memo494.posetracker.core
  *   count), count, in [[MIN_ASSOC_MISS_LOG_PER_MIN], [MAX_ASSOC_MISS_LOG_PER_MIN]]; 0 writes none.
  * @property relockEarlyMaxHeadRatio early re-lock (M4f), while the held track is only LOST: a new track may be
  *   accepted only when its head is within this multiple of the held track's height of the held track's predicted
- *   head, unitless, in [[MIN_RELOCK_EARLY_MAX_HEAD_RATIO], [MAX_RELOCK_EARLY_MAX_HEAD_RATIO]]; and no other shown
- *   track may be within the same radius. Otherwise the lock waits for the removal of the held track.
+ *   head, unitless, in [[MIN_RELOCK_EARLY_MAX_HEAD_RATIO], [MAX_RELOCK_EARLY_MAX_HEAD_RATIO]]; and no other track
+ *   (tentative ones too) may be within the same radius. Otherwise the lock waits for the removal of the held track.
  */
 data class TrackerConfig(
     val scoreThreshold: Float = DEFAULT_SCORE_THRESHOLD,
@@ -1259,8 +1259,8 @@ data class TrackerConfig(
         /** Highest accepted [assocMissNearRatio]. */
         const val MAX_ASSOC_MISS_NEAR_RATIO = 5.0f
 
-        /** Default [relockEarlyMaxHeadRatio], unitless (M4f: one track height). */
-        const val DEFAULT_RELOCK_EARLY_MAX_HEAD_RATIO = 1.0f
+        /** Default [relockEarlyMaxHeadRatio], unitless (M4f: 0.6 track heights; phone jumps were about 0.3 h, p75 0.5 h). */
+        const val DEFAULT_RELOCK_EARLY_MAX_HEAD_RATIO = 0.6f
 
         /** Lowest accepted [relockEarlyMaxHeadRatio]. */
         const val MIN_RELOCK_EARLY_MAX_HEAD_RATIO = 0.1f

@@ -589,8 +589,8 @@ class TrackerConfigTest {
     }
 
     @Test
-    fun relockEarlyMaxHeadRatio_defaultsToOne_andAcceptsItsBounds() {
-        assertThat(TrackerConfig().relockEarlyMaxHeadRatio).isEqualTo(1.0f)
+    fun relockEarlyMaxHeadRatio_defaultsToSixTenths_andAcceptsItsBounds() {
+        assertThat(TrackerConfig().relockEarlyMaxHeadRatio).isEqualTo(0.6f)
         assertWithin(
             TrackerConfig().relockEarlyMaxHeadRatio,
             TrackerConfig.MIN_RELOCK_EARLY_MAX_HEAD_RATIO,

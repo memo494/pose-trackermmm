@@ -188,6 +188,10 @@ package com.memo494.posetracker.core
  *   unitless, in [[MIN_ASSOC_MISS_NEAR_RATIO], [MAX_ASSOC_MISS_NEAR_RATIO]].
  * @property assocMissLogPerMin most association-miss log lines the app writes per minute (the counters always
  *   count), count, in [[MIN_ASSOC_MISS_LOG_PER_MIN], [MAX_ASSOC_MISS_LOG_PER_MIN]]; 0 writes none.
+ * @property relockEarlyMaxHeadRatio early re-lock (M4f), while the held track is only LOST: a new track may be
+ *   accepted only when its head is within this multiple of the held track's height of the held track's predicted
+ *   head, unitless, in [[MIN_RELOCK_EARLY_MAX_HEAD_RATIO], [MAX_RELOCK_EARLY_MAX_HEAD_RATIO]]; and no other shown
+ *   track may be within the same radius. Otherwise the lock waits for the removal of the held track.
  */
 data class TrackerConfig(
     val scoreThreshold: Float = DEFAULT_SCORE_THRESHOLD,
@@ -275,6 +279,7 @@ data class TrackerConfig(
     val relockUpperTorsoRatio: Float = DEFAULT_RELOCK_UPPER_TORSO_RATIO,
     val assocMissNearRatio: Float = DEFAULT_ASSOC_MISS_NEAR_RATIO,
     val assocMissLogPerMin: Int = DEFAULT_ASSOC_MISS_LOG_PER_MIN,
+    val relockEarlyMaxHeadRatio: Float = DEFAULT_RELOCK_EARLY_MAX_HEAD_RATIO,
 ) {
     init {
         require(scoreThreshold in MIN_SCORE_THRESHOLD..MAX_SCORE_THRESHOLD) {
@@ -558,6 +563,10 @@ data class TrackerConfig(
         }
         require(assocMissNearRatio in MIN_ASSOC_MISS_NEAR_RATIO..MAX_ASSOC_MISS_NEAR_RATIO) {
             "assocMissNearRatio $assocMissNearRatio outside [$MIN_ASSOC_MISS_NEAR_RATIO, $MAX_ASSOC_MISS_NEAR_RATIO]"
+        }
+        require(relockEarlyMaxHeadRatio in MIN_RELOCK_EARLY_MAX_HEAD_RATIO..MAX_RELOCK_EARLY_MAX_HEAD_RATIO) {
+            "relockEarlyMaxHeadRatio $relockEarlyMaxHeadRatio outside " +
+                "[$MIN_RELOCK_EARLY_MAX_HEAD_RATIO, $MAX_RELOCK_EARLY_MAX_HEAD_RATIO]"
         }
         require(assocMissLogPerMin in MIN_ASSOC_MISS_LOG_PER_MIN..MAX_ASSOC_MISS_LOG_PER_MIN) {
             "assocMissLogPerMin $assocMissLogPerMin outside [$MIN_ASSOC_MISS_LOG_PER_MIN, $MAX_ASSOC_MISS_LOG_PER_MIN]"
@@ -1249,6 +1258,15 @@ data class TrackerConfig(
 
         /** Highest accepted [assocMissNearRatio]. */
         const val MAX_ASSOC_MISS_NEAR_RATIO = 5.0f
+
+        /** Default [relockEarlyMaxHeadRatio], unitless (M4f: one track height). */
+        const val DEFAULT_RELOCK_EARLY_MAX_HEAD_RATIO = 1.0f
+
+        /** Lowest accepted [relockEarlyMaxHeadRatio]. */
+        const val MIN_RELOCK_EARLY_MAX_HEAD_RATIO = 0.1f
+
+        /** Highest accepted [relockEarlyMaxHeadRatio]. */
+        const val MAX_RELOCK_EARLY_MAX_HEAD_RATIO = 3.0f
 
         /** Length of the window [assocMissLogPerMin] counts in, nanoseconds (one minute). */
         const val ASSOC_MISS_LOG_WINDOW_NS = 60_000_000_000L

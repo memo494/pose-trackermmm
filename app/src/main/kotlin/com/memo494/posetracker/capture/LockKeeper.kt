@@ -48,7 +48,10 @@ import kotlin.math.min
  *   that cannot be sampled makes every candidate ambiguous (`next=unsampled`: fail closed);
  * - **early re-lock** (M4f): the same judging, with the same rules, already while the held track is LOST (coasting, not
  *   yet removed) and a signature exists, so the ring does not wait for the old track to be removed. At the first
- *   acceptance the lock moves at once, the old track is no longer held, and the line ends with `early`. When the held
+ *   acceptance the lock moves at once, the old track is no longer held, and the line ends with `early`. An early accept
+ *   also needs spatial evidence: the candidate's head within `relockEarlyMaxHeadRatio` of the held track's height from
+ *   the held track's predicted head and no other shown track within that radius; a candidate without it is not judged
+ *   (no window used, no reject) and waits for pending. When the held
  *   track is matched again first, the candidates are forgotten (no move). Whatever was judged before the removal
  *   carries over into the pending step;
  * - **end**: a tap on the handle (also one that replaces a pending lock with a new one), a reset ([onReset]), the end
@@ -96,11 +99,11 @@ internal class LockKeeper(
     var lockCount: Int = 0
         private set
 
-    /** Pending locks that moved to a returning person. Capture thread. */
+    /** Locks that moved to a returning person, pending or early (M4f). Capture thread. */
     var relockCount: Int = 0
         private set
 
-    /** New tracks compared with a pending lock and not accepted. Capture thread. */
+    /** New tracks compared with a pending or an early lock and not accepted when their window ended. Capture thread. */
     var relockRejectCount: Int = 0
         private set
 
@@ -169,7 +172,7 @@ internal class LockKeeper(
         lastFrameNs = frame.timestampNs
         resolve(tracks)
         if (matcher.isPending) {
-            if (matcher.isExpired(lastFrameNs)) expire() else tryRelock(list, detections, frame, early = false)
+            if (matcher.isExpired(lastFrameNs)) expire() else tryRelock(list, detections, frame, NOT_EARLY)
         } else if (heldId != OverlayState.NO_LOCK) {
             followHeld(list, detections, frame)
         }
@@ -230,7 +233,7 @@ internal class LockKeeper(
         val index = indexOfId(list, heldId)
         if (index < 0) return
         if (list.matchedDetectionIndex(index) < 0) {
-            if (list.state(index) == TrackState.LOST && signature.hasData) tryRelock(list, detections, frame, early = true)
+            if (list.state(index) == TrackState.LOST && signature.hasData) tryRelock(list, detections, frame, index)
             return
         }
         candidateCount = 0
@@ -239,17 +242,22 @@ internal class LockKeeper(
         if (signature.blend(frame.rgba, frame.widthImg, frame.heightImg, torso)) signatureFrames++
     }
 
-    /** Judges the new tracks against the signature; [early] = the held track is still LOST, not yet removed. */
+    /**
+     * Judges the new tracks against the signature. [heldIndex] is the list index of the held track when it is still
+     * LOST (early re-lock: a candidate is only judged when it passes [hasSpatialEvidence]), [NOT_EARLY] when pending.
+     */
     private fun tryRelock(
         list: TrackList,
         detections: List<PoseDetection>,
         frame: CaptureFrame,
-        early: Boolean,
+        heldIndex: Int,
     ) {
+        val early = heldIndex != NOT_EARLY
         forgetCandidatesNotInList(list)
         var sampled = false
         for (i in 0 until list.size) {
             if (!list.isShown(i) || list.matchedDetectionIndex(i) < 0 || list.id(i) <= maxIdAtLastMatch) continue
+            if (early && !hasSpatialEvidence(list, heldIndex, i)) continue
             val slot = slotOf(list.id(i))
             if (slot < 0 || candidateFrames[slot] >= config.relockJudgeFrames) continue
             if (!sampled) {
@@ -258,6 +266,38 @@ internal class LockKeeper(
             }
             if (!judge(list, i, slot, early)) return
         }
+    }
+
+    /**
+     * Early re-lock only: true when the candidate at list index [candidate] is within `relockEarlyMaxHeadRatio` times
+     * the held track's height of the held track's predicted head and no other shown track (not the held one, not the
+     * candidate) is. A candidate that fails is not judged at all (no slot, no window, no reject): pending decides later.
+     * Fails closed on any value that is not a number.
+     */
+    private fun hasSpatialEvidence(
+        list: TrackList,
+        heldIndex: Int,
+        candidate: Int,
+    ): Boolean {
+        val radiusImg = config.relockEarlyMaxHeadRatio * list.heightImg(heldIndex)
+        val radius2Img2 = radiusImg * radiusImg
+        if (!(distance2Img2(list, heldIndex, candidate) <= radius2Img2)) return false
+        for (j in 0 until list.size) {
+            if (j == heldIndex || j == candidate || !list.isShown(j)) continue
+            if (!(distance2Img2(list, heldIndex, j) > radius2Img2)) return false
+        }
+        return true
+    }
+
+    /** Squared distance between the heads of list tracks [a] and [b], Img px^2. */
+    private fun distance2Img2(
+        list: TrackList,
+        a: Int,
+        b: Int,
+    ): Float {
+        val dx = list.headXImg(a) - list.headXImg(b)
+        val dy = list.headYImg(a) - list.headYImg(b)
+        return dx * dx + dy * dy
     }
 
     /** Judges the candidate at list index [index] (slot [slot]) in this frame; false when the lock moved or was ended. */
@@ -466,5 +506,8 @@ internal class LockKeeper(
         const val STATUS_NONE = 0
         const val STATUS_OK = 1
         const val STATUS_UNSAMPLED = 2
+
+        /** `tryRelock` while pending: no held track in the list. */
+        const val NOT_EARLY = -1
     }
 }

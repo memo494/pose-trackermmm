@@ -98,6 +98,26 @@ class TrackerGateFloorTest {
         assertThat(miss.gateChi2).isAtMost(FAR_JUMP_IMG * FAR_JUMP_IMG / FLOOR_VARIANCE_IMG2 + CHI2_TOLERANCE)
     }
 
+    @Test
+    fun aMissRecord_gateValue_isExactlyWhatMahalanobis2GivesWithTheFloor() {
+        for (k in 0 until HITS) feed(floor, k, person(START_X))
+        feed(floor, HITS)
+        val detection = person(START_X + FAR_JUMP_IMG)
+
+        val list = feed(floor, HITS + 1, detection)
+
+        assertThat(floor.missCount).isEqualTo(1)
+        val miss = floor.miss(0)
+        val lost = (0 until list.size).first { list.id(it) == miss.lostId }
+        val head = HeadPoint()
+        HeadMeasurement.of(detection, config, head)
+        val dxImg = head.headXImg - list.headXImg(lost)
+        val dyImg = head.headYImg - list.headYImg(lost)
+        // The filter's variance is far below the floor here, so any variance below it gives the same value.
+        val expected = AssociationCost.mahalanobis2(dxImg, dyImg, 1f, 1f, 0.2f * list.heightImg(lost))
+        assertThat(miss.gateChi2).isEqualTo(expected)
+    }
+
     /** Three hits at [START_X] (confirmed), then frame [MISSED_FRAME] without people. */
     private fun confirmedThenOneMissedFrame(target: Tracker) {
         for (k in 0 until HITS) feed(target, k, person(START_X))

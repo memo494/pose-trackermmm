@@ -589,6 +589,33 @@ class TrackerConfigTest {
     }
 
     @Test
+    fun relockEarlyMaxHeadRatio_defaultsToOne_andAcceptsItsBounds() {
+        assertThat(TrackerConfig().relockEarlyMaxHeadRatio).isEqualTo(1.0f)
+        assertWithin(
+            TrackerConfig().relockEarlyMaxHeadRatio,
+            TrackerConfig.MIN_RELOCK_EARLY_MAX_HEAD_RATIO,
+            TrackerConfig.MAX_RELOCK_EARLY_MAX_HEAD_RATIO,
+        )
+        TrackerConfig(relockEarlyMaxHeadRatio = TrackerConfig.MIN_RELOCK_EARLY_MAX_HEAD_RATIO)
+        TrackerConfig(relockEarlyMaxHeadRatio = TrackerConfig.MAX_RELOCK_EARLY_MAX_HEAD_RATIO)
+    }
+
+    @Test
+    fun relockEarlyMaxHeadRatio_outsideItsBoundsOrNotFinite_isRejected() {
+        val bad =
+            listOf(
+                TrackerConfig.MIN_RELOCK_EARLY_MAX_HEAD_RATIO - 0.01f,
+                TrackerConfig.MAX_RELOCK_EARLY_MAX_HEAD_RATIO + 0.01f,
+                Float.NaN,
+                Float.POSITIVE_INFINITY,
+                Float.NEGATIVE_INFINITY,
+            )
+        for (value in bad) {
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(relockEarlyMaxHeadRatio = value) }
+        }
+    }
+
+    @Test
     fun trackTentativeMaxMisses_defaultsToOne_andAcceptsItsBounds() {
         assertThat(TrackerConfig().trackTentativeMaxMisses).isEqualTo(1)
         assertThat(TrackerConfig.DEFAULT_TRACK_TENTATIVE_MAX_MISSES).isAtLeast(TrackerConfig.MIN_TRACK_TENTATIVE_MAX_MISSES)

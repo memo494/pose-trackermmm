@@ -69,6 +69,9 @@ private const val EDGE_STAY_FRAMES = 11
 private const val FRAMES_WHILE_HIDDEN = 2
 private const val FRAMES_UNTIL_REMOVED = 22
 private const val MORE_FRAMES_HIDDEN = 8
+private const val EARLY_TEST_RATIO = 0.6f
+private const val EARLY_NEAR_SHIFT_X_IMG = 90f
+private const val FAR_GROUP_MIN_X_IMG = 250f
 
 /** An image that records its reads and closes in [events]. */
 private class FakeFrameImage(
@@ -2181,6 +2184,89 @@ class FramePipelineTest {
         assertThat(states.last().tracks.count).isEqualTo(1)
         assertThat(states.last().lockedId).isEqualTo(OverlayState.NO_LOCK)
         assertThat(pipeline.hasLock).isTrue()
+    }
+
+    /** A radius of 0.6 heights (120 px for the 200 px walker): [EARLY_NEAR_SHIFT_X_IMG] is inside it, [NEW_PERSON_SHIFT_X_IMG] outside. */
+    private fun narrowEarlyConfig() = TrackerConfig(relockEarlyMaxHeadRatio = EARLY_TEST_RATIO)
+
+    @Test
+    fun relock_early_aLookAlikeFarFromTheLostTrack_isNotAcceptedBeforeTheLockedPersonReturns() {
+        val pipeline = trackingPipeline(narrowEarlyConfig())
+        val atMs = lockedPersonHiddenForAWhile(pipeline)
+        val lookAlike = Look(walker(shiftXImg = NEW_PERSON_SHIFT_X_IMG), RED_SHIRT)
+        val back = Look(walker(), RED_SHIRT)
+
+        val shownAtMs = lookFramesFrom(pipeline, atMs + FRAME_STEP_MS, 4, lookAlike)
+        assertThat(states.last().tracks.count).isEqualTo(2)
+        assertThat(states.last().lockedId).isEqualTo(1)
+        lookFramesFrom(pipeline, shownAtMs + FRAME_STEP_MS, WINDOW_END_FRAMES, back, lookAlike)
+
+        assertThat(states.none { it.lockedId > 1 }).isTrue()
+        assertThat(states.last().lockedId).isEqualTo(1)
+        assertThat(pipeline.lockRelockCount).isEqualTo(0)
+        assertThat(pipeline.lockRelockRejectCount).isEqualTo(0)
+        assertThat(lockLogs()).containsExactly("lock: set id=1")
+    }
+
+    @Test
+    fun relock_early_theLockedPersonReturningAsANewTrackNearTheOldOne_neverGivesTheLockToAFarLookAlike() {
+        val pipeline = trackingPipeline(narrowEarlyConfig())
+        val atMs = lockedPersonHiddenForAWhile(pipeline)
+        val lookAlike = Look(walker(shiftXImg = NEW_PERSON_SHIFT_X_IMG), RED_SHIRT)
+        val returned = Look(walker(shiftXImg = EARLY_NEAR_SHIFT_X_IMG), RED_SHIRT)
+
+        val shownAtMs = lookFramesFrom(pipeline, atMs + FRAME_STEP_MS, 4, lookAlike)
+        val lookAlikeId = idOfTheTrackRightOf(FAR_GROUP_MIN_X_IMG)
+        lookFramesFrom(pipeline, shownAtMs + FRAME_STEP_MS, WINDOW_END_FRAMES, returned, lookAlike)
+
+        assertThat(lookAlikeId).isGreaterThan(1)
+        assertThat(states.none { it.lockedId == lookAlikeId }).isTrue()
+    }
+
+    @Test
+    fun relock_early_aCandidateNearTheLostTracksPredictedHead_isStillAcceptedEarly() {
+        val pipeline = trackingPipeline(narrowEarlyConfig())
+        val atMs = lockedPersonHiddenForAWhile(pipeline)
+
+        lookFramesFrom(pipeline, atMs + FRAME_STEP_MS, 4, Look(walker(shiftXImg = EARLY_NEAR_SHIFT_X_IMG), RED_SHIRT))
+
+        assertThat(states.last().tracks.count).isEqualTo(2)
+        assertThat(states.last().tracks.isLost(0)).isTrue()
+        assertThat(states.last().lockedId).isEqualTo(2)
+        assertThat(pipeline.lockRelockCount).isEqualTo(1)
+        assertThat(lockLogs().last()).isEqualTo("lock: relocked id=1 -> 2 d=0.00 next=none early")
+    }
+
+    @Test
+    fun relock_early_twoShownTracksNearTheLostTrack_giveNoEarlyAccept() {
+        val pipeline = trackingPipeline(narrowEarlyConfig())
+        val atMs = lockedPersonHiddenForAWhile(pipeline)
+        val sameColours = Look(walker(shiftXImg = EARLY_NEAR_SHIFT_X_IMG), RED_SHIRT)
+        val otherPerson = Look(walker(shiftXImg = -EARLY_NEAR_SHIFT_X_IMG), BLUE_SHIRT)
+
+        lookFramesFrom(pipeline, atMs + FRAME_STEP_MS, 6, sameColours, otherPerson)
+
+        assertThat(states.last().tracks.count).isEqualTo(3)
+        assertThat(states.last().lockedId).isEqualTo(1)
+        assertThat(pipeline.lockRelockCount).isEqualTo(0)
+        assertThat(pipeline.lockRelockRejectCount).isEqualTo(0)
+        assertThat(lockLogs()).containsExactly("lock: set id=1")
+    }
+
+    @Test
+    fun relock_early_aCandidateThatFailedOnlyTheSpatialTest_isStillJudgedAndAcceptedWhenTheOldTrackIsRemoved() {
+        val pipeline = trackingPipeline(narrowEarlyConfig())
+        val atMs = lockedPersonHiddenForAWhile(pipeline)
+        val lookAlike = Look(walker(shiftXImg = NEW_PERSON_SHIFT_X_IMG), RED_SHIRT)
+
+        lookFramesFrom(pipeline, atMs + FRAME_STEP_MS, 4 + FRAMES_UNTIL_REMOVED, lookAlike)
+
+        assertThat(states.last().tracks.count).isEqualTo(1)
+        assertThat(states.last().lockedId).isEqualTo(2)
+        assertThat(pipeline.lockRelockCount).isEqualTo(1)
+        assertThat(pipeline.lockRelockRejectCount).isEqualTo(0)
+        assertThat(lockLogs()).containsExactly("lock: set id=1", "lock: pending id=1 frames=3", "lock: relocked id=1 -> 2 d=0.00 next=none")
+            .inOrder()
     }
 
     @Test

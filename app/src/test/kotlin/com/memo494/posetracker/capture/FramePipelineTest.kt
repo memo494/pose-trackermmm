@@ -2265,7 +2265,8 @@ class FramePipelineTest {
         assertThat(states.last().lockedId).isEqualTo(2)
         assertThat(pipeline.lockRelockCount).isEqualTo(1)
         assertThat(pipeline.lockRelockRejectCount).isEqualTo(0)
-        assertThat(lockLogs()).containsExactly("lock: set id=1", "lock: pending id=1 frames=3", "lock: relocked id=1 -> 2 d=0.00 next=none")
+        assertThat(lockLogs())
+            .containsExactly("lock: set id=1", "lock: pending id=1 frames=3", "lock: relocked id=1 -> 2 d=0.00 next=none")
             .inOrder()
     }
 

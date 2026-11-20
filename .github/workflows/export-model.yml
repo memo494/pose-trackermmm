@@ -10,7 +10,7 @@ on:
         type: string
         default: ""
       publish_tag:
-        description: "With sizes: release tag to upload the files to (created as a pre-release if missing). Must start with 'models' (for example 'models'); never 'latest'."
+        description: "With sizes: release tag to upload the files to (created as a pre-release if missing). Must start with 'models' (for example 'models'); never 'latest' or 'models-sweep'."
         type: string
         default: ""
       sweep:
@@ -87,6 +87,10 @@ jobs:
           if [ -n "$TAG" ]; then
             if [ "$TAG" = "latest" ]; then
               echo "publish_tag must not be 'latest' (the rolling APK release)" >&2
+              exit 1
+            fi
+            if [ "$TAG" = "models-sweep" ]; then
+              echo "publish_tag must not be 'models-sweep' (the sweep job is the only writer of that release)" >&2
               exit 1
             fi
             if ! [[ "$TAG" =~ ^models[A-Za-z0-9._-]*$ ]]; then

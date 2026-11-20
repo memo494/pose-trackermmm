@@ -49,7 +49,7 @@ internal fun ControlScreen(
     onStopClick: () -> Unit,
     onOpenOverlaySettingsClick: () -> Unit,
     onImportClick: () -> Unit,
-    onUseBuiltInClick: () -> Unit,
+    onRemoveAllClick: () -> Unit,
     onDeleteModelClick: (String) -> Unit,
     onSlotPick: (ModelOrientation, String?) -> Unit,
     onDebugMarksChange: (Boolean) -> Unit,
@@ -101,7 +101,7 @@ internal fun ControlScreen(
 
             DebugMarksSwitch(state.debugMarks, onDebugMarksChange)
 
-            ModelBlock(state, onImportClick, onUseBuiltInClick, onDeleteModelClick, onSlotPick)
+            ModelBlock(state, onImportClick, onRemoveAllClick, onDeleteModelClick, onSlotPick)
 
             Text(stringResource(R.string.control_description), style = MaterialTheme.typography.bodyMedium)
             diagnosticsContent()
@@ -144,7 +144,7 @@ private fun DebugMarksSwitch(
 private fun ModelBlock(
     state: ControlState,
     onImportClick: () -> Unit,
-    onUseBuiltInClick: () -> Unit,
+    onRemoveAllClick: () -> Unit,
     onDeleteModelClick: (String) -> Unit,
     onSlotPick: (ModelOrientation, String?) -> Unit,
 ) {
@@ -180,8 +180,8 @@ private fun ModelBlock(
             Text(stringResource(R.string.model_import))
         }
         if (state.library.isNotEmpty() || modelNotice != null || state.modelFileStored) {
-            OutlinedButton(onClick = onUseBuiltInClick, enabled = idle, modifier = Modifier.fillMaxWidth()) {
-                Text(stringResource(R.string.model_use_built_in))
+            OutlinedButton(onClick = onRemoveAllClick, enabled = idle, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(if (state.removeAllArmed) R.string.model_remove_all_confirm else R.string.model_use_built_in))
             }
         }
         Text(stringResource(R.string.model_hint_trust), style = MaterialTheme.typography.bodySmall)
@@ -322,7 +322,7 @@ private fun ControlScreenPreview() {
             onStopClick = {},
             onOpenOverlaySettingsClick = {},
             onImportClick = {},
-            onUseBuiltInClick = {},
+            onRemoveAllClick = {},
             onDeleteModelClick = {},
             onSlotPick = { _, _ -> },
             onDebugMarksChange = {},

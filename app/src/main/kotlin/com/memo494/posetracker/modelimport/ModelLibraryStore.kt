@@ -136,14 +136,15 @@ class ModelLibraryStore internal constructor(
     override fun guard(): ImportGuardState = state().guard
 
     /**
-     * Stores the crash marker. Refused (`false`) while a crash of one model is still recorded in the marker itself
-     * (it could not be moved to the blocked list yet): a new marker would erase it.
+     * Stores the crash marker. A new `Pending` is refused (`false`) while a crash of one model is still recorded in the
+     * marker itself (it could not be moved to the blocked list yet) or while another attempt is pending: a new marker
+     * would erase what the old one says.
      */
     override fun setGuard(state: ImportGuardState): Boolean {
         threadCheck()
         synchronized(LOCK) {
             val current = readState().guard
-            if (state is ImportGuardState.Pending && isModelTrip(current)) return false
+            if (state is ImportGuardState.Pending && (current is ImportGuardState.Pending || isModelTrip(current))) return false
             return root.setGuard(state)
         }
     }
@@ -156,16 +157,22 @@ class ModelLibraryStore internal constructor(
         synchronized(LOCK) {
             val current = readState()
             val added = current.library.add(meta, config.modelLibraryMax)
+            val entryStore = root.inDirectory(entryDirectory(meta.sha256))
             if (added == LibraryAdd.Duplicate) {
-                // The same model again: it is not added twice. For a blocked model it is the way to try it again.
-                val unblocked = unblock(current, meta.sha256)
-                temp.delete()
-                return if (unblocked) StoreResult.STORED else StoreResult.FAILED
+                // The same model again: it is not added twice. For a blocked model it is the way to try it again, and
+                // when the stored file is missing or damaged the new copy replaces it.
+                val listed = current.entries.firstOrNull { it.meta.sha256 == meta.sha256 }
+                if (listed?.fileExists == true && entryStore.storedFileMatches(meta)) {
+                    temp.delete()
+                    return if (unblock(current, meta.sha256)) StoreResult.STORED else StoreResult.FAILED
+                }
+                if (!entryStore.accept(temp, meta)) return StoreResult.FAILED
+                return if (unblock(current, meta.sha256)) StoreResult.STORED else StoreResult.FAILED
             }
             if (added == LibraryAdd.Full) return StoreResult.LIBRARY_FULL
-            val stored = root.inDirectory(entryDirectory(meta.sha256)).accept(temp, meta)
-            // Accepting lifts a trip (a new file gets a new chance), but not the record of another model's crash.
-            if (stored) restoreModelTrip(current.guard)
+            val stored = entryStore.accept(temp, meta)
+            // A new file gets a new chance: a probe trip (or a marker without a model) is lifted; a model's crash stays.
+            if (stored) liftTripUnlessAModelCrash(current.guard)
             return if (stored) StoreResult.STORED else StoreResult.FAILED
         }
     }
@@ -211,11 +218,11 @@ class ModelLibraryStore internal constructor(
             if (ModelImporter.isImporting() || !current.library.contains(sha256)) return false
             val slots = current.slots.withoutModel(sha256)
             if (slots != current.slots && !writeAtomically(slotsFile(), slots.encode())) return false
-            if (sha256 in current.blocked && !writeBlocked(current.blocked - sha256)) return false
+            // Files first: a model whose files could not be deleted stays listed (and blocked) and can be deleted again.
             val directory = entryDirectory(sha256)
-            val cleared = root.inDirectory(directory).clear()
-            if (!current.guard.blames(sha256)) restoreModelTrip(current.guard)
-            return directory.delete() && cleared
+            val removed = root.inDirectory(directory).clear() && directory.delete()
+            if (!removed) return false
+            return unblock(current, sha256)
         }
     }
 
@@ -282,27 +289,70 @@ class ModelLibraryStore internal constructor(
     }
 
     /**
-     * Moves the model of the version before the library into its own directory (see the class comment). Does nothing
-     * when there is none. A step that fails is retried by the next read.
+     * Brings the model of the version before the library into its own directory (see the class comment). Does nothing
+     * when there is none. The old file is never moved: it is copied next to its new place (synced), accepted there
+     * (the entry's own crash-safe order), checked by length and sha256, and only then is the old record removed, so
+     * a failure or a process death at any step leaves the old model where it was. A half-finished entry (a model file
+     * without its meta) is finished from whichever copy exists. An old record whose file is gone becomes an entry
+     * without a file, which the screen reports as "file missing". A step that fails is retried by the next read.
      */
     private fun migrateSingleModel() {
         val legacy = root.state()
         val meta = legacy.meta ?: return
         val entryStore = root.inDirectory(entryDirectory(meta.sha256))
-        if (entryStore.state().meta?.sha256 != meta.sha256) {
-            if (!legacy.fileExists) {
-                log("the old imported model has no file, its record is dropped", null)
-                root.clear()
-                return
-            }
+        val oldFile = root.modelFileFor(meta)
+        if (!entryHolds(entryStore, meta, oldFile.isFile)) {
             if (!blockLegacyTrip(legacy.guard, meta.sha256)) return
-            if (!entryStore.accept(root.modelFileFor(meta), meta)) {
-                log("moving the old imported model into the library failed", null)
-                return
-            }
+            val source = listOf(oldFile, entryStore.modelFileFor(meta)).firstOrNull { it.isFile }
+            if (!copyIntoEntry(entryStore, meta, source)) return
         }
         if (!slotsFile().exists() && !writeAtomically(slotsFile(), pointingBoth(meta.sha256))) return
         if (!root.clear()) log("the old single-model record could not be removed yet", null)
+    }
+
+    /** Whether the entry of [meta] is complete: its meta is stored and, while the old file exists, its file matches. */
+    private fun entryHolds(
+        entryStore: ImportedModelStore,
+        meta: ImportedModelMeta,
+        oldFileExists: Boolean,
+    ): Boolean {
+        val stored = entryStore.state()
+        if (stored.meta?.sha256 != meta.sha256) return false
+        return !oldFileExists || (stored.fileExists && entryStore.storedFileMatches(meta))
+    }
+
+    /**
+     * Copies [source] (`null` = there is no file: an entry without one) into the entry as its model and meta, and
+     * checks the result. `false` (logged) when any step failed; [source] is never changed.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private fun copyIntoEntry(
+        entryStore: ImportedModelStore,
+        meta: ImportedModelMeta,
+        source: File?,
+    ): Boolean {
+        try {
+            val temp = entryStore.newTempFile()
+            FileOutputStream(temp).use { output ->
+                source?.inputStream()?.use { input -> input.copyTo(output) }
+                output.fd.sync()
+            }
+            if (!entryStore.accept(temp, meta)) {
+                temp.delete()
+                log("moving the old imported model into the library failed", null)
+                return false
+            }
+            if (source == null) {
+                entryStore.modelFileFor(meta).delete()
+            } else if (!entryStore.storedFileMatches(meta)) {
+                log("the copy of the old imported model does not match, the old model stays where it is", null)
+                return false
+            }
+            return entryStore.state().meta?.sha256 == meta.sha256
+        } catch (t: Throwable) {
+            log("copying the old imported model into the library failed", t)
+            return false
+        }
     }
 
     /** A crash at the load recorded without a model blames the one model there was; `false` when that could not be stored. */
@@ -318,15 +368,28 @@ class ModelLibraryStore internal constructor(
 
     private fun pointingBoth(sha256: String): String = OrientationSlots(SlotChoice.Library(sha256), SlotChoice.Library(sha256)).encode()
 
-    /** Takes [sha256] off the blocked list (and lifts the marker if it names it); `false` when that could not be stored. */
+    /**
+     * Takes [sha256] off the blocked list (and lifts the marker if it names it); `false` when that could not be stored.
+     * A blocked list that cannot be read counts as "every library model is blocked": it is rewritten without [sha256].
+     */
     private fun unblock(
         current: LibraryState,
         sha256: String,
     ): Boolean {
         var done = true
-        if (sha256 in current.blocked) done = writeBlocked(current.blocked - sha256)
+        if (current.blockedUnreadable) {
+            done = writeBlocked(current.library.entries.map { it.sha256 }.toSet() - sha256)
+        } else if (sha256 in current.blocked) {
+            done = writeBlocked(current.blocked - sha256)
+        }
         if (done && current.guard.blames(sha256)) done = root.setGuard(ImportGuard.clear())
         return done
+    }
+
+    private fun liftTripUnlessAModelCrash(guard: ImportGuardState) {
+        if (guard is ImportGuardState.Tripped && !isModelTrip(guard) && !root.setGuard(ImportGuard.clear())) {
+            log("the old crash record could not be lifted", null)
+        }
     }
 
     /** The model a tripped load marker names; `null` for any other marker (or one that names no model). */
@@ -336,10 +399,6 @@ class ModelLibraryStore internal constructor(
     private fun ImportGuardState.blames(sha256: String): Boolean = crashedModel(this) == sha256
 
     private fun isModelTrip(guard: ImportGuardState): Boolean = crashedModel(guard) != null
-
-    private fun restoreModelTrip(previous: ImportGuardState) {
-        if (isModelTrip(previous) && !root.setGuard(previous)) log("the record of a model crash could not be restored", null)
-    }
 
     private fun entryDirectory(sha256: String): File = File(root.directory, sha256.take(TrackerConfig.STAGED_MODEL_SHA_PREFIX_LENGTH))
 

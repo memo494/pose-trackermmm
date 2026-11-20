@@ -324,6 +324,13 @@ internal class FramePipeline(
             modelInputWidth = newDetector?.inputWidth ?: 0
             modelInputHeight = newDetector?.inputHeight ?: 0
             lastState = lastState.copy(modelInputWidth = modelInputWidth, modelInputHeight = modelInputHeight, modelImported = imported)
+            // The timing of the old model must not mix into the new model's percentiles.
+            copyWindow.clear()
+            preWindow.clear()
+            inferWindow.clear()
+            postWindow.clear()
+            frameWindow.clear()
+            resultAgeWindow.clear()
             republish(dropFrame = true)
         } catch (e: Throwable) {
             safeLog("changing the model failed", e)

@@ -145,7 +145,13 @@ internal object ControlModelMapper {
             library.entries.map {
                 LibraryItem(it.meta.sha256, it.meta.displayName, inputText(it.meta), library.isBlocked(it.meta.sha256))
             }
-        return slot.copy(
+        val noticed =
+            if (library.blockedUnreadable && slot.notice == null) {
+                slot.copy(notice = ModelNotice(ModelNoticeKind.BLOCKED_UNREADABLE))
+            } else {
+                slot
+            }
+        return noticed.copy(
             library = items,
             portraitSha = shaOf(library.slots.portrait),
             landscapeSha = shaOf(library.slots.landscape),
@@ -217,5 +223,6 @@ internal object ControlModelMapper {
             ModelNoticeKind.GUARD_NOT_STORED -> R.string.model_notice_guard_not_stored
             ModelNoticeKind.LOAD_FAILED -> R.string.model_notice_load_failed
             ModelNoticeKind.STATE_UNREADABLE -> R.string.model_notice_state_unreadable
+            ModelNoticeKind.BLOCKED_UNREADABLE -> R.string.model_notice_blocked_unreadable
         }
 }

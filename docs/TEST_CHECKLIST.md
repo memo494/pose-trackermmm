@@ -141,7 +141,7 @@ person at medium distance (not close, not tiny) and play it from the same point 
 2. Press **Import model** and pick `yolo26n-pose_640.tflite` in the file picker.
 3. Wait a few seconds ("Importing: copying and checking the model.").
 
-**Pass:** a line says **Imported yolo26n-pose_640.tflite. It is used the next time you press Start.** and the
+**Pass:** a line says **Imported yolo26n-pose_640.tflite. Choose it for Portrait or Landscape below.** and the
 model line says **yolo26n-pose_640.tflite (640, imported)**.
 **If it fails:** any other text under **Model**: Share diagnostics and send a screenshot of that block.
 
@@ -158,7 +158,7 @@ to 55 ms and 17 to 20 fps; these are estimates, the numbers you write down are t
 diagnostics (it names the reason).
 
 ### 4. Compare with the built-in model on the same video
-1. Stop. Press **Remove all imported models** and check that the model line says **Built-in (416)**.
+1. Stop. Press **Remove all imported models**, then press it again within 4 seconds (it says **Tap again to remove all**), and check that the model line says **Built-in (416)**.
 2. Start, play the same video from the same point, write down `ms`, `fps` and the `max` number for the same
    person as in block 3.
 3. Send both sets of numbers (built-in and imported) in one message.
@@ -190,7 +190,7 @@ full box and the dots on the body are back.
 Stop and Start, or the person still blinks as before: Share diagnostics and say which of (a) or (b) failed.
 
 ### 7. Back to the built-in model, and the report
-1. Stop. Import the 640 file again, Start, then Stop and press **Remove all imported models**, Start.
+1. Stop. Import the 640 file again, Start, then Stop and press **Remove all imported models** twice (the second tap confirms), Start.
 2. Press **Share diagnostics** and open `summary.txt` in the zip (or send it to the agent).
 
 **Pass:** after **Remove all imported models** the model line says **Built-in (416)** and the `det` line says `in 416`.

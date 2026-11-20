@@ -48,6 +48,9 @@ class ModelSwitcherTest {
     private var builtInFailure: Throwable? = null
     private val detectors = mutableListOf<TestDetector>()
     private val logs = mutableListOf<String>()
+    private var logFailure: Throwable? = null
+    private var nowCalls = 0
+    private var nowFailsOnCall = -1
 
     /** How long each load takes on the fake clock, nanoseconds. */
     private var loadNs = 5_000_000L
@@ -92,8 +95,15 @@ class ModelSwitcherTest {
                 newDetector("builtin", 416, 416)
             },
             verifyStored = { false },
-            nowNs = { now },
-            log = { message, _ -> logs.add(message) },
+            nowNs = {
+                nowCalls++
+                if (nowCalls == nowFailsOnCall) throw IllegalStateException("clock failed")
+                now
+            },
+            log = { message, _ ->
+                logs.add(message)
+                logFailure?.let { throw it }
+            },
         )
 
     private fun choose(
@@ -297,5 +307,53 @@ class ModelSwitcherTest {
 
         assertThat(status.portrait).isEqualTo("builtin")
         assertThat(status.landscape).isEqualTo("builtin")
+    }
+
+    @Test
+    fun aFailureAfterTheOldDetectorWasClosed_neverLeavesAClosedModelRunning() {
+        choose(portrait = library(metaA), landscape = library(metaB))
+        switcher.select(ModelOrientation.PORTRAIT)
+        val old = detectors.single()
+        nowCalls = 0
+        nowFailsOnCall = 2
+
+        val selection = switcher.select(ModelOrientation.LANDSCAPE)!!
+
+        assertThat(old.closeCount).isEqualTo(1)
+        assertThat(detectors).hasSize(2)
+        assertThat(detectors[1].closeCount).isEqualTo(1)
+        assertThat(selection.loaded.detector).isNull()
+        assertThat(selection.loaded.source).isEqualTo(ModelSource.BUILT_IN)
+        assertThat(selection.loaded.fallback).isEqualTo(ModelFallback.LOAD_FAILED)
+        assertThat(switcher.status()!!.inputWidth).isEqualTo(0)
+        assertThat(switcher.switches).isEqualTo(1)
+    }
+
+    @Test
+    fun afterSuchAFailure_theNextSelectLoadsAgain() {
+        choose(portrait = library(metaA), landscape = library(metaB))
+        switcher.select(ModelOrientation.PORTRAIT)
+        nowCalls = 0
+        nowFailsOnCall = 2
+        switcher.select(ModelOrientation.LANDSCAPE)
+        nowFailsOnCall = -1
+
+        val again = switcher.select(ModelOrientation.LANDSCAPE)
+
+        assertThat(again!!.loaded.detector!!.inputWidth).isEqualTo(832)
+    }
+
+    @Test
+    fun aLogThatThrows_afterTheOldDetectorWasClosed_doesNotStopTheSwitch() {
+        choose(portrait = library(metaA), landscape = library(metaB))
+        switcher.select(ModelOrientation.PORTRAIT)
+        detectors.single().closeFailure = IllegalStateException("close failed")
+        importedFailure = IllegalStateException("load failed")
+        logFailure = IllegalStateException("log failed")
+
+        val selection = switcher.select(ModelOrientation.LANDSCAPE)!!
+
+        assertThat(selection.loaded.source).isEqualTo(ModelSource.BUILT_IN)
+        assertThat(selection.loaded.detector).isNotNull()
     }
 }

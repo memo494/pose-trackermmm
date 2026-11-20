@@ -51,6 +51,7 @@ import com.memo494.posetracker.modelimport.ModelLibraryStore
 import com.memo494.posetracker.modelimport.ModelStatus
 import com.memo494.posetracker.modelimport.ModelStatusHolder
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -112,7 +113,7 @@ class MainActivity : ComponentActivity() {
                     onStopClick = { dispatch(ControlEvent.StopClicked) },
                     onOpenOverlaySettingsClick = { dispatch(ControlEvent.OpenOverlaySettingsClicked) },
                     onImportClick = { dispatch(ControlEvent.ImportClicked) },
-                    onUseBuiltInClick = { dispatch(ControlEvent.UseBuiltInClicked) },
+                    onRemoveAllClick = { dispatch(ControlEvent.RemoveAllClicked) },
                     onDeleteModelClick = { dispatch(ControlEvent.DeleteModelClicked(it)) },
                     onSlotPick = { orientation, sha256 -> dispatch(ControlEvent.SlotPicked(orientation, sha256)) },
                     onDebugMarksChange = { dispatch(ControlEvent.DebugMarksToggled(it)) },
@@ -182,6 +183,7 @@ class MainActivity : ComponentActivity() {
             ControlEffect.OPEN_MODEL_PICKER -> openModelPicker()
             ControlEffect.RUN_IMPORT -> runImport(step.importUri)
             ControlEffect.CLEAR_IMPORTED -> clearImported()
+            ControlEffect.SCHEDULE_REMOVE_ALL_DISARM -> scheduleRemoveAllDisarm()
             ControlEffect.DELETE_MODEL -> deleteModel(step.modelSha)
             ControlEffect.SET_SLOT -> setSlot(step.slotOrientation, step.modelSha)
             ControlEffect.LOAD_MODEL_STATE -> loadModelState()
@@ -355,6 +357,14 @@ class MainActivity : ComponentActivity() {
             withContext(Dispatchers.IO) { clearOrLog() }
             acknowledgedStatus = ModelStatusHolder.latest()
             loadModelState()
+        }
+    }
+
+    /** Gives the second tap on "Remove all imported models" [TrackerConfig.removeAllConfirmMs]; then the first tap is forgotten. */
+    private fun scheduleRemoveAllDisarm() {
+        lifecycleScope.launch {
+            delay(TrackerConfig().removeAllConfirmMs)
+            dispatch(ControlEvent.RemoveAllDisarm)
         }
     }
 

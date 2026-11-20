@@ -5,6 +5,7 @@ import com.memo494.posetracker.core.modelimport.ImportGuardState
 import com.memo494.posetracker.core.modelimport.ImportedModelMeta
 import com.memo494.posetracker.core.modelimport.ModelOrientation
 import com.memo494.posetracker.core.modelimport.SlotChoice
+import com.memo494.posetracker.detector.ModelProbe
 import com.memo494.posetracker.detector.PoseDetector
 
 /**
@@ -68,6 +69,10 @@ internal class ModelSwitcher(
     private var loadedFor: String? = null
     private var lastLibrary: LibraryState? = null
 
+    /** Set while one [select] runs: the old detector was closed / the new model was built (for [recover]). */
+    private var oldClosed = false
+    private var built: LoadedModel? = null
+
     /** Changes of the model caused by a change of orientation since this switcher was made (Start not counted). */
     var switches: Int = 0
         private set
@@ -82,13 +87,33 @@ internal class ModelSwitcher(
      * The detector of the previous model is closed here before the new one loads.
      */
     @Suppress("TooGenericExceptionCaught")
-    fun select(orientation: ModelOrientation): ModelSelection? =
-        try {
+    fun select(orientation: ModelOrientation): ModelSelection? {
+        oldClosed = false
+        built = null
+        return try {
             choose(orientation)
         } catch (t: Throwable) {
-            log("choosing the model for ${orientation.logName} failed", t)
-            null
+            safeLog("choosing the model for ${orientation.logName} failed", t)
+            if (oldClosed) recover(orientation, t) else null
         }
+    }
+
+    /**
+     * Something failed after the old detector was closed: the session must not keep a closed model. Any detector that
+     * was already built is closed too, and the result is a selection without a detector (the HUD shows
+     * DETECTOR_UNAVAILABLE and frames are still drained); the next [select] tries again.
+     */
+    private fun recover(
+        orientation: ModelOrientation,
+        error: Throwable,
+    ): ModelSelection {
+        closeQuietly(built?.detector)
+        val failed = LoadedModel(null, ModelSource.BUILT_IN, null, ModelFallback.LOAD_FAILED, ModelProbe.failureMessage(error))
+        current = failed
+        loadedFor = null
+        switches++
+        return ModelSelection(failed, orientation, 0L, true)
+    }
 
     /** The status of the running model with the two slots and the switch counters; `null` before the first [select]. */
     fun status(): ModelStatus? {
@@ -109,6 +134,7 @@ internal class ModelSwitcher(
         if (running != null && running.detector != null && wanted == loadedFor) return null
         val startNs = nowNs()
         if (running != null) closeQuietly(running.detector)
+        oldClosed = running != null
         current = null
         val loaded =
             SessionModelLoader(
@@ -116,9 +142,10 @@ internal class ModelSwitcher(
                 setGuard = setGuard,
                 loadImported = loadImported,
                 loadBuiltIn = loadBuiltIn,
-                log = log,
+                log = ::safeLog,
                 verifyStored = verifyStored,
             ).load()
+        built = loaded
         val ms = (nowNs() - startNs) / TrackerConfig.NANOS_PER_MILLI
         current = loaded
         loadedFor = wanted
@@ -135,7 +162,7 @@ internal class ModelSwitcher(
         try {
             readLibrary()
         } catch (t: Throwable) {
-            log("cannot read the model library", t)
+            safeLog("cannot read the model library", t)
             null
         }
 
@@ -154,7 +181,20 @@ internal class ModelSwitcher(
         try {
             detector?.close()
         } catch (t: Throwable) {
-            log("closing the previous detector failed", t)
+            safeLog("closing the previous detector failed", t)
+        }
+    }
+
+    /** [log] that cannot throw: a failing logger must not stop a switch. */
+    @Suppress("TooGenericExceptionCaught")
+    private fun safeLog(
+        message: String,
+        error: Throwable?,
+    ) {
+        try {
+            log(message, error)
+        } catch (t: Throwable) {
+            // Nowhere left to report it.
         }
     }
 

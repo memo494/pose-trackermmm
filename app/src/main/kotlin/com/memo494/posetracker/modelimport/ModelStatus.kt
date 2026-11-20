@@ -69,6 +69,16 @@ data class ModelStatus(
     companion object {
         /** The text of a slot that runs the built-in model. */
         const val SLOT_BUILT_IN = "builtin"
+
+        /** The message of [chooseFailed]. */
+        const val CHOOSE_FAILED_MESSAGE = "choosing the model failed"
+
+        /**
+         * What the control screen and the diagnostics show when the model choice at Start failed before anything was
+         * loaded (no detector runs; the built-in model is what the next Start tries again).
+         */
+        fun chooseFailed(): ModelStatus =
+            ModelStatus(ModelSource.BUILT_IN, null, ModelFallback.STATE_UNREADABLE, CHOOSE_FAILED_MESSAGE, 0, 0)
     }
 }
 

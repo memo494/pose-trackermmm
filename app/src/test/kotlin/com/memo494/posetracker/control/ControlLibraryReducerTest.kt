@@ -161,4 +161,56 @@ class ControlLibraryReducerTest {
         assertThat(step.state.libraryFull).isFalse()
         assertThat(step.effect).isEqualTo(ControlEffect.CLEAR_IMPORTED)
     }
+
+    // ---- remove all: the second tap confirms ----
+
+    @Test
+    fun removeAll_firstTap_armsAndSchedulesTheDisarm_withoutRemovingAnything() {
+        val step = reduce(loaded, ControlEvent.RemoveAllClicked)
+
+        assertThat(step.state.removeAllArmed).isTrue()
+        assertThat(step.state.library).containsExactly(itemA, itemB)
+        assertThat(step.effect).isEqualTo(ControlEffect.SCHEDULE_REMOVE_ALL_DISARM)
+    }
+
+    @Test
+    fun removeAll_secondTap_removesEverythingAndDisarms() {
+        val armed = reduce(loaded, ControlEvent.RemoveAllClicked).state
+
+        val step = reduce(armed, ControlEvent.RemoveAllClicked)
+
+        assertThat(step.effect).isEqualTo(ControlEffect.CLEAR_IMPORTED)
+        assertThat(step.state.removeAllArmed).isFalse()
+        assertThat(step.state.library).isEmpty()
+    }
+
+    @Test
+    fun removeAll_theTimeout_disarmsWithoutAnEffect() {
+        val armed = reduce(loaded, ControlEvent.RemoveAllClicked).state
+
+        val step = reduce(armed, ControlEvent.RemoveAllDisarm)
+
+        assertThat(step.state.removeAllArmed).isFalse()
+        assertThat(step.effect).isNull()
+        assertThat(reduce(step.state, ControlEvent.RemoveAllClicked).effect).isEqualTo(ControlEffect.SCHEDULE_REMOVE_ALL_DISARM)
+    }
+
+    @Test
+    fun removeAll_isIgnoredWhileRunningAwaitingConsentOrImporting() {
+        for (busy in listOf(loaded.copy(running = true), loaded.copy(awaitingConsent = true), loaded.copy(importing = true))) {
+            val step = reduce(busy, ControlEvent.RemoveAllClicked)
+
+            assertThat(step.state).isEqualTo(busy)
+            assertThat(step.effect).isNull()
+        }
+    }
+
+    @Test
+    fun removeAll_armedState_endsWhenAnotherModelActionStarts() {
+        val armed = reduce(loaded, ControlEvent.RemoveAllClicked).state
+
+        assertThat(reduce(armed, ControlEvent.DeleteModelClicked(shaA)).state.removeAllArmed).isFalse()
+        assertThat(reduce(armed, ControlEvent.ImportClicked).state.removeAllArmed).isFalse()
+        assertThat(reduce(armed, ControlEvent.SlotPicked(ModelOrientation.PORTRAIT, shaB)).state.removeAllArmed).isFalse()
+    }
 }

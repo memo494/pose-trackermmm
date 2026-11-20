@@ -1238,6 +1238,19 @@ class TrackerConfigTest {
         for (build in rejected) assertThrows(IllegalArgumentException::class.java) { build() }
     }
 
+    @Test
+    fun removeAllConfirmMs_defaultsToFourSeconds_andRejectsOutsideItsBounds() {
+        assertThat(TrackerConfig().removeAllConfirmMs).isEqualTo(4000L)
+        TrackerConfig(removeAllConfirmMs = TrackerConfig.MIN_REMOVE_ALL_CONFIRM_MS)
+        TrackerConfig(removeAllConfirmMs = TrackerConfig.MAX_REMOVE_ALL_CONFIRM_MS)
+        assertThrows(IllegalArgumentException::class.java) {
+            TrackerConfig(removeAllConfirmMs = TrackerConfig.MIN_REMOVE_ALL_CONFIRM_MS - 1)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            TrackerConfig(removeAllConfirmMs = TrackerConfig.MAX_REMOVE_ALL_CONFIRM_MS + 1)
+        }
+    }
+
     private fun assertWithin(
         value: Float,
         min: Float,

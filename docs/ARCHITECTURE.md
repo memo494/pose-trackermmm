@@ -747,9 +747,12 @@ step back up after 60 s below the threshold. Every step is logged and shown in t
     `noBackupFilesDir/imported/`: one directory per model (`<first 16 hex of sha256>/`, managed by an
     `ImportedModelStore` over it: `model-<16 hex>.tflite` and `meta.txt`, written in the crash-safe order above),
     `slots.txt` (`OrientationSlots`, header `posetracker-model-slots v1`) and `blocked.txt` (`ModelBlocklist`), the
-    last two written to a scratch file, synced and renamed over the old one. *Migration:* the model of the earlier
-    version (in the root directory) moves into its own directory on the first read, both slots point to it, the old
-    record goes; each step can be repeated after a process death. *Fail closed:* a model record that does not read is
+    last two written to a scratch file, synced and renamed over the old one. The per-model stores have no
+    crash marker of their own (only the library owns it). *Migration:* the model of the earlier version (in the root
+    directory) is **copied** (never moved) into its own directory on the first read, checked by length and sha256, both
+    slots point to it, and only then the old record goes; each step can be repeated after a process death and a
+    half-finished entry is finished from whichever copy exists. An old record whose file is gone becomes an entry
+    that the screen reports as "file missing". *Fail closed:* a model record that does not read is
     skipped, a slot record that does not read (or names a model that is not there) is the built-in model for that
     slot, both logged; an unreadable blocked list blocks every model.
   - *Switch on rotation (M1b-1).* `ModelSwitcher` (capture thread; never the main thread) loads the model of the
@@ -765,7 +768,8 @@ step back up after 60 s below the threshold. Every step is logged and shown in t
     single-model `ImportedModelStore` implements it too); a full library is `FailureKind.LIBRARY_FULL`.
   - *Control screen (M1b-1).* The library list (name, size, **Delete**, "switched off after a crash"), the choices
     **عمودي / Portrait** and **عرضي / Landscape**, the line "In this orientation: …" (the slot of the screen's
-    orientation, with its notice) and **Remove all imported models** (replaces **Use built-in model**).
+    orientation, with its notice) and **Remove all imported models** (replaces **Use built-in model**; it needs a second
+    tap within `TrackerConfig.removeAllConfirmMs`, the label says "Tap again to remove all").
   - *Classes:* `ModelFileSniffer` (`TFL3` identifier and size limits), `ImportedModelRules` (accept or refuse
     the tensors), `ImportedModelMeta` (name, sha256, bytes, input width and height, output rows; strict text codec, **version 2**:
     header `posetracker-imported-model v2` with `inputWidth=` and `inputHeight=`; a stored **v1** text with one

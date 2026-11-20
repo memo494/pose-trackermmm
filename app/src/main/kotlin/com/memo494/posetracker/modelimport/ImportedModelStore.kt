@@ -39,6 +39,13 @@ internal interface GuardPrefs {
     fun write(text: String): Boolean
 }
 
+/** A [GuardPrefs] that stores nothing: no marker, and every write "succeeds". For the stores of the library's entries. */
+private object NoGuardPrefs : GuardPrefs {
+    override fun read(): String? = null
+
+    override fun write(text: String): Boolean = true
+}
+
 /**
  * The one owner of everything on disk for the imported model: the directory `noBackupFilesDir/imported/` with
  * the model file `model-<first 16 hex of its sha256>.tflite` (named by content, so two different imports never
@@ -106,12 +113,14 @@ class ImportedModelStore private constructor(
     internal val directory: File get() = directoryLazy.value
 
     /**
-     * A store over another directory that shares everything else with this one (the crash marker, the process-wide
-     * lock and app-start flag, the thread check and the rename). The model library keeps each model in its own
-     * directory under this store's directory, each managed by one such store (M1b-1).
+     * A store over another directory that shares the process-wide lock, the thread check, the in-flight check and the
+     * rename with this one but not the crash marker: it never reads or writes it (the marker is the library's, and an
+     * entry's accept or clear must not lift a trip or a pending attempt) and it never runs the app-start step. The
+     * model library keeps each model in its own directory under this store's directory, each managed by one such
+     * store (M1b-1).
      */
     internal fun inDirectory(other: File): ImportedModelStore =
-        ImportedModelStore(lazyOf(other), prefsLazy, appStartApplied, threadCheck, importInFlight, rename)
+        ImportedModelStore(lazyOf(other), lazyOf(NoGuardPrefs), AtomicBoolean(true), threadCheck, importInFlight, rename)
 
     override fun guard(): ImportGuardState = state().guard
 

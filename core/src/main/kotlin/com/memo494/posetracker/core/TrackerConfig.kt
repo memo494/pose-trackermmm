@@ -51,6 +51,8 @@ package com.memo494.posetracker.core
  *   1.0 accepts only square inputs, 4.0 (default) accepts 768x192 and refuses 832x192.
  * @property modelLibraryMax most imported models the model library holds, count, in
  *   [[MIN_MODEL_LIBRARY_MAX], [MAX_MODEL_LIBRARY_MAX]]; an import into a full library is refused until a model is deleted.
+ * @property removeAllConfirmMs how long, in milliseconds, "Remove all imported models" waits for the second tap that
+ *   confirms it, in [[MIN_REMOVE_ALL_CONFIRM_MS], [MAX_REMOVE_ALL_CONFIRM_MS]].
  * @property timingWindowFrames number of the newest processed frames each timing statistic (copy, pre, inference,
  *   post, frame, result age) is computed over, in frames, in [[MIN_TIMING_WINDOW_FRAMES], [MAX_TIMING_WINDOW_FRAMES]].
  * @property thermalSampleIntervalMs shortest time between two reads of the device's thermal status and headroom,
@@ -217,6 +219,7 @@ data class TrackerConfig(
     val importMaxInputSize: Int = DEFAULT_IMPORT_MAX_INPUT_SIZE,
     val importMaxInputAspect: Float = DEFAULT_IMPORT_MAX_INPUT_ASPECT,
     val modelLibraryMax: Int = DEFAULT_MODEL_LIBRARY_MAX,
+    val removeAllConfirmMs: Long = DEFAULT_REMOVE_ALL_CONFIRM_MS,
     val timingWindowFrames: Int = DEFAULT_TIMING_WINDOW_FRAMES,
     val thermalSampleIntervalMs: Long = DEFAULT_THERMAL_SAMPLE_INTERVAL_MS,
     val headKeypointEnterScore: Float = DEFAULT_HEAD_KEYPOINT_ENTER_SCORE,
@@ -358,6 +361,9 @@ data class TrackerConfig(
         }
         require(modelLibraryMax in MIN_MODEL_LIBRARY_MAX..MAX_MODEL_LIBRARY_MAX) {
             "modelLibraryMax $modelLibraryMax outside [$MIN_MODEL_LIBRARY_MAX, $MAX_MODEL_LIBRARY_MAX]"
+        }
+        require(removeAllConfirmMs in MIN_REMOVE_ALL_CONFIRM_MS..MAX_REMOVE_ALL_CONFIRM_MS) {
+            "removeAllConfirmMs $removeAllConfirmMs outside [$MIN_REMOVE_ALL_CONFIRM_MS, $MAX_REMOVE_ALL_CONFIRM_MS]"
         }
         require(timingWindowFrames in MIN_TIMING_WINDOW_FRAMES..MAX_TIMING_WINDOW_FRAMES) {
             "timingWindowFrames $timingWindowFrames outside [$MIN_TIMING_WINDOW_FRAMES, $MAX_TIMING_WINDOW_FRAMES]"
@@ -1402,6 +1408,15 @@ data class TrackerConfig(
 
         /** Highest accepted [modelLibraryMax]. */
         const val MAX_MODEL_LIBRARY_MAX = 16
+
+        /** Default [removeAllConfirmMs], in milliseconds. */
+        const val DEFAULT_REMOVE_ALL_CONFIRM_MS = 4000L
+
+        /** Lowest accepted [removeAllConfirmMs], in milliseconds. */
+        const val MIN_REMOVE_ALL_CONFIRM_MS = 1000L
+
+        /** Highest accepted [removeAllConfirmMs], in milliseconds. */
+        const val MAX_REMOVE_ALL_CONFIRM_MS = 30_000L
 
         /** An imported model's input width and height must each be a multiple of this, in pixels (the largest YOLO stride). */
         const val IMPORT_INPUT_SIZE_STEP = 32

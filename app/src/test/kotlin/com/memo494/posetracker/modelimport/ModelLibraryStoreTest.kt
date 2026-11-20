@@ -29,6 +29,9 @@ class ModelLibraryStoreTest {
     /** Test hook: a rename that returns `false` (a failed move) for a target with this name. */
     private var failRenameOf: String? = null
 
+    /** Test hook: a file or directory with this name is deleted right before a rename onto it (an unreadable record repaired). */
+    private var removeBeforeRenameOf: String? = null
+
     private val directory get() = File(tmp.root, "imported")
 
     private val shaA = "a".repeat(64)
@@ -52,7 +55,10 @@ class ModelLibraryStoreTest {
     private fun rename(
         from: File,
         to: File,
-    ): Boolean = to.name != failRenameOf && from.renameTo(to)
+    ): Boolean {
+        if (to.name == removeBeforeRenameOf) to.delete()
+        return to.name != failRenameOf && from.renameTo(to)
+    }
 
     private fun newRoot(appStartApplied: AtomicBoolean = AtomicBoolean(false)) =
         ImportedModelStore(directory, prefs, appStartApplied, thread::check, { false }, this::rename)
@@ -524,15 +530,177 @@ class ModelLibraryStoreTest {
     }
 
     @Test
-    fun migration_aMetaWithoutItsFile_isDropped() {
+    fun migration_aMetaWithoutItsFile_keepsAnEntryThatSaysFileMissing() {
         storeLegacyModel(metaA, bytesA)
         File(directory, "model-" + "a".repeat(16) + ".tflite").delete()
 
         val state = newLibrary().state()
 
-        assertThat(state.entries).isEmpty()
+        assertThat(state.entries).containsExactly(LibraryEntry(metaA, false))
         assertThat(File(directory, "meta.txt").exists()).isFalse()
-        assertThat(state.slots).isEqualTo(OrientationSlots())
+        assertThat(state.slots).isEqualTo(OrientationSlots(SlotChoice.Library(shaA), SlotChoice.Library(shaA)))
+        assertThat(ModelChoice.resolve(state.viewFor(ModelOrientation.PORTRAIT)))
+            .isEqualTo(ModelChoice.BuiltIn(BuiltInReason.FILE_MISSING))
+        assertThat(newLibrary().state().entries).containsExactly(LibraryEntry(metaA, false))
+    }
+
+    @Test
+    fun migration_aFailedMetaRename_keepsTheOldModelWhereItWas_andTheRetryFinishes() {
+        storeLegacyModel(metaA, bytesA)
+        val oldFile = File(directory, "model-" + "a".repeat(16) + ".tflite")
+        failRenameOf = "meta.txt"
+
+        val failed = newLibrary().state()
+
+        assertThat(failed.entries).isEmpty()
+        assertThat(oldFile.readBytes()).isEqualTo(bytesA)
+        assertThat(File(directory, "meta.txt").exists()).isTrue()
+
+        failRenameOf = null
+        val retried = newLibrary().state()
+
+        assertThat(retried.entries).containsExactly(LibraryEntry(metaA, true))
+        assertThat(oldFile.exists()).isFalse()
+        assertThat(File(directory, "meta.txt").exists()).isFalse()
+        assertThat(newLibrary().modelFileFor(metaA).readBytes()).isEqualTo(bytesA)
+    }
+
+    @Test
+    fun migration_aProcessDeathAfterTheOldFileWasGone_finishesTheEntryFromItsOwnFile() {
+        storeLegacyModel(metaA, bytesA)
+        newLibrary().state()
+        // The old file is gone, the entry has its model file but no meta, the old meta is still there.
+        File(entryDirectory(shaA), "meta.txt").delete()
+        File(directory, "slots.txt").delete()
+        File(directory, "meta.txt").writeText(metaA.encode())
+
+        val state = newLibrary().state()
+
+        assertThat(state.entries).containsExactly(LibraryEntry(metaA, true))
+        assertThat(File(directory, "meta.txt").exists()).isFalse()
+        assertThat(state.slots).isEqualTo(OrientationSlots(SlotChoice.Library(shaA), SlotChoice.Library(shaA)))
+        assertThat(newLibrary().storedFileMatches(metaA)).isTrue()
+    }
+
+    @Test
+    fun migration_anEntryWhoseFileIsDamagedWhileTheOldFileExists_isCopiedAgain() {
+        storeLegacyModel(metaA, bytesA)
+        val oldFile = File(directory, "model-" + "a".repeat(16) + ".tflite")
+        failRenameOf = "slots.txt"
+        newLibrary().state()
+        failRenameOf = null
+        // The slots could not be written, so the old model and record are still there; the entry's copy gets damaged.
+        newLibrary().modelFileFor(metaA).writeBytes(ByteArray(bytesA.size))
+
+        val state = newLibrary().state()
+
+        assertThat(state.entries).containsExactly(LibraryEntry(metaA, true))
+        assertThat(newLibrary().storedFileMatches(metaA)).isTrue()
+        assertThat(oldFile.exists()).isFalse()
+    }
+
+    // ---- duplicates repair the stored copy ----
+
+    @Test
+    fun store_aDuplicate_whoseStoredFileIsMissing_putsTheNewCopyInPlace() {
+        val library = newLibrary()
+        add(library, metaA, bytesA)
+        library.modelFileFor(metaA).delete()
+        assertThat(library.state().entries).containsExactly(LibraryEntry(metaA, false))
+
+        assertThat(add(library, metaA, bytesA)).isEqualTo(StoreResult.STORED)
+
+        assertThat(library.state().entries).containsExactly(LibraryEntry(metaA, true))
+        assertThat(library.storedFileMatches(metaA)).isTrue()
+    }
+
+    @Test
+    fun store_aDuplicate_whoseStoredFileIsDamaged_replacesIt() {
+        val library = newLibrary()
+        add(library, metaA, bytesA)
+        library.modelFileFor(metaA).writeBytes(ByteArray(bytesA.size))
+        assertThat(library.storedFileMatches(metaA)).isFalse()
+
+        assertThat(add(library, metaA, bytesA)).isEqualTo(StoreResult.STORED)
+
+        assertThat(library.storedFileMatches(metaA)).isTrue()
+        assertThat(filesIn(entryDirectory(shaA))).containsExactly("meta.txt", "model-" + "a".repeat(16) + ".tflite")
+    }
+
+    // ---- the entry stores keep their hands off the crash marker ----
+
+    @Test
+    fun acceptingAndDeletingModels_leavesAnotherModelsCrashRecordInTheMarker() {
+        val library = newLibrary()
+        add(library, metaA, bytesA)
+        library.setGuard(ImportGuardState.Pending(ImportStage.LOAD, shaA))
+        failRenameOf = "blocked.txt"
+        val restarted = newLibrary()
+        assertThat(restarted.guard()).isEqualTo(ImportGuardState.Tripped(ImportStage.LOAD, shaA))
+
+        add(restarted, metaB, bytesB)
+        assertThat(restarted.guard()).isEqualTo(ImportGuardState.Tripped(ImportStage.LOAD, shaA))
+
+        assertThat(restarted.delete(shaB)).isTrue()
+        assertThat(restarted.guard()).isEqualTo(ImportGuardState.Tripped(ImportStage.LOAD, shaA))
+    }
+
+    @Test
+    fun setGuard_refusesAPending_whileAnotherPendingIsStored() {
+        val library = newLibrary()
+        add(library, metaA, bytesA)
+        assertThat(library.setGuard(ImportGuardState.Pending(ImportStage.PROBE))).isTrue()
+
+        assertThat(library.setGuard(ImportGuardState.Pending(ImportStage.LOAD, shaA))).isFalse()
+        assertThat(library.guard()).isEqualTo(ImportGuardState.Pending(ImportStage.PROBE))
+        assertThat(library.setGuard(ImportGuardState.Idle)).isTrue()
+        assertThat(library.setGuard(ImportGuardState.Pending(ImportStage.LOAD, shaA))).isTrue()
+    }
+
+    // ---- delete order and the unreadable blocked list ----
+
+    @Test
+    fun delete_deletesTheFilesBeforeItUnblocks_soAFailedDeletionKeepsTheModelBlocked() {
+        val library = newLibrary()
+        add(library, metaA, bytesA)
+        library.setGuard(ImportGuardState.Pending(ImportStage.LOAD, shaA))
+        val restarted = newLibrary()
+        assertThat(restarted.state().blocked).containsExactly(shaA)
+        File(entryDirectory(shaA), "stray.bin").writeText("x")
+
+        assertThat(restarted.delete(shaA)).isFalse()
+
+        assertThat(restarted.state().blocked).containsExactly(shaA)
+    }
+
+    @Test
+    fun delete_withAnUnreadableBlockedList_rewritesItWithTheOtherModelsStillBlocked() {
+        val library = newLibrary()
+        add(library, metaA, bytesA)
+        add(library, metaB, bytesB)
+        File(directory, "blocked.txt").mkdirs()
+        removeBeforeRenameOf = "blocked.txt"
+
+        assertThat(library.delete(shaA)).isTrue()
+
+        val state = library.state()
+        assertThat(state.blockedUnreadable).isFalse()
+        assertThat(state.blocked).containsExactly(shaB)
+    }
+
+    @Test
+    fun importingAModelAgain_withAnUnreadableBlockedList_unblocksOnlyThatModel() {
+        val library = newLibrary()
+        add(library, metaA, bytesA)
+        add(library, metaB, bytesB)
+        File(directory, "blocked.txt").mkdirs()
+        removeBeforeRenameOf = "blocked.txt"
+
+        assertThat(add(library, metaA, bytesA)).isEqualTo(StoreResult.STORED)
+
+        val state = library.state()
+        assertThat(state.isBlocked(shaA)).isFalse()
+        assertThat(state.isBlocked(shaB)).isTrue()
     }
 
     // ---- the importer into the library ----

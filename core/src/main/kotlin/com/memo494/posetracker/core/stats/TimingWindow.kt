@@ -52,6 +52,13 @@ class TimingWindow(
         return true
     }
 
+    /** Forgets every sample (the model changed: the old model's timings must not mix with the new one's). */
+    fun clear() {
+        next = 0
+        count = 0
+        scratchSorted = false
+    }
+
     /** The percentile [p] in [0, 1] of the samples held, in milliseconds (see the class KDoc); NaN when not defined. */
     fun percentile(p: Double): Float {
         if (count == 0 || p.isNaN() || p < 0.0 || p > 1.0) return Float.NaN

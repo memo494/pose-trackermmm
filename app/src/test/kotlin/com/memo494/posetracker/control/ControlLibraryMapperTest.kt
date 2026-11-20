@@ -21,7 +21,8 @@ class ControlLibraryMapperTest {
         unreadable: Set<ModelOrientation> = emptySet(),
         blocked: Set<String> = emptySet(),
         guard: ImportGuardState = ImportGuardState.Idle,
-    ) = LibraryState(entries, slots, unreadable, blocked, false, guard, anyFileStored = entries.isNotEmpty())
+        blockedUnreadable: Boolean = false,
+    ) = LibraryState(entries, slots, unreadable, blocked, blockedUnreadable, guard, anyFileStored = entries.isNotEmpty())
 
     private fun load(
         state: LibraryState,
@@ -127,5 +128,18 @@ class ControlLibraryMapperTest {
         assertThat(event.landscapeSha).isNull()
         assertThat(event.libraryFull).isFalse()
         assertThat(event.fileStored).isFalse()
+    }
+
+    @Test
+    fun anUnreadableBlockedList_showsItsNotice_andEveryModelIsSwitchedOff() {
+        val event = load(library(blockedUnreadable = true))
+
+        assertThat(event.notice!!.kind).isEqualTo(ModelNoticeKind.BLOCKED_UNREADABLE)
+        assertThat(event.library.all { it.blocked }).isTrue()
+    }
+
+    @Test
+    fun aReadableBlockedList_showsNoSuchNotice() {
+        assertThat(load(library()).notice).isNull()
     }
 }

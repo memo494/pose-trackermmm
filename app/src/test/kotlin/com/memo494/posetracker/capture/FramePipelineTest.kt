@@ -2675,4 +2675,17 @@ class FramePipelineTest {
 
         assertThat(pipeline.failures).isEqualTo(0L)
     }
+
+    @Test
+    fun modelChanged_forgetsTheTimingOfTheOldModel() {
+        val pipeline = trackingPipeline()
+        framesFrom(pipeline, 0, 5)
+        assertThat(pipeline.timingSummary().samples).isGreaterThan(0)
+
+        pipeline.onModelChanged(ScriptedDetector(events, 832, 384), imported = false, notUsed = false)
+
+        assertThat(pipeline.timingSummary().samples).isEqualTo(0)
+        framesFrom(pipeline, 200, 2)
+        assertThat(pipeline.timingSummary().samples).isEqualTo(2)
+    }
 }

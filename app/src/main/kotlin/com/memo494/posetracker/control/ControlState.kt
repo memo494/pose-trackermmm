@@ -28,6 +28,8 @@ internal data class ControlState(
     val landscapeSha: String? = null,
     /** `true` when the library holds the most models it may; Import is disabled until one is deleted. */
     val libraryFull: Boolean = false,
+    /** `true` after the first tap on "Remove all imported models" until the second tap or the timeout. */
+    val removeAllArmed: Boolean = false,
     /** `true` from the moment a picked file is handed to the importer until its result arrives; Start is disabled. */
     val importing: Boolean = false,
     /** What the last import said; `null` before any import, after a new one starts and after "Use built-in model". */
@@ -175,6 +177,9 @@ internal enum class ModelNoticeKind {
 
     /** What is stored about the imported model could not be read ([ModelNotice.message] says why). */
     STATE_UNREADABLE,
+
+    /** The list of switched-off models could not be read, so every imported model counts as switched off. */
+    BLOCKED_UNREADABLE,
 }
 
 /** A [kind] of notice with the optional one-line technical [message] of the failure behind it. */
@@ -245,6 +250,12 @@ internal sealed interface ControlEvent {
     /** The user pressed "Use built-in model". */
     data object UseBuiltInClicked : ControlEvent
 
+    /** The user pressed "Remove all imported models": the first tap arms it, a second tap before the timeout removes. */
+    data object RemoveAllClicked : ControlEvent
+
+    /** The time to confirm "Remove all imported models" ran out. */
+    data object RemoveAllDisarm : ControlEvent
+
     /** The user switched "Debug marks" on or off. Allowed in every state; it is used from the next Start. */
     data class DebugMarksToggled(
         val enabled: Boolean,
@@ -298,6 +309,9 @@ internal enum class ControlEffect {
     /** Delete every imported model on a worker thread, then read the model state again. */
     CLEAR_IMPORTED,
 
+    /** After `TrackerConfig.removeAllConfirmMs`, send `RemoveAllDisarm`. */
+    SCHEDULE_REMOVE_ALL_DISARM,
+
     /** Delete the library model [ControlStep.modelSha] on a worker thread, then read the model state again. */
     DELETE_MODEL,
 
@@ -338,6 +352,23 @@ internal object ControlReducer {
         state: ControlState,
         event: ControlEvent,
         notificationPermissionMissing: Boolean,
+    ): ControlStep {
+        val ends = state.removeAllArmed && event.endsRemoveAllConfirm()
+        return step(if (ends) state.copy(removeAllArmed = false) else state, event, notificationPermissionMissing)
+    }
+
+    /** Another action started: the first tap on "Remove all imported models" no longer waits for its second tap. */
+    private fun ControlEvent.endsRemoveAllConfirm(): Boolean =
+        this is ControlEvent.ImportClicked ||
+            this is ControlEvent.ImportPicked ||
+            this is ControlEvent.DeleteModelClicked ||
+            this is ControlEvent.SlotPicked ||
+            this is ControlEvent.StartClicked
+
+    private fun step(
+        state: ControlState,
+        event: ControlEvent,
+        notificationPermissionMissing: Boolean,
     ): ControlStep =
         when (event) {
             is ControlEvent.OverlayPermissionChecked -> onOverlayChecked(state, event.granted)
@@ -352,6 +383,8 @@ internal object ControlReducer {
             is ControlEvent.ImportPicked -> onImportPicked(state, event.uriString)
             is ControlEvent.ImportFinished -> onImportFinished(state, event.summary)
             ControlEvent.UseBuiltInClicked -> onUseBuiltIn(state)
+            ControlEvent.RemoveAllClicked -> onRemoveAll(state)
+            ControlEvent.RemoveAllDisarm -> ControlStep(state.copy(removeAllArmed = false), null)
             is ControlEvent.DeleteModelClicked -> onDeleteModel(state, event.sha256)
             is ControlEvent.SlotPicked -> onSlotPicked(state, event.orientation, event.sha256)
             is ControlEvent.ModelStateLoaded -> onModelStateLoaded(state, event)
@@ -472,10 +505,18 @@ internal object ControlReducer {
         return ControlStep(next, ControlEffect.LOAD_MODEL_STATE)
     }
 
+    /** The first tap arms (and the activity schedules the disarm); the second removes everything. */
+    private fun onRemoveAll(state: ControlState): ControlStep {
+        if (modelBusy(state)) return ControlStep(state, null)
+        if (!state.removeAllArmed) return ControlStep(state.copy(removeAllArmed = true), ControlEffect.SCHEDULE_REMOVE_ALL_DISARM)
+        return onUseBuiltIn(state)
+    }
+
     private fun onUseBuiltIn(state: ControlState): ControlStep {
         if (modelBusy(state)) return ControlStep(state, null)
         val cleared =
             state.copy(
+                removeAllArmed = false,
                 activeModel = ActiveModel.BuiltIn,
                 importResult = null,
                 modelNotice = null,

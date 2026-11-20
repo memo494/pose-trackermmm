@@ -164,4 +164,18 @@ class TimingWindowTest {
             assertThrows(IllegalArgumentException::class.java) { TimingWindow(capacity) }
         }
     }
+
+    @Test
+    fun clear_forgetsEverySampleAndTheWindowFillsAgain() {
+        val window = TimingWindow(TrackerConfig.MIN_TIMING_WINDOW_FRAMES)
+        for (i in 1..5) window.add(i.toFloat())
+
+        window.clear()
+
+        assertThat(window.count).isEqualTo(0)
+        assertThat(window.percentile(0.5)).isNaN()
+        window.add(7f)
+        assertThat(window.count).isEqualTo(1)
+        assertThat(window.percentile(0.5)).isEqualTo(7f)
+    }
 }

@@ -26,6 +26,7 @@ import com.memo494.posetracker.diagnostics.CaptureStatsHolder
 import com.memo494.posetracker.modelimport.ModelLibraryStore
 import com.memo494.posetracker.modelimport.ModelSelection
 import com.memo494.posetracker.modelimport.ModelSource
+import com.memo494.posetracker.modelimport.ModelStatus
 import com.memo494.posetracker.modelimport.ModelStatusHolder
 import com.memo494.posetracker.modelimport.ModelSwitcher
 import com.memo494.posetracker.overlay.LockTarget
@@ -318,7 +319,7 @@ internal class CaptureSession(
     }
 
     private fun publishModelStatus(switcher: ModelSwitcher) {
-        switcher.status()?.let { ModelStatusHolder.publish(it) }
+        ModelStatusHolder.publish(switcher.status() ?: ModelStatus.chooseFailed())
     }
 
     /**

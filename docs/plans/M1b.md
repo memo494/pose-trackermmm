@@ -54,6 +54,6 @@ diagnostics show both slots and the switches.
 ## Progress (M1b-1)
 | Task | Status | Commit | Notes |
 |---|---|---|---|
-| T1 | — | | |
-| T2 | — | | |
-| T3 | — | | |
+| T1 | done | a341042 | library, slots, per-model crash marker (core) |
+| T2 | done | 11bf672 | library store, control screen pickers |
+| T3 | done | 5da2856 | switch on rotation, diagnostics; review fixes d5d140e, 56ba144 (copy-not-move migration, closed-detector safety, two-tap remove all); @Test 1589→1741 |

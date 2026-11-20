@@ -345,7 +345,10 @@ class ModelLibraryStore internal constructor(
 
     private fun entryDirectories(): List<File> =
         try {
-            root.directory.listFiles { file -> file.isDirectory && isEntryName(file.name) }?.sortedBy { it.name }.orEmpty()
+            root.directory
+                .listFiles { file -> file.isDirectory && isEntryName(file.name) }
+                ?.sortedBy { it.name }
+                .orEmpty()
         } catch (e: SecurityException) {
             emptyList()
         }

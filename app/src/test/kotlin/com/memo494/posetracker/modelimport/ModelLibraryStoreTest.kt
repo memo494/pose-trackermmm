@@ -581,8 +581,9 @@ class ModelLibraryStoreTest {
         val again = importBytes(importer, tfliteBytes(500, 1), "copy.tflite")
 
         assertThat(again).isInstanceOf(ImportOutcome.Accepted::class.java)
-        assertThat(library.state().entries).hasSize(1)
-        assertThat(library.state().entries.single().meta.displayName).isEqualTo("one.tflite")
+        val entries = library.state().entries
+        assertThat(entries).hasSize(1)
+        assertThat(entries.single().meta.displayName).isEqualTo("one.tflite")
     }
 
     @Test

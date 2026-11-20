@@ -29,6 +29,40 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Guards every path below (download-only export, publish, sweep); skipped for the normal export.
+      - name: Check inputs
+        if: ${{ inputs.sizes != '' || inputs.publish_tag != '' || inputs.sweep }}
+        env:
+          SIZES: ${{ inputs.sizes }}
+          TAG: ${{ inputs.publish_tag }}
+          SWEEP: ${{ inputs.sweep }}
+        run: |
+          if [ "$SWEEP" = "true" ] && { [ -n "$SIZES" ] || [ -n "$TAG" ]; }; then
+            echo "sweep cannot be combined with sizes or publish_tag: the sweep only reads the release 'models' and writes the release 'models-sweep'" >&2
+            exit 1
+          fi
+          if [ "$SWEEP" = "true" ]; then
+            exit 0
+          fi
+          if [ -z "$SIZES" ]; then
+            echo "publish_tag needs sizes" >&2
+            exit 1
+          fi
+          if [ -n "$TAG" ]; then
+            if [ "$TAG" = "latest" ]; then
+              echo "publish_tag must not be 'latest' (the rolling APK release)" >&2
+              exit 1
+            fi
+            if [ "$TAG" = "models-sweep" ]; then
+              echo "publish_tag must not be 'models-sweep' (the sweep job is the only writer of that release)" >&2
+              exit 1
+            fi
+            if ! [[ "$TAG" =~ ^models[A-Za-z0-9._-]*$ ]]; then
+              echo "publish_tag must start with 'models' and may only contain A-Z a-z 0-9 . _ -" >&2
+              exit 1
+            fi
+          fi
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -66,39 +100,6 @@ jobs:
             tools/requirements.lock
 
       # ---- Download-only export (sizes set): no PR, nothing under model/ (M0c D5) ----
-      - name: Check inputs
-        if: ${{ inputs.sizes != '' || inputs.publish_tag != '' || inputs.sweep }}
-        env:
-          SIZES: ${{ inputs.sizes }}
-          TAG: ${{ inputs.publish_tag }}
-          SWEEP: ${{ inputs.sweep }}
-        run: |
-          if [ "$SWEEP" = "true" ] && { [ -n "$SIZES" ] || [ -n "$TAG" ]; }; then
-            echo "sweep cannot be combined with sizes or publish_tag: the sweep only reads the release 'models' and writes the release 'models-sweep'" >&2
-            exit 1
-          fi
-          if [ "$SWEEP" = "true" ]; then
-            exit 0
-          fi
-          if [ -z "$SIZES" ]; then
-            echo "publish_tag needs sizes" >&2
-            exit 1
-          fi
-          if [ -n "$TAG" ]; then
-            if [ "$TAG" = "latest" ]; then
-              echo "publish_tag must not be 'latest' (the rolling APK release)" >&2
-              exit 1
-            fi
-            if [ "$TAG" = "models-sweep" ]; then
-              echo "publish_tag must not be 'models-sweep' (the sweep job is the only writer of that release)" >&2
-              exit 1
-            fi
-            if ! [[ "$TAG" =~ ^models[A-Za-z0-9._-]*$ ]]; then
-              echo "publish_tag must start with 'models' and may only contain A-Z a-z 0-9 . _ -" >&2
-              exit 1
-            fi
-          fi
-
       - name: Install pinned export toolchain
         if: ${{ inputs.sizes != '' }}
         run: |

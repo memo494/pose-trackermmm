@@ -77,6 +77,9 @@ enum class FailureKind {
     /** The crash marker could not be saved, so the risky step was not taken (or its result is not safe to keep). */
     GUARD_NOT_STORED,
 
+    /** The model library is full (`TrackerConfig.modelLibraryMax`): delete a model first. */
+    LIBRARY_FULL,
+
     /** An I/O or other unexpected error; the message names it. */
     IO,
 }
@@ -104,7 +107,7 @@ enum class FailureKind {
  * @param probe reads the tensors of a file; the real one is `ModelProbe.probe`, tests pass a fake.
  */
 class ModelImporter(
-    private val store: ImportedModelStore,
+    private val store: ImportTarget,
     private val config: TrackerConfig = TrackerConfig(),
     private val threadCheck: () -> Unit = { WorkerThreadCheck.require() },
     private val probe: (File) -> ProbeResult = ModelProbe::probe,
@@ -180,7 +183,7 @@ class ModelImporter(
             return ImportOutcome.Rejected(RejectionKind.Sniffed(sniff.reason), "${copy.bytes} bytes")
         }
 
-        val initialGuard = store.state().guard
+        val initialGuard = store.guard()
         if (initialGuard is ImportGuardState.Pending) return ImportOutcome.Failed(FailureKind.BUSY)
         // A stored trip stays untouched for the whole probe: replacing it by the probe marker would let a process
         // death in the probe read as a trip at the probe, which keeps a stored model that a load crash switched off.
@@ -226,9 +229,12 @@ class ModelImporter(
         if (ImportedModelMeta.decode(meta.encode(), config) != meta) {
             return ImportOutcome.Failed(FailureKind.IO, "The model description cannot be stored")
         }
-        // The store also lifts a trip (the new file replaces the one that tripped the guard), under the same lock.
-        if (!store.accept(temp, meta)) return ImportOutcome.Failed(FailureKind.IO, "The model could not be stored")
-        return ImportOutcome.Accepted(meta)
+        // The target also lifts a trip (the new file replaces the one that tripped the guard), under the same lock.
+        return when (store.store(temp, meta)) {
+            StoreResult.STORED -> ImportOutcome.Accepted(meta)
+            StoreResult.LIBRARY_FULL -> ImportOutcome.Failed(FailureKind.LIBRARY_FULL)
+            StoreResult.FAILED -> ImportOutcome.Failed(FailureKind.IO, "The model could not be stored")
+        }
     }
 
     /** A probe that throws is a catchable failure (no crash happened), reported like a failed probe. */

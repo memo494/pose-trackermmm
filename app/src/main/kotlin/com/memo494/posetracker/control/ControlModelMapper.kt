@@ -7,10 +7,13 @@ import com.memo494.posetracker.core.modelimport.ImportGuardState
 import com.memo494.posetracker.core.modelimport.ImportRejection
 import com.memo494.posetracker.core.modelimport.ImportStage
 import com.memo494.posetracker.core.modelimport.ImportedModelMeta
+import com.memo494.posetracker.core.modelimport.ModelOrientation
+import com.memo494.posetracker.core.modelimport.SlotChoice
 import com.memo494.posetracker.core.modelimport.SniffRejection
 import com.memo494.posetracker.modelimport.BuiltInReason
 import com.memo494.posetracker.modelimport.FailureKind
 import com.memo494.posetracker.modelimport.ImportOutcome
+import com.memo494.posetracker.modelimport.LibraryState
 import com.memo494.posetracker.modelimport.ModelChoice
 import com.memo494.posetracker.modelimport.ModelFallback
 import com.memo494.posetracker.modelimport.ModelStatus
@@ -40,6 +43,7 @@ internal object ControlModelMapper {
         when (kind) {
             FailureKind.BUSY -> ImportFailure.BUSY
             FailureKind.GUARD_NOT_STORED -> ImportFailure.GUARD_NOT_STORED
+            FailureKind.LIBRARY_FULL -> ImportFailure.LIBRARY_FULL
             FailureKind.IO -> ImportFailure.IO
         }
 
@@ -117,6 +121,40 @@ internal object ControlModelMapper {
             }
         }
 
+    /**
+     * The whole model block from the library ([library]) and the newest session's [status]: the library list, the
+     * two choices, and the model and notice of the slot of [orientation] (the screen's current orientation, which is
+     * the one the next start captures), read exactly as [stateLoaded] reads one stored model. A choice that could not
+     * be read shows the built-in model and a "could not be read" notice. [maxModels] is `TrackerConfig.modelLibraryMax`.
+     */
+    fun libraryLoaded(
+        library: LibraryState,
+        status: ModelStatus?,
+        orientation: ModelOrientation,
+        maxModels: Int,
+        storedFileMatches: (ImportedModelMeta) -> Boolean = { false },
+    ): ControlEvent.ModelStateLoaded {
+        val slot =
+            if (orientation in library.slotsUnreadable) {
+                val notice = ModelNotice(ModelNoticeKind.STATE_UNREADABLE, "${orientation.logName}: the stored choice is unreadable")
+                ControlEvent.ModelStateLoaded(ActiveModel.BuiltIn, notice, library.anyFileStored)
+            } else {
+                stateLoaded(library.viewFor(orientation), status, storedFileMatches)
+            }
+        val items =
+            library.entries.map {
+                LibraryItem(it.meta.sha256, it.meta.displayName, inputText(it.meta), library.isBlocked(it.meta.sha256))
+            }
+        return slot.copy(
+            library = items,
+            portraitSha = shaOf(library.slots.portrait),
+            landscapeSha = shaOf(library.slots.landscape),
+            libraryFull = library.entries.size >= maxModels,
+        )
+    }
+
+    private fun shaOf(choice: SlotChoice): String? = if (choice is SlotChoice.Library) choice.sha256 else null
+
     /** Only a trip at the probe reaches here with an imported model active (a load trip is always built-in). */
     private fun probeTripNotice(guard: ImportGuardState): ModelNotice? =
         if (guard == ImportGuardState.Tripped(ImportStage.PROBE)) ModelNotice(ModelNoticeKind.PROBE_TRIP_MODEL_KEPT) else null
@@ -164,6 +202,7 @@ internal object ControlModelMapper {
         when (failure) {
             ImportFailure.BUSY -> R.string.model_result_busy
             ImportFailure.GUARD_NOT_STORED -> R.string.model_result_guard_not_stored
+            ImportFailure.LIBRARY_FULL -> R.string.model_result_library_full
             ImportFailure.IO -> R.string.model_result_failed
         }
 

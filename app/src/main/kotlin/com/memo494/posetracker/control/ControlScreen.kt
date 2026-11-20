@@ -1,5 +1,6 @@
 package com.memo494.posetracker.control
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -7,11 +8,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -24,6 +27,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.memo494.posetracker.R
 import com.memo494.posetracker.core.TrackerConfig
+import com.memo494.posetracker.core.modelimport.ModelOrientation
 
 private val SCREEN_PADDING = 24.dp
 private val ITEM_SPACING = 16.dp
@@ -46,6 +50,8 @@ internal fun ControlScreen(
     onOpenOverlaySettingsClick: () -> Unit,
     onImportClick: () -> Unit,
     onUseBuiltInClick: () -> Unit,
+    onDeleteModelClick: (String) -> Unit,
+    onSlotPick: (ModelOrientation, String?) -> Unit,
     onDebugMarksChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
     crashContent: @Composable () -> Unit = {},
@@ -95,7 +101,7 @@ internal fun ControlScreen(
 
             DebugMarksSwitch(state.debugMarks, onDebugMarksChange)
 
-            ModelBlock(state, onImportClick, onUseBuiltInClick)
+            ModelBlock(state, onImportClick, onUseBuiltInClick, onDeleteModelClick, onSlotPick)
 
             Text(stringResource(R.string.control_description), style = MaterialTheme.typography.bodyMedium)
             diagnosticsContent()
@@ -130,19 +136,26 @@ private fun DebugMarksSwitch(
 }
 
 /**
- * The model block: the active model, Import and Use built-in, the progress line, the last result, the notice and
- * the trust hint. Import and reset are disabled while the capture runs or starts and while an import runs.
+ * The model block: the library list with Delete, the two choices (portrait and landscape), the model of this
+ * orientation, Import and Remove all, the progress line, the last result, the notice and the trust hint. Everything
+ * that changes the models is disabled while the capture runs or starts and while an import runs.
  */
 @Composable
 private fun ModelBlock(
     state: ControlState,
     onImportClick: () -> Unit,
     onUseBuiltInClick: () -> Unit,
+    onDeleteModelClick: (String) -> Unit,
+    onSlotPick: (ModelOrientation, String?) -> Unit,
 ) {
     val idle = !state.running && !state.awaitingConsent && !state.importing
     Column(verticalArrangement = Arrangement.spacedBy(ITEM_SPACING)) {
         Text(stringResource(R.string.model_title), style = MaterialTheme.typography.titleMedium)
-        Text(activeModelLine(state), style = MaterialTheme.typography.bodyLarge)
+        Text(stringResource(R.string.model_now, activeModelLine(state)), style = MaterialTheme.typography.bodyLarge)
+
+        SlotPicker(R.string.model_slot_portrait, state.portraitSha, state, idle) { onSlotPick(ModelOrientation.PORTRAIT, it) }
+        SlotPicker(R.string.model_slot_landscape, state.landscapeSha, state, idle) { onSlotPick(ModelOrientation.LANDSCAPE, it) }
+        LibraryList(state, idle, onDeleteModelClick)
 
         val modelNotice = state.modelNotice
         if (modelNotice != null) {
@@ -160,15 +173,85 @@ private fun ModelBlock(
         val result = state.importResult
         if (result != null) ImportResultText(result)
 
-        OutlinedButton(onClick = onImportClick, enabled = idle, modifier = Modifier.fillMaxWidth()) {
+        if (state.libraryFull) {
+            Text(stringResource(R.string.model_library_full), style = MaterialTheme.typography.bodyMedium)
+        }
+        OutlinedButton(onClick = onImportClick, enabled = idle && !state.libraryFull, modifier = Modifier.fillMaxWidth()) {
             Text(stringResource(R.string.model_import))
         }
-        if (state.activeModel is ActiveModel.Imported || modelNotice != null || state.modelFileStored) {
+        if (state.library.isNotEmpty() || modelNotice != null || state.modelFileStored) {
             OutlinedButton(onClick = onUseBuiltInClick, enabled = idle, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.model_use_built_in))
             }
         }
         Text(stringResource(R.string.model_hint_trust), style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+/** The choice of one orientation: the built-in model and every library model that is not switched off. */
+@Composable
+private fun SlotPicker(
+    @StringRes labelRes: Int,
+    selectedSha: String?,
+    state: ControlState,
+    enabled: Boolean,
+    onPick: (String?) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(SWITCH_NOTE_SPACING)) {
+        Text(stringResource(labelRes), style = MaterialTheme.typography.titleSmall)
+        PickRow(stringResource(R.string.model_active_built_in, state.builtInInputSize), selectedSha == null, enabled) { onPick(null) }
+        for (item in state.library) {
+            val text = stringResource(R.string.model_library_item, item.displayName, item.inputText)
+            PickRow(text, selectedSha == item.sha256, enabled && !item.blocked) { onPick(item.sha256) }
+        }
+    }
+}
+
+@Composable
+private fun PickRow(
+    text: String,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .selectable(selected = selected, enabled = enabled, role = Role.RadioButton, onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(ITEM_SPACING),
+    ) {
+        RadioButton(selected = selected, onClick = null, enabled = enabled)
+        Text(text, style = MaterialTheme.typography.bodyLarge)
+    }
+}
+
+/** The library: one row per model with its size and a Delete button, or a sentence when it is empty. */
+@Composable
+private fun LibraryList(
+    state: ControlState,
+    enabled: Boolean,
+    onDeleteModelClick: (String) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(SWITCH_NOTE_SPACING)) {
+        Text(stringResource(R.string.model_library_title), style = MaterialTheme.typography.titleSmall)
+        if (state.library.isEmpty()) {
+            Text(stringResource(R.string.model_library_empty), style = MaterialTheme.typography.bodySmall)
+        }
+        for (item in state.library) {
+            val itemRes = if (item.blocked) R.string.model_library_item_blocked else R.string.model_library_item
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(ITEM_SPACING)) {
+                Text(
+                    text = stringResource(itemRes, item.displayName, item.inputText),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                OutlinedButton(onClick = { onDeleteModelClick(item.sha256) }, enabled = enabled) {
+                    Text(stringResource(R.string.model_delete))
+                }
+            }
+        }
     }
 }
 
@@ -240,6 +323,8 @@ private fun ControlScreenPreview() {
             onOpenOverlaySettingsClick = {},
             onImportClick = {},
             onUseBuiltInClick = {},
+            onDeleteModelClick = {},
+            onSlotPick = { _, _ -> },
             onDebugMarksChange = {},
         )
     }

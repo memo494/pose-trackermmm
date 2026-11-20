@@ -69,7 +69,7 @@ class ImportedModelStore private constructor(
     private val threadCheck: () -> Unit,
     private val importInFlight: () -> Boolean,
     private val rename: (File, File) -> Boolean,
-) {
+) : ImportTarget {
     /** The production store: files under `noBackupFilesDir/imported/`, the marker in private preferences. */
     constructor(context: Context) : this(
         lazy { File(context.applicationContext.noBackupFilesDir, DIRECTORY_NAME) },
@@ -101,6 +101,24 @@ class ImportedModelStore private constructor(
         importInFlight: () -> Boolean = { ModelImporter.isImporting() },
         rename: (File, File) -> Boolean = File::renameTo,
     ) : this(lazyOf(directory), lazyOf(guardPrefs), appStartApplied, threadCheck, importInFlight, rename)
+
+    /** The directory this store owns. No disk work: it only names the place. */
+    internal val directory: File get() = directoryLazy.value
+
+    /**
+     * A store over another directory that shares everything else with this one (the crash marker, the process-wide
+     * lock and app-start flag, the thread check and the rename). The model library keeps each model in its own
+     * directory under this store's directory, each managed by one such store (M1b-1).
+     */
+    internal fun inDirectory(other: File): ImportedModelStore =
+        ImportedModelStore(lazyOf(other), prefsLazy, appStartApplied, threadCheck, importInFlight, rename)
+
+    override fun guard(): ImportGuardState = state().guard
+
+    override fun store(
+        temp: File,
+        meta: ImportedModelMeta,
+    ): StoreResult = if (accept(temp, meta)) StoreResult.STORED else StoreResult.FAILED
 
     /** The file that holds the model described by [meta]: `model-<first 16 hex of sha256>.tflite`; it may not exist. */
     fun modelFileFor(meta: ImportedModelMeta): File {
@@ -156,7 +174,7 @@ class ImportedModelStore private constructor(
      *
      * @throws IOException when the directory cannot be created or the leftover cannot be deleted.
      */
-    fun newTempFile(): File {
+    override fun newTempFile(): File {
         threadCheck()
         synchronized(LOCK) {
             currentGuard()
@@ -215,7 +233,7 @@ class ImportedModelStore private constructor(
     }
 
     /** Stores the crash marker synchronously, before the caller goes on; `false` when it could not be written. */
-    fun setGuard(state: ImportGuardState): Boolean {
+    override fun setGuard(state: ImportGuardState): Boolean {
         threadCheck()
         synchronized(LOCK) {
             currentGuard()

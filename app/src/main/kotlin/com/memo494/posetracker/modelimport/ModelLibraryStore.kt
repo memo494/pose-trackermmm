@@ -378,7 +378,8 @@ class ModelLibraryStore internal constructor(
     ): Boolean {
         var done = true
         if (current.blockedUnreadable) {
-            done = writeBlocked(current.library.entries.map { it.sha256 }.toSet() - sha256)
+            val everyModel = current.entries.mapTo(HashSet()) { it.meta.sha256 }
+            done = writeBlocked(everyModel - sha256)
         } else if (sha256 in current.blocked) {
             done = writeBlocked(current.blocked - sha256)
         }

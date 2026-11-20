@@ -100,4 +100,45 @@ class ImportGuardTest {
             assertThat(ImportGuard.decode(text)).isEqualTo(ImportGuardState.Idle)
         }
     }
+
+    private val shaA = "a".repeat(64)
+
+    @Test
+    fun begin_withASha_isPendingForThatModel() {
+        assertThat(ImportGuard.begin(ImportStage.LOAD, shaA)).isEqualTo(ImportGuardState.Pending(ImportStage.LOAD, shaA))
+    }
+
+    @Test
+    fun onAppStart_pendingLoadOfAModel_isTrippedForThatModel() {
+        val state = ImportGuard.onAppStart(ImportGuardState.Pending(ImportStage.LOAD, shaA))
+
+        assertThat(state).isEqualTo(ImportGuardState.Tripped(ImportStage.LOAD, shaA))
+    }
+
+    @Test
+    fun encode_appendsTheShaAfterAColon() {
+        assertThat(ImportGuard.encode(ImportGuardState.Pending(ImportStage.LOAD, shaA))).isEqualTo("pending:load:$shaA")
+        assertThat(ImportGuard.encode(ImportGuardState.Tripped(ImportStage.LOAD, shaA))).isEqualTo("tripped:load:$shaA")
+    }
+
+    @Test
+    fun decode_roundTripsStatesWithAModel() {
+        val states = listOf(ImportGuardState.Pending(ImportStage.LOAD, shaA), ImportGuardState.Tripped(ImportStage.LOAD, shaA))
+
+        for (state in states) {
+            assertThat(ImportGuard.decode(ImportGuard.encode(state))).isEqualTo(state)
+        }
+    }
+
+    @Test
+    fun decode_aMarkerWithABadSha_isStillAMarkerOfAnUnknownModel() {
+        assertThat(ImportGuard.decode("pending:load:xyz")).isEqualTo(ImportGuardState.Pending(ImportStage.LOAD))
+        assertThat(ImportGuard.decode("tripped:load:" + "A".repeat(64))).isEqualTo(ImportGuardState.Tripped(ImportStage.LOAD))
+        assertThat(ImportGuard.decode("tripped:load:")).isEqualTo(ImportGuardState.Tripped(ImportStage.LOAD))
+    }
+
+    @Test
+    fun decode_aMarkerWithAnUnknownStageAndASha_isIdle() {
+        assertThat(ImportGuard.decode("pending:other:$shaA")).isEqualTo(ImportGuardState.Idle)
+    }
 }

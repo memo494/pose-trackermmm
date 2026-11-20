@@ -1217,6 +1217,27 @@ class TrackerConfigTest {
         }
     }
 
+    @Test
+    fun modelLibraryMax_defaultsToFour() {
+        assertThat(TrackerConfig().modelLibraryMax).isEqualTo(4)
+    }
+
+    @Test
+    fun modelLibraryMax_atItsBounds_isAccepted() {
+        assertThat(TrackerConfig(modelLibraryMax = TrackerConfig.MIN_MODEL_LIBRARY_MAX).modelLibraryMax).isEqualTo(1)
+        assertThat(TrackerConfig(modelLibraryMax = TrackerConfig.MAX_MODEL_LIBRARY_MAX).modelLibraryMax).isEqualTo(16)
+    }
+
+    @Test
+    fun modelLibraryMax_outsideItsBounds_isRejected() {
+        val rejected: List<() -> TrackerConfig> =
+            listOf(
+                { TrackerConfig(modelLibraryMax = TrackerConfig.MIN_MODEL_LIBRARY_MAX - 1) },
+                { TrackerConfig(modelLibraryMax = TrackerConfig.MAX_MODEL_LIBRARY_MAX + 1) },
+            )
+        for (build in rejected) assertThrows(IllegalArgumentException::class.java) { build() }
+    }
+
     private fun assertWithin(
         value: Float,
         min: Float,

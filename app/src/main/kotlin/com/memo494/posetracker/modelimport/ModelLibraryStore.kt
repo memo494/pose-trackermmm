@@ -124,7 +124,7 @@ class ModelLibraryStore internal constructor(
         config,
         { WorkerThreadCheck.require() },
         File::renameTo,
-        { message, error -> AppLog.log(message, error) },
+        log = { message, error -> AppLog.log(message, error) },
     )
 
     /** Everything stored now. Runs the migration and the crash-marker conversion first. */

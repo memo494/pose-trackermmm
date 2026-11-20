@@ -22,4 +22,4 @@
 ## Progress
 | Task | Status | Commit | Notes |
 |---|---|---|---|
-| T1 | — | | |
+| T1 | done | 7be10be | review fixes: no-row model marked broken not fatal, Check inputs first, plain rows reused; self-test passes |

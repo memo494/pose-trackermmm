@@ -762,7 +762,11 @@ step back up after 60 s below the threshold. Every step is logged and shown in t
     model that is blocked, missing or fails to load (an `Error` such as `OutOfMemoryError` included) gives the built-in
     model with the existing fallback reasons; the session never stops, and a failed load is tried again when its
     orientation returns. The LOAD crash marker now names the model (`pending:load:<sha256>`); a trip moves only that
-    model to `blocked.txt` and the marker goes idle, so the other models keep working. To try a blocked model again,
+    model to `blocked.txt` and the marker goes idle, so the other models keep working. If the marker cannot be set back to idle after
+    a load (a failed write), the `Pending` stays stored: for the rest of the process loads fall back to the built-in model
+    and imports answer BUSY (the library refuses a second `Pending`), and at the next start that model is blocked (fail
+    closed: a possible crash is never ignored). A model file is copied into the library only if it still has its length
+    and sha256; an old file that does not is migrated as a "file missing" entry, once. To try a blocked model again,
     delete it and import it again (importing the same file again also unblocks it). A marker without a model (an
     older version's) blocks the migrated model. `ModelImporter` stores through `ImportTarget` (the library; the
     single-model `ImportedModelStore` implements it too); a full library is `FailureKind.LIBRARY_FULL`.

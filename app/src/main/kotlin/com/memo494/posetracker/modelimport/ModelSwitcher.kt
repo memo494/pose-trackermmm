@@ -94,7 +94,13 @@ internal class ModelSwitcher(
             choose(orientation)
         } catch (t: Throwable) {
             safeLog("choosing the model for ${orientation.logName} failed", t)
-            if (oldClosed) recover(orientation, t) else null
+            if (oldClosed) {
+                recover(orientation, t)
+            } else {
+                // Nothing was running before (Start): a detector that was built is not returned, so it is closed here.
+                closeQuietly(built?.detector)
+                null
+            }
         }
     }
 

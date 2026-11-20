@@ -262,6 +262,7 @@ internal class CaptureSession(
         if (teardown.isStarted) return
         val switcher = createModelSwitcher()
         modelSwitcher = switcher
+        detector = null
         val selection = switcher.select(startOrientation())
         val loaded = selection?.loaded
         detector = loaded?.detector
@@ -333,7 +334,17 @@ internal class CaptureSession(
         activePipeline: FramePipeline,
     ) {
         val switcher = modelSwitcher ?: return
-        val selection: ModelSelection = switcher.select(ModelOrientation.of(size.widthImg, size.heightImg)) ?: return
+        // The switcher closes the running detector first. Nothing may keep using it, even if the switch dies half-way
+        // (an Error that escapes the switcher): both holders are cleared before, and put back when nothing changed.
+        val previous = detector
+        detector = null
+        activePipeline.holdDetector(null)
+        val selection: ModelSelection? = switcher.select(ModelOrientation.of(size.widthImg, size.heightImg))
+        if (selection == null) {
+            detector = previous
+            activePipeline.holdDetector(previous)
+            return
+        }
         val loaded = selection.loaded
         detector = loaded.detector
         publishModelStatus(switcher)

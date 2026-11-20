@@ -356,4 +356,17 @@ class ModelSwitcherTest {
         assertThat(selection.loaded.source).isEqualTo(ModelSource.BUILT_IN)
         assertThat(selection.loaded.detector).isNotNull()
     }
+
+    @Test
+    fun aFailureAtStart_afterTheDetectorWasBuilt_closesThatDetectorAndReturnsNothing() {
+        nowCalls = 0
+        nowFailsOnCall = 2
+
+        val selection = switcher.select(ModelOrientation.PORTRAIT)
+
+        assertThat(selection).isNull()
+        assertThat(detectors).hasSize(1)
+        assertThat(detectors.single().closeCount).isEqualTo(1)
+        assertThat(switcher.status()).isNull()
+    }
 }

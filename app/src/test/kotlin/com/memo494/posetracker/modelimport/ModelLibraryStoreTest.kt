@@ -30,8 +30,8 @@ class ModelLibraryStoreTest {
     /** Test hook: a rename that returns `false` (a failed move) for a target with this name. */
     private var failRenameOf: String? = null
 
-    /** Test hook: a file or directory with this name is deleted right before a rename onto it (an unreadable record repaired). */
-    private var removeBeforeRenameOf: String? = null
+    /** Test hook: reading a file with this name fails (an unreadable record). */
+    private var failReadOf: String? = null
 
     private val directory get() = File(tmp.root, "imported")
 
@@ -62,9 +62,11 @@ class ModelLibraryStoreTest {
     private fun rename(
         from: File,
         to: File,
-    ): Boolean {
-        if (to.name == removeBeforeRenameOf) to.delete()
-        return to.name != failRenameOf && from.renameTo(to)
+    ): Boolean = to.name != failRenameOf && from.renameTo(to)
+
+    private fun readFile(file: File): String {
+        if (file.name == failReadOf) throw java.io.IOException("read failed")
+        return file.readText(Charsets.UTF_8)
     }
 
     private fun newRoot(appStartApplied: AtomicBoolean = AtomicBoolean(false)) =
@@ -78,6 +80,7 @@ class ModelLibraryStoreTest {
         TrackerConfig(modelLibraryMax = max),
         thread::check,
         this::rename,
+        readFile = this::readFile,
     ) { message, _ -> logs.add(message) }
 
     private fun add(
@@ -606,6 +609,22 @@ class ModelLibraryStoreTest {
         assertThat(oldFile.exists()).isFalse()
     }
 
+    @Test
+    fun migration_anOldFileThatDoesNotMatchItsMeta_becomesAFileMissingEntryOnce() {
+        storeLegacyModel(metaA, bytesA)
+        val oldFile = File(directory, modelName(shaA))
+        oldFile.writeBytes(ByteArray(bytesA.size))
+
+        val state = newLibrary().state()
+
+        assertThat(state.entries).containsExactly(LibraryEntry(metaA, false))
+        assertThat(filesIn(entryDirectory(shaA))).containsExactly("meta.txt")
+        assertThat(oldFile.exists()).isFalse()
+        assertThat(File(directory, "meta.txt").exists()).isFalse()
+        assertThat(state.slots).isEqualTo(OrientationSlots(SlotChoice.Library(shaA), SlotChoice.Library(shaA)))
+        assertThat(newLibrary().state().entries).containsExactly(LibraryEntry(metaA, false))
+    }
+
     // ---- duplicates repair the stored copy ----
 
     @Test
@@ -685,11 +704,13 @@ class ModelLibraryStoreTest {
         val library = newLibrary()
         add(library, metaA, bytesA)
         add(library, metaB, bytesB)
-        File(directory, "blocked.txt").mkdirs()
-        removeBeforeRenameOf = "blocked.txt"
+        File(directory, "blocked.txt").writeText("$shaA,$shaB")
+        failReadOf = "blocked.txt"
+        assertThat(library.state().blockedUnreadable).isTrue()
 
         assertThat(library.delete(shaA)).isTrue()
 
+        failReadOf = null
         val state = library.state()
         assertThat(state.blockedUnreadable).isFalse()
         assertThat(state.blocked).containsExactly(shaB)
@@ -700,14 +721,34 @@ class ModelLibraryStoreTest {
         val library = newLibrary()
         add(library, metaA, bytesA)
         add(library, metaB, bytesB)
-        File(directory, "blocked.txt").mkdirs()
-        removeBeforeRenameOf = "blocked.txt"
+        File(directory, "blocked.txt").writeText("$shaA,$shaB")
+        failReadOf = "blocked.txt"
 
         assertThat(add(library, metaA, bytesA)).isEqualTo(StoreResult.STORED)
 
+        failReadOf = null
         val state = library.state()
         assertThat(state.isBlocked(shaA)).isFalse()
         assertThat(state.isBlocked(shaB)).isTrue()
+    }
+
+    @Test
+    fun aBlockedListThatIsADirectory_isReplacedByARealFileWhenItIsRewritten() {
+        val library = newLibrary()
+        add(library, metaA, bytesA)
+        add(library, metaB, bytesB)
+        File(directory, "blocked.txt").apply {
+            mkdirs()
+            File(this, "stray").writeText("x")
+        }
+        assertThat(library.state().blockedUnreadable).isTrue()
+
+        assertThat(library.delete(shaA)).isTrue()
+
+        val state = library.state()
+        assertThat(File(directory, "blocked.txt").isFile).isTrue()
+        assertThat(state.blockedUnreadable).isFalse()
+        assertThat(state.blocked).containsExactly(shaB)
     }
 
     // ---- the importer into the library ----

@@ -303,6 +303,15 @@ internal class FramePipeline(
     }
 
     /**
+     * Capture thread. Sets only the detector the next frame uses, with no republish and no reset. The session calls it
+     * with `null` before the model switcher may close the running detector (so a closed detector is never used even if
+     * the switch dies half-way) and puts the running one back when the switcher changed nothing.
+     */
+    fun holdDetector(held: PoseDetector?) {
+        detector = held
+    }
+
+    /**
      * The model changed because the orientation changed (M1b-1): [newDetector] (`null` = none could be loaded) now
      * runs. The caller has closed the old detector. The positions of the old model's frames must not feed the new
      * model's tracks, so the state drops its detections and tracks, and the tracker, the smoother and the lock are

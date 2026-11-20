@@ -111,6 +111,8 @@ class ModelLibraryStore internal constructor(
     private val config: TrackerConfig,
     private val threadCheck: () -> Unit,
     private val rename: (File, File) -> Boolean,
+    /** Reads a record file; a failure makes the record unreadable. A hook so tests can make a read fail. */
+    private val readFile: (File) -> String = { it.readText(Charsets.UTF_8) },
     private val log: (String, Throwable?) -> Unit,
 ) : ImportTarget {
     /** The production store. */
@@ -300,25 +302,23 @@ class ModelLibraryStore internal constructor(
         val legacy = root.state()
         val meta = legacy.meta ?: return
         val entryStore = root.inDirectory(entryDirectory(meta.sha256))
-        val oldFile = root.modelFileFor(meta)
-        if (!entryHolds(entryStore, meta, oldFile.isFile)) {
+        val stored = entryStore.state()
+        val hasMeta = stored.meta?.sha256 == meta.sha256
+        if (!(hasMeta && stored.fileExists && entryStore.storedFileMatches(meta))) {
             if (!blockLegacyTrip(legacy.guard, meta.sha256)) return
-            val source = listOf(oldFile, entryStore.modelFileFor(meta)).firstOrNull { it.isFile }
-            if (!copyIntoEntry(entryStore, meta, source)) return
+            // Only a file that still has its length and sha256 is copied; any other counts as "file missing", once.
+            val oldFile = root.modelFileFor(meta)
+            val entryFile = entryStore.modelFileFor(meta)
+            val source =
+                when {
+                    oldFile.isFile && root.storedFileMatches(meta) -> oldFile
+                    entryFile.isFile && entryStore.storedFileMatches(meta) -> entryFile
+                    else -> null
+                }
+            if ((source != null || !hasMeta) && !copyIntoEntry(entryStore, meta, source)) return
         }
         if (!slotsFile().exists() && !writeAtomically(slotsFile(), pointingBoth(meta.sha256))) return
         if (!root.clear()) log("the old single-model record could not be removed yet", null)
-    }
-
-    /** Whether the entry of [meta] is complete: its meta is stored and, while the old file exists, its file matches. */
-    private fun entryHolds(
-        entryStore: ImportedModelStore,
-        meta: ImportedModelMeta,
-        oldFileExists: Boolean,
-    ): Boolean {
-        val stored = entryStore.state()
-        if (stored.meta?.sha256 != meta.sha256) return false
-        return !oldFileExists || (stored.fileExists && entryStore.storedFileMatches(meta))
     }
 
     /**
@@ -436,7 +436,7 @@ class ModelLibraryStore internal constructor(
     @Suppress("TooGenericExceptionCaught")
     private fun readText(file: File): String? =
         try {
-            if (file.isFile) file.readText(Charsets.UTF_8) else null
+            if (file.isFile) readFile(file) else null
         } catch (t: Throwable) {
             UNREADABLE
         }
@@ -457,7 +457,9 @@ class ModelLibraryStore internal constructor(
             scratch.delete()
             return false
         }
-        if (rename(scratch, target)) return true
+        // Whatever sits in the way (a directory, a special file) goes first, so the record can be repaired.
+        val cleared = !target.exists() || target.isFile || target.deleteRecursively()
+        if (cleared && rename(scratch, target)) return true
         scratch.delete()
         return false
     }

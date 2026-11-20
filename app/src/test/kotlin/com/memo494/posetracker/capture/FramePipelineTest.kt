@@ -2688,4 +2688,22 @@ class FramePipelineTest {
         framesFrom(pipeline, 200, 2)
         assertThat(pipeline.timingSummary().samples).isEqualTo(2)
     }
+
+    @Test
+    fun holdDetector_null_stopsDetection_andPuttingItBackResumesIt_withoutRepublishing() {
+        val pipeline = trackingPipeline()
+        framesFrom(pipeline, 0, 2)
+        val calls = detector.calls
+        val published = states.size
+
+        pipeline.holdDetector(null)
+        assertThat(states.size).isEqualTo(published)
+        framesFrom(pipeline, 200, 2)
+        assertThat(detector.calls).isEqualTo(calls)
+        assertThat(states.last().warning).isEqualTo(OverlayWarning.DETECTOR_UNAVAILABLE)
+
+        pipeline.holdDetector(detector)
+        framesFrom(pipeline, 400, 2)
+        assertThat(detector.calls).isEqualTo(calls + 2)
+    }
 }

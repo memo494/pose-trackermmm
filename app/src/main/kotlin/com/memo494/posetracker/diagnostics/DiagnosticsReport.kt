@@ -187,7 +187,9 @@ internal object DiagnosticsReport {
     /**
      * The model of the session: `modelFile`, `modelSha256` (first [TrackerConfig.SHA256_SHORT_CHARS] hex characters)
      * and `modelOutputRows` describe the imported model in use (`builtin` / `none` otherwise); a refused imported
-     * model is named in `modelFallbackFile`.
+     * model is named in `modelFallbackFile`. The model fields describe the model loaded now; `modelPortrait` and
+     * `modelLandscape` (`builtin` or `name sha-prefix`) say what each orientation is set to, `modelSwitches` how many
+     * times a change of orientation changed the model since Start and `modelSwitchMsMax` the longest change (ms).
      */
     private fun appendModel(
         out: StringBuilder,
@@ -207,6 +209,10 @@ internal object DiagnosticsReport {
         line(out, "modelFallbackMessage", model.message?.let(::oneLine) ?: NONE)
         val refused = if (model.source == ModelSource.BUILT_IN) model.meta else null
         if (refused != null) line(out, "modelFallbackFile", "${refused.displayName} ${shortSha(refused)}")
+        line(out, "modelPortrait", oneLine(model.portrait))
+        line(out, "modelLandscape", oneLine(model.landscape))
+        line(out, "modelSwitches", model.switches)
+        line(out, "modelSwitchMsMax", model.switchMsMax)
     }
 
     private fun shortSha(meta: ImportedModelMeta): String = meta.sha256.take(TrackerConfig.SHA256_SHORT_CHARS)

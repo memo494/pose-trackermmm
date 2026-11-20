@@ -86,10 +86,10 @@ class SessionModelLoaderTest {
     fun importedModel_loadsWithTheMarkerPendingExactlyWhileItLoads() {
         val loaded = loader().load()
 
-        assertThat(guardDuringImportedLoad).isEqualTo(ImportGuardState.Pending(ImportStage.LOAD))
+        assertThat(guardDuringImportedLoad).isEqualTo(ImportGuardState.Pending(ImportStage.LOAD, meta.sha256))
         assertThat(metaGiven).isEqualTo(meta)
         assertThat(storedGuard).isEqualTo(ImportGuardState.Idle)
-        assertThat(guardWrites).containsExactly(ImportGuardState.Pending(ImportStage.LOAD), ImportGuardState.Idle).inOrder()
+        assertThat(guardWrites).containsExactly(ImportGuardState.Pending(ImportStage.LOAD, meta.sha256), ImportGuardState.Idle).inOrder()
         assertThat(loaded.detector).isSameInstanceAs(importedDetector)
         assertThat(loaded.source).isEqualTo(ModelSource.IMPORTED)
         assertThat(loaded.meta).isEqualTo(meta)
@@ -132,7 +132,7 @@ class SessionModelLoaderTest {
 
         loader().load()
 
-        assertThat(guardWrites).containsExactly(ImportGuardState.Pending(ImportStage.LOAD), ImportGuardState.Idle).inOrder()
+        assertThat(guardWrites).containsExactly(ImportGuardState.Pending(ImportStage.LOAD, meta.sha256), ImportGuardState.Idle).inOrder()
     }
 
     @Test
@@ -260,7 +260,7 @@ class SessionModelLoaderTest {
         assertThat(loaded.source).isEqualTo(ModelSource.IMPORTED)
         assertThat(loaded.fallback).isNull()
         assertThat(importedLoads).isEqualTo(1)
-        assertThat(guardWrites).containsExactly(ImportGuardState.Pending(ImportStage.LOAD), ImportGuardState.Idle).inOrder()
+        assertThat(guardWrites).containsExactly(ImportGuardState.Pending(ImportStage.LOAD, meta.sha256), ImportGuardState.Idle).inOrder()
     }
 
     @Test

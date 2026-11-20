@@ -1,4 +1,4 @@
-# pose-tracker-android — Architecture (v1.5)
+# pose-tracker-android — Architecture (v1.6)
 
 Real-time Android app: a screen-capture overlay that draws a stable, low-latency dot on each person's head
 over any other app (video, stream, game), using YOLO26n-pose on-device. Built and modified by AI coding agents (Claude Code, Codex); built only
@@ -629,6 +629,12 @@ uses no accessibility service.
   written is `track: miss suppressed N`. Read it with the limits: `gateChi2` above 9.21 = gated, `cost` at or above 0.7 (high) / 0.6
   (low) = too expensive. Seven counters follow `lockExpired` in `summary.txt`: `assocMisses`, `assocMissGate`,
   `assocMissCost`, `assocMissTaken`, `assocMissLowBirth`, `assocBirthNearLive`, `assocBirthAfterRemoval`; since Start, read at the HUD tick, 0 before the first miss.
+- **Model per orientation in the log and in `summary.txt` (M1b-1).** After the model fields: `modelPortrait` and
+  `modelLandscape` (`builtin` or `<name> <first 12 hex of sha256>`), `modelSwitches` (changes of the model caused by a
+  change of orientation since Start; the load at Start is not counted) and `modelSwitchMsMax` (the longest, ms, from
+  closing the old detector to the new one ready). One log line per load: `model: <name> for portrait|landscape
+  (start Nms)` at Start, `(switch Nms)` after a change (`built-in` for the built-in model). `ModelStatus` is
+  published again after each switch, so the `modelSource/modelFile/...` fields describe the model loaded now.
 - **Timing in `summary.txt` (M1a).** After the model fields, in this order: `timingSamples`, then `copyMsP50`,
   `copyMsP95`, `preMsP50`, `preMsP95`, `inferMsP50`, `inferMsP95`, `postMsP50`, `postMsP95`, `frameMsP50`,
   `frameMsP95`, `resultAgeMsP50`, `resultAgeMsP95` (twelve keys, milliseconds with one decimal), then
@@ -707,7 +713,7 @@ step back up after 60 s below the threshold. Every step is logged and shown in t
   is the `stage<Variant>ModelAssets` Gradle task of `app`, which verifies every file listed in `model_info.json`
   and copies only the `.tflite` files and `model_info.json` into the APK assets.
 - No INT8 / w8a16 (loses the end-to-end head; w8a16 falls off the GPU).
-- **Imported models (M0c).** The app has one imported-model slot besides the bundled ones.
+- **Imported models (M0c).** The app keeps imported models besides the bundled ones (one slot until M1b-1, now a library, see "Model library" below).
   - *Storage:* the picked file is copied into `noBackupFilesDir/imported/` while its sha256 is computed and stored
     as `model-<first 16 hex of sha256>.tflite` (named by content, so two imports of equal size never share the
     name the GPU program cache is keyed by); importing again replaces it, **Use built-in model** deletes it. Import
@@ -733,6 +739,33 @@ step back up after 60 s below the threshold. Every step is logged and shown in t
     which lifts the probe trip; an accepted import or **Use built-in model** lift any trip. While a trip is stored
     the probe of a new file does not replace it (no marker is written before or after that probe), so a model
     switched off after a load crash stays off even if the process dies in the next probe.
+  - *Model library and a model per orientation (M1b-1).* The single imported-model slot became a library of up to
+    `modelLibraryMax` (4) models keyed by sha256 (a model imported twice is stored once; a full library refuses the
+    import until a model is deleted) and two slots, **portrait** and **landscape**, each the built-in model or one
+    library model (default built-in). The orientation is the capture geometry (`ModelOrientation.of(widthImg,
+    heightImg)`: width > height is landscape; square or unknown is portrait). *Storage* under
+    `noBackupFilesDir/imported/`: one directory per model (`<first 16 hex of sha256>/`, managed by an
+    `ImportedModelStore` over it: `model-<16 hex>.tflite` and `meta.txt`, written in the crash-safe order above),
+    `slots.txt` (`OrientationSlots`, header `posetracker-model-slots v1`) and `blocked.txt` (`ModelBlocklist`), the
+    last two written to a scratch file, synced and renamed over the old one. *Migration:* the model of the earlier
+    version (in the root directory) moves into its own directory on the first read, both slots point to it, the old
+    record goes; each step can be repeated after a process death. *Fail closed:* a model record that does not read is
+    skipped, a slot record that does not read (or names a model that is not there) is the built-in model for that
+    slot, both logged; an unreadable blocked list blocks every model.
+  - *Switch on rotation (M1b-1).* `ModelSwitcher` (capture thread; never the main thread) loads the model of the
+    start geometry's slot at Start and, whenever the capture geometry changes and the slot asks for another model
+    than the loaded one, closes the old detector and loads the new one through `SessionModelLoader`; the pipeline then
+    drops the old detections and resets the tracker, the smoother and the lock (`FramePipeline.onModelChanged`). A
+    model that is blocked, missing or fails to load (an `Error` such as `OutOfMemoryError` included) gives the built-in
+    model with the existing fallback reasons; the session never stops, and a failed load is tried again when its
+    orientation returns. The LOAD crash marker now names the model (`pending:load:<sha256>`); a trip moves only that
+    model to `blocked.txt` and the marker goes idle, so the other models keep working. To try a blocked model again,
+    delete it and import it again (importing the same file again also unblocks it). A marker without a model (an
+    older version's) blocks the migrated model. `ModelImporter` stores through `ImportTarget` (the library; the
+    single-model `ImportedModelStore` implements it too); a full library is `FailureKind.LIBRARY_FULL`.
+  - *Control screen (M1b-1).* The library list (name, size, **Delete**, "switched off after a crash"), the choices
+    **عمودي / Portrait** and **عرضي / Landscape**, the line "In this orientation: …" (the slot of the screen's
+    orientation, with its notice) and **Remove all imported models** (replaces **Use built-in model**).
   - *Classes:* `ModelFileSniffer` (`TFL3` identifier and size limits), `ImportedModelRules` (accept or refuse
     the tensors), `ImportedModelMeta` (name, sha256, bytes, input width and height, output rows; strict text codec, **version 2**:
     header `posetracker-imported-model v2` with `inputWidth=` and `inputHeight=`; a stored **v1** text with one
@@ -886,6 +919,11 @@ answers hard questions. Each change is verified in the session with `scripts/ver
 and always by GitHub Actions, which is the source of truth. The owner's laptop is not used for builds.
 
 ## 15. Changes
+- **v1.6 (M1b-1, 2026-11-20):** a model per orientation (plan `docs/plans/M1b.md`). §8: the model library (up to
+  `modelLibraryMax` models by sha256), the portrait and landscape slots, migration, the per-model LOAD crash marker and
+  blocked list, the switch on rotation on the capture thread, the control screen; §6.7: `modelPortrait`,
+  `modelLandscape`, `modelSwitches`, `modelSwitchMsMax` and the `model: … for landscape (switch Nms)` line; §7.1:
+  `modelLibraryMax` 4 (1..16).
 - **v1.5 (M4f, 2026-11-19):** fewer id switches from the third phone test (plan `docs/plans/M4.md`). §6.3: the gate's
   per-axis variance is at least `(trackGateMinSigmaRatio × h)²`; §6.6: early re-lock while the held track is LOST,
   only with spatial evidence (log suffix `early`); §7.1: `trackGateMinSigmaRatio` 0.2 (0..1), `relockEarlyMaxHeadRatio` 0.6 (0.1..3).

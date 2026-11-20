@@ -672,4 +672,28 @@ class DiagnosticsReportTest {
     fun summary_withoutAModelStatus_hasNoOtherModelLines() {
         assertThat(modelLines(null).filter { it.startsWith("modelFile=") }).isEmpty()
     }
+
+    @Test
+    fun summary_modelSlotsAndSwitchCounters_arePrinted() {
+        val status =
+            builtInStatus(416, 416).copy(
+                portrait = "a.tflite 0123456789ab",
+                landscape = "builtin",
+                switches = 3,
+                switchMsMax = 240L,
+            )
+
+        val lines = modelLines(status)
+
+        assertThat(lines)
+            .containsAtLeast("modelPortrait=a.tflite 0123456789ab", "modelLandscape=builtin", "modelSwitches=3", "modelSwitchMsMax=240")
+            .inOrder()
+    }
+
+    @Test
+    fun summary_modelSlotsDefault_toBuiltInAndZeroSwitches() {
+        val lines = modelLines(builtInStatus(416, 416))
+
+        assertThat(lines).containsAtLeast("modelPortrait=builtin", "modelLandscape=builtin", "modelSwitches=0", "modelSwitchMsMax=0")
+    }
 }

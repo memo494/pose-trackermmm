@@ -46,6 +46,13 @@ enum class ModelFallback {
  *   characters); `null` otherwise.
  * @property inputWidth width of the running model's input, in model pixels (Mdl); 0 = no model is running.
  * @property inputHeight height of the running model's input, in model pixels (Mdl); 0 = no model is running.
+ * @property portrait what the portrait slot is set to (M1b-1): [SLOT_BUILT_IN] or the name and short sha256 of the
+ *   library model, as `name 0123456789ab`.
+ * @property landscape what the landscape slot is set to, like [portrait].
+ * @property switches how many times the model was changed by a change of orientation since Start (the load at Start
+ *   is not counted).
+ * @property switchMsMax the longest of those changes, from closing the old detector to the new one being ready, in
+ *   milliseconds.
  */
 data class ModelStatus(
     val source: ModelSource,
@@ -54,7 +61,16 @@ data class ModelStatus(
     val message: String?,
     val inputWidth: Int,
     val inputHeight: Int,
-)
+    val portrait: String = SLOT_BUILT_IN,
+    val landscape: String = SLOT_BUILT_IN,
+    val switches: Int = 0,
+    val switchMsMax: Long = 0L,
+) {
+    companion object {
+        /** The text of a slot that runs the built-in model. */
+        const val SLOT_BUILT_IN = "builtin"
+    }
+}
 
 /**
  * The [ModelStatus] of the newest capture session, written by the session when it starts and read by the control

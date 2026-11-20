@@ -18,6 +18,12 @@ Every model sees every canvas letterboxed like Ultralytics LetterBox (gain = min
 centred, pad 114); rows >= 0.15 are mapped back to canvas pixels and greedily matched (by score, IoU >= 0.3,
 one row per box) to the expected boxes.
 
+Before the scaled cases every model runs on the plain image; one that finds fewer than half the reference
+people there is marked "broken on the plain image" (printed, not to be ranked). A model with no row >= 0.15
+there is marked broken too (coordinates unknown, its scaled cases are skipped, it is still listed). Two reference boxes with
+IoU >= 0.3 stop the run (the reference is not clean). The reference favours its own model's misses. Every
+interpreter uses SWEEP_THREADS threads.
+
 Outputs in --out: sweep.json (all numbers) and sweep.md (tables). CPU time is of the machine that runs
 this (the CI runner): relative cost only, not the phone GPU.
 
@@ -29,8 +35,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
+import shutil
 import statistics
+import subprocess
 import sys
 import time
 from importlib import metadata
@@ -54,8 +63,13 @@ PAD_VALUE = 114
 P_RATIOS = (0.08, 0.12, 0.16, 0.20, 0.25, 0.30, 0.40, 0.50)
 CANVASES = (("landscape", 1356, 610), ("portrait", 610, 1356))  # (name, width, height)
 TIMING_RUNS = 5
+SWEEP_THREADS = 4  # interpreter threads for every model, so CPU times are comparable between runs
 PACKAGES = ("numpy", "opencv-python", "opencv-python-headless", "ai-edge-litert", "ultralytics")
 CPU_NOTE = "CPU of the CI runner, relative cost only; not the phone GPU"
+BROKEN_LABEL = "broken on the plain image"
+NO_ROW_COORDINATES = "unknown (no row on the plain image)"
+REFERENCE_NOTE = ("The reference favours its own model: a person that model missed is not in the reference, so "
+                  "it is not expected from anyone.")
 IMAGE_NOTE = "This is a clean test image (bus.jpg on a black canvas), not the owner's video."
 
 _MODEL_FILE = re.compile(rf"{re.escape(MODEL)}_([0-9]+)(?:x([0-9]+))?\.tflite")
@@ -200,6 +214,24 @@ def split_expected_ignore(placed: list[tuple[Box, float]], cw: int, ch: int) -> 
     return expected, ignore
 
 
+def coordinate_convention(boxes: np.ndarray) -> str:
+    """'pixels of the model input', 'normalised 0..1', or NO_ROW_COORDINATES when there is no row to tell."""
+    if boxes.shape[0] == 0:
+        return NO_ROW_COORDINATES
+    return "normalised 0..1" if looks_normalised(boxes) else "pixels of the model input"
+
+
+def duplicate_reference_pairs(boxes: list[Box]) -> list[tuple[int, int, float]]:
+    """Pairs (i, j, IoU) of reference boxes that overlap at IoU >= MATCH_IOU: one person counted twice."""
+    return [(i, j, v) for i in range(len(boxes)) for j in range(i + 1, len(boxes))
+            if (v := iou(boxes[i], boxes[j])) >= MATCH_IOU]
+
+
+def plain_scene_broken(found: int, ref_people: int) -> bool:
+    """A model that finds fewer than half of the reference people on the plain image is broken."""
+    return found * 2 < ref_people
+
+
 def case_stats(rows: np.ndarray, expected: list[Box], ignore: list[Box] | None = None) -> dict:
     """Numbers of one model on one case from canvas-pixel rows (score >= ROW_SCORE).
 
@@ -239,10 +271,13 @@ def p_label(p: float, ch: int) -> str:
     return f"{round(p * 100)}% ({round(p * ch)} px)"
 
 
-def canvas_table(p_ratios, labels: list[str], cells: dict, ch: int) -> str:
-    """cells[(p, label)] -> stats dict or None. Rows = p as % of the canvas height ch (and in px)."""
+def canvas_table(p_ratios, labels: list[str], cells: dict, ch: int, heads: dict | None = None) -> str:
+    """cells[(p, label)] -> stats dict or None. Rows = p as % of the canvas height ch (and in px).
+
+    heads maps a label to its column header (default: the label itself).
+    """
     body = [[p_label(p, ch)] + [format_cell(cells.get((p, lab))) for lab in labels] for p in p_ratios]
-    return md_table(["p"] + labels, body)
+    return md_table(["p"] + [(heads or {}).get(lab, lab) for lab in labels], body)
 
 
 # ---------------------------------------------------------------- self-test
@@ -388,7 +423,120 @@ def self_test() -> None:
     ok("canvas table", tbl.splitlines() == [
         "| p | 640 | 832x384 |", "|---|---|---|",
         "| 8% (49 px) | 0/5 (0.00) | skipped |", "| 50% (305 px) | 5/5 (0.94) | 4/5 (0.90) |"])
+
+    # decision 1: duplicate reference boxes (IoU >= MATCH_IOU) mean the reference is not clean
+    clean = [(0.0, 0.0, 10.0, 10.0), (100.0, 100.0, 110.0, 110.0), (200.0, 0.0, 210.0, 10.0)]
+    ok("clean reference has no duplicate pairs", duplicate_reference_pairs(clean) == [])
+    dup = clean + [(1.0, 0.0, 11.0, 10.0)]  # iou with the first = 9/11
+    pairs = duplicate_reference_pairs(dup)
+    ok("duplicate reference pair is found", [(i, j) for i, j, _ in pairs] == [(0, 3)] and near(pairs[0][2], 9 / 11))
+    ok("iou exactly at the match threshold counts as duplicate",
+       len(duplicate_reference_pairs([(0.0, 0.0, 10.0, 10.0), (5.0, 0.0, 15.0, 10.0)])) == 1)  # 1/3 >= 0.3
+    ok("iou below the match threshold is two people",
+       duplicate_reference_pairs([(0.0, 0.0, 10.0, 10.0), (7.0, 0.0, 17.0, 10.0)]) == [])  # 3/17 < 0.3
+    ok("no reference boxes, no pairs", duplicate_reference_pairs([]) == [])
+
+    # decision 2: plain-scene check, fewer than half the reference people means broken
+    ok("plain: all found is fine", not plain_scene_broken(4, 4))
+    ok("plain: exactly half is fine", not plain_scene_broken(2, 4))
+    ok("plain: less than half is broken", plain_scene_broken(1, 4))
+    ok("plain: odd count, 2 of 5 is broken", plain_scene_broken(2, 5))
+    ok("plain: odd count, 3 of 5 is fine", not plain_scene_broken(3, 5))
+    ok("plain: nothing found is broken", plain_scene_broken(0, 3))
+    plain_exp = [(0.0, 0.0, 10.0, 10.0), (100.0, 100.0, 110.0, 110.0), (200.0, 0.0, 210.0, 10.0)]
+    plain_rows = mk(((0, 0, 10, 10), 0.9), ((100, 100, 110, 110), 0.35), ((200, 0, 210, 10), 0.2),
+                    ((300, 300, 310, 310), 0.9))  # 3 rows match (one only at 0.2), 1 matches nothing
+    ok("plain found counts matched rows at score >= found025 only, not every matched row",
+       len(greedy_match(plain_rows, plain_exp)[0]) == 3 and case_stats(plain_rows, plain_exp)["found025"] == 2)
+    ok("convention: no row on the plain image is unknown", coordinate_convention(np.zeros((0, 4))) == NO_ROW_COORDINATES)
+    ok("convention: pixels", coordinate_convention(np.array([[10, 20, 300, 400.0]])) == "pixels of the model input")
+    ok("convention: normalised", coordinate_convention(np.array([[0.1, 0.2, 0.9, 1.0]])) == "normalised 0..1")
+
+    # sweep.md: broken marking, reference note, thread count
+    fake = {
+        "image": {"name": "bus.jpg", "width": 810, "height": 1080},
+        "reference": {"model": "yolo26n-pose_640.tflite", "people": 4, "hRef": 700.0},
+        "canvases": [{"name": "landscape", "width": 1356, "height": 610}],
+        "threads": SWEEP_THREADS,
+        "cases": [{"canvas": "landscape", "p": 0.5, "expected": 3, "skipped": False, "models": {
+            "640": {"found025": 3, "expected": 3, "maxScore": 0.9},
+            "320": {"found025": 0, "expected": 3, "maxScore": 0.0}}}],
+        "models": [
+            {"label": "640", "gain": {"landscape": 0.47}, "cpuMs": 10.0, "sha256": "a" * 64, "bytes": 1,
+             "coordinates": "pixels of the model input", "plainFound": 4, "plainExpected": 4, "broken": False},
+            {"label": "320", "gain": {"landscape": 0.23}, "cpuMs": 5.0, "sha256": "b" * 64, "bytes": 1,
+             "coordinates": "pixels of the model input", "plainFound": 1, "plainExpected": 4, "broken": True}],
+    }
+    md = render_md(fake)
+    ok("md: broken model is marked", md.count(BROKEN_LABEL) >= 1 and "320 (broken on the plain image)" in md)
+    ok("md: a model that is fine is not marked", "640 (broken" not in md)
+    ok("md: broken model rows are still printed", "0/3 (0.00)" in md)
+    ok("md: names the reference model and its bias",
+       "yolo26n-pose_640.tflite" in md and "favours" in md and "not expected from anyone" in md)
+    ok("md: prints the thread count", f"{SWEEP_THREADS} threads" in md)
+    ok("thread count is fixed at 4", SWEEP_THREADS == 4)
+    fake["models"][1]["broken"] = False
+    ok("md: nothing marked when no model is broken", BROKEN_LABEL not in render_md(fake))
+    fake["models"].append(
+        {"label": "960x448", "gain": {"landscape": 0.7}, "cpuMs": 20.0, "sha256": "c" * 64, "bytes": 1,
+         "coordinates": NO_ROW_COORDINATES, "plainFound": 0, "plainExpected": 4, "broken": True, "noRows": True})
+    md = render_md(fake)
+    ok("md: a model with no row on the plain image is listed, marked and its cases are skipped",
+       "960x448 (broken on the plain image)" in md and NO_ROW_COORDINATES in md and "960x448 (0/4)" in md
+       and "| skipped |" in md)
+
+    # decision 5: publish_tag guard of the workflow (the real "Check inputs" script is run, not a copy)
+    wf = Path(__file__).resolve().parent.parent / ".github" / "workflows" / "export-model.yml"
+    try:  # the step name "Check inputs" of export-model.yml is part of this test's contract
+        script = workflow_check_script(wf.read_text())
+    except OSError as e:
+        script = ""
+        print(f"cannot read {wf}: {e}")
+    ok("workflow check script found (step 'Check inputs' of export-model.yml)",
+       "publish_tag" in script and script.count("\n") > 5)
+    bash = shutil.which("bash")
+    ok("bash is available for the tag check", bash is not None)
+
+    def tag_exit(sizes: str, tag: str, sweep: str = "false") -> int:
+        env = {"SIZES": sizes, "TAG": tag, "SWEEP": sweep, "PATH": os.environ.get("PATH", "")}
+        return subprocess.run([bash, "-c", script], env=env, capture_output=True).returncode
+
+    ok("tag: models is accepted", tag_exit("640", "models") == 0)
+    ok("tag: models-v2 is accepted", tag_exit("640", "models-v2") == 0)
+    ok("tag: no tag is accepted", tag_exit("640", "") == 0)
+    ok("tag: models-sweep is refused", tag_exit("640", "models-sweep") != 0)
+    ok("tag: latest is refused", tag_exit("640", "latest") != 0)
+    ok("tag: not starting with models is refused", tag_exit("640", "release") != 0)
+    ok("tag: a tag without sizes is refused", tag_exit("", "models") != 0)
+    ok("tag: sweep with a tag is refused", tag_exit("", "models", "true") != 0)
+    ok("tag: sweep alone is accepted", tag_exit("", "", "true") == 0)
     print("self-test passed")
+
+
+def workflow_check_script(text: str) -> str:
+    """The bash of the 'Check inputs' step of export-model.yml (line based, no YAML library).
+
+    The step name "Check inputs" and its `run: |` block are part of the self-test's contract: rename the
+    step and the self-test fails.
+    """
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if line.strip() == "- name: Check inputs":
+            break
+    else:
+        return ""
+    for i in range(i + 1, len(lines)):
+        if lines[i].strip() == "run: |":
+            indent = len(lines[i]) - len(lines[i].lstrip())
+            body = []
+            for line in lines[i + 1:]:
+                if line.strip() and len(line) - len(line.lstrip()) <= indent:
+                    break
+                body.append(line[indent + 2:] if line.strip() else "")
+            return "\n".join(body).strip() + "\n"
+        if lines[i].lstrip().startswith("- name:"):
+            return ""
+    return ""
 
 
 # ---------------------------------------------------------------- heavy part
@@ -434,7 +582,7 @@ class LoadedModel:
 
         self.path, self.width, self.height = path, width, height
         self.label = size_label(width, height)
-        self.interp = Interpreter(model_path=str(path))
+        self.interp = Interpreter(model_path=str(path), num_threads=SWEEP_THREADS)
         self.interp.allocate_tensors()
         ins, outs = self.interp.get_input_details(), self.interp.get_output_details()
         want_in, want_out = [1, 3, height, width], [1, OUT_ROWS, OUT_COLS]
@@ -501,6 +649,7 @@ def find_image(arg: Path | None) -> Path:
 
 def render_md(result: dict) -> str:
     labels = [m["label"] for m in result["models"]]
+    heads = {m["label"]: m["label"] + (f" ({BROKEN_LABEL})" if m.get("broken") else "") for m in result["models"]}
     out = ["# Detection sweep of the published models", "",
            f"Image: {result['image']['name']} ({result['image']['width']}x{result['image']['height']}), "
            f"reference people: {result['reference']['people']} (largest square model "
@@ -508,7 +657,14 @@ def render_md(result: dict) -> str:
            "Cell = found at score >= 0.25 / expected people (maxScore of the matched rows). "
            f"Match: score >= {ROW_SCORE} rows, greedy by score, IoU >= {MATCH_IOU}, one row per box. "
            "p is a share of each canvas's height, so the same p is a taller person in px on the portrait canvas "
-           "than on the landscape one (the px in the row label).", ""]
+           "than on the landscape one (the px in the row label).",
+           f"Reference model: {result['reference']['model']}. {REFERENCE_NOTE}",
+           f"Interpreter threads: {result['threads']} threads for every model.", ""]
+    broken = [m for m in result["models"] if m.get("broken")]
+    if broken:
+        out += [f"Models marked '{BROKEN_LABEL}' found fewer than half of the reference people on the plain "
+                "image; their rows are printed but must not be ranked: "
+                + ", ".join(f"{m['label']} ({m['plainFound']}/{m['plainExpected']})" for m in broken), ""]
     for canvas in result["canvases"]:
         name = canvas["name"]
         out += [f"## {name} canvas {canvas['width']}x{canvas['height']}", ""]
@@ -517,7 +673,7 @@ def render_md(result: dict) -> str:
             if case["canvas"] == name and not case["skipped"]:
                 for lab, st in case["models"].items():
                     cells[(case["p"], lab)] = st
-        out += [canvas_table(P_RATIOS, labels, cells, canvas["height"]), ""]
+        out += [canvas_table(P_RATIOS, labels, cells, canvas["height"], heads), ""]
         out += ["Content scale (letterbox gain) per model:", ""]
         out += [md_table(["model", "content scale"],
                          [[m["label"], f"{m['gain'][name]:.3f}"] for m in result["models"]]), ""]
@@ -558,19 +714,21 @@ def run_sweep(models_dir: Path, out_dir: Path, image_arg: Path | None) -> None:
     if not square:
         raise SystemExit("no square model among the files: the reference people need the largest square one")
     for m in models:
-        tensor, _, _, _ = to_input(scene, m.width, m.height)
+        tensor, gain, left, top = to_input(scene, m.width, m.height)
         raw = m.infer(tensor)
         raw = raw[raw[:, 4] >= ROW_SCORE]
-        if raw.shape[0] == 0:
-            raise SystemExit(f"{m.path.name}: no row with score >= {ROW_SCORE} on {image_path.name}, so the "
-                             f"coordinate convention (pixels or 0..1) cannot be told; not guessing")
-        m.normalised = looks_normalised(raw[:, :4])
+        # No row at all: the convention cannot be told, so the model is broken and its cases are skipped.
+        m.no_rows = raw.shape[0] == 0
+        m.coordinates = coordinate_convention(raw[:, :4])
+        m.normalised = m.coordinates == "normalised 0..1"
+        # The plain-image rows in scene pixels are reused for the reference and the plain-scene check.
+        m.plain_rows = (np.zeros((0, 5)) if m.no_rows else
+                        rows_to_canvas(raw, gain, left, top, m.width, m.height, m.normalised))
         m.cpu_ms = median_ms(lambda m=m, t=tensor: m.infer(t))
-        m.coordinates = "normalised 0..1" if m.normalised else "pixels of the model input"
         print(f"{m.path.name}: {m.coordinates}, {m.cpu_ms:.1f} ms")
 
     ref = max(square, key=lambda m: m.width)
-    ref_rows, _ = detect(ref.infer, (ref.width, ref.height), scene, ref.normalised)
+    ref_rows = ref.plain_rows
     # Boxes may overshoot the image by a pixel or two; clamp them to the image.
     ref_all = [(clamp_box((float(r[0]), float(r[1]), float(r[2]), float(r[3])), sw, sh), float(r[4]))
                for r in ref_rows]
@@ -578,11 +736,24 @@ def run_sweep(models_dir: Path, out_dir: Path, image_arg: Path | None) -> None:
     if len(ref_boxes) < MIN_REF_PEOPLE:
         raise SystemExit(f"reference model {ref.path.name} found {len(ref_boxes)} people >= {REF_SCORE} "
                          f"on {image_path.name}, expected at least {MIN_REF_PEOPLE}")
+    dups = duplicate_reference_pairs(ref_boxes)
+    if dups:
+        raise SystemExit(f"reference model {ref.path.name} has duplicate people on {image_path.name} (reference "
+                         f"boxes with IoU >= {MATCH_IOU}, the reference is not clean): "
+                         + "; ".join(f"#{i} {[round(v) for v in ref_boxes[i]]} and #{j} "
+                                     f"{[round(v) for v in ref_boxes[j]]} IoU {v:.2f}" for i, j, v in dups))
     h_ref = max(b[3] - b[1] for b in ref_boxes)
     if h_ref < REF_MIN_HEIGHT_FRACTION * sh:
         raise SystemExit(f"reference boxes look wrong (tallest {h_ref:.0f} px of a {sh} px image, "
                          f"coordinates {ref.coordinates}): {[[round(v) for v in b] for b in ref_boxes]}")
     print(f"reference: {len(ref_boxes)} people from {ref.path.name}, hRef={h_ref:.0f}px")
+
+    # Plain-scene check per model: fewer than half the reference people found means the model is broken.
+    for m in models:
+        m.plain_found = case_stats(m.plain_rows, ref_boxes)["found025"]
+        m.broken = m.no_rows or plain_scene_broken(m.plain_found, len(ref_boxes))
+        print(f"{m.path.name}: {m.plain_found}/{len(ref_boxes)} reference people on the plain image"
+              + (f" ({BROKEN_LABEL})" if m.broken else ""))
 
     cases = []
     gains = {m.label: {n: letterbox_params(w, h, m.width, m.height)[0] for n, w, h in CANVASES} for m in models}
@@ -598,21 +769,25 @@ def run_sweep(models_dir: Path, out_dir: Path, image_arg: Path | None) -> None:
             if case["skipped"]:
                 continue
             for m in models:
+                if m.no_rows:
+                    continue
                 rows, gain = detect(m.infer, (m.width, m.height), canvas, m.normalised)
                 case["models"][m.label] = case_stats(rows, expected, ignore) | {"contentScale": gain}
 
     result = {
         "image": {"name": image_path.name, "width": sw, "height": sh, "sha256": sha256(image_path)},
-        "reference": {"model": ref.path.name, "people": len(ref_boxes), "hRef": h_ref,
+        "reference": {"model": ref.path.name, "people": len(ref_boxes), "hRef": h_ref, "note": REFERENCE_NOTE,
                       "boxes": [[round(v, 1) for v in b] for b in ref_boxes]},
         "thresholds": {"reference": REF_SCORE, "row": ROW_SCORE, "found": FOUND_SCORE, "iou": MATCH_IOU},
         "canvases": [{"name": n, "width": w, "height": h} for n, w, h in CANVASES],
         "pRatios": list(P_RATIOS),
         "cpuNote": CPU_NOTE,
+        "threads": SWEEP_THREADS,
         "versions": package_versions(),
         "models": [{"name": m.path.name, "label": m.label, "width": m.width, "height": m.height,
                     "sha256": sha256(m.path), "bytes": m.path.stat().st_size, "cpuMs": m.cpu_ms,
-                    "coordinates": m.coordinates, "gain": gains[m.label]} for m in models],
+                    "coordinates": m.coordinates, "gain": gains[m.label], "plainFound": m.plain_found,
+                    "plainExpected": len(ref_boxes), "broken": m.broken, "noRows": m.no_rows} for m in models],
         "cases": cases,
     }
     out_dir.mkdir(parents=True, exist_ok=True)

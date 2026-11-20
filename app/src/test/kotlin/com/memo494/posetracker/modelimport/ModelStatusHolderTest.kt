@@ -46,4 +46,15 @@ class ModelStatusHolderTest {
 
         assertThat(ModelStatusHolder.latest()).isNull()
     }
+
+    @Test
+    fun chooseFailed_isABuiltInStatusWithoutADetector_thatSaysWhy() {
+        val status = ModelStatus.chooseFailed()
+
+        assertThat(status.source).isEqualTo(ModelSource.BUILT_IN)
+        assertThat(status.fallback).isEqualTo(ModelFallback.STATE_UNREADABLE)
+        assertThat(status.message).isEqualTo(ModelStatus.CHOOSE_FAILED_MESSAGE)
+        assertThat(status.inputWidth).isEqualTo(0)
+        assertThat(status.portrait).isEqualTo(ModelStatus.SLOT_BUILT_IN)
+    }
 }

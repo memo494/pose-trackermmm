@@ -66,7 +66,8 @@ class SessionModelLoader(
     /**
      * Never throws (`Error`s such as `OutOfMemoryError` included).
      *
-     * - An imported model that is present and not blocked: the marker `Pending(LOAD)` is stored, the model loads, the
+     * - An imported model that is present and not blocked: the marker `Pending(LOAD, sha256)` (it names the model, so a
+     *   crash blocks only that model) is stored, the model loads, the
      *   marker goes back to `Idle`. If the marker cannot be stored, the imported model is not loaded (the crash guard
      *   would be blind): built-in with [ModelFallback.GUARD_NOT_STORED].
      * - A catchable load failure is not a crash: the marker goes back to `Idle` and the built-in model runs with
@@ -94,7 +95,7 @@ class SessionModelLoader(
     }
 
     private fun loadImportedOrBuiltIn(meta: ImportedModelMeta): LoadedModel {
-        if (!store(ImportGuard.begin(ImportStage.LOAD))) {
+        if (!store(ImportGuard.begin(ImportStage.LOAD, meta.sha256))) {
             log("crash marker not stored, imported model not loaded", null)
             return builtIn(meta, ModelFallback.GUARD_NOT_STORED, null)
         }

@@ -141,7 +141,7 @@ person at medium distance (not close, not tiny) and play it from the same point 
 2. Press **Import model** and pick `yolo26n-pose_640.tflite` in the file picker.
 3. Wait a few seconds ("Importing: copying and checking the model.").
 
-**Pass:** a line says **Imported yolo26n-pose_640.tflite. It is used the next time you press Start.** and the
+**Pass:** a line says **Imported yolo26n-pose_640.tflite. Choose it for Portrait or Landscape below.** and the
 model line says **yolo26n-pose_640.tflite (640, imported)**.
 **If it fails:** any other text under **Model**: Share diagnostics and send a screenshot of that block.
 
@@ -158,7 +158,7 @@ to 55 ms and 17 to 20 fps; these are estimates, the numbers you write down are t
 diagnostics (it names the reason).
 
 ### 4. Compare with the built-in model on the same video
-1. Stop. Press **Use built-in model** and check that the model line says **Built-in (416)**.
+1. Stop. Press **Remove all imported models**, then press it again within 4 seconds (it says **Tap again to remove all**), and check that the model line says **Built-in (416)**.
 2. Start, play the same video from the same point, write down `ms`, `fps` and the `max` number for the same
    person as in block 3.
 3. Send both sets of numbers (built-in and imported) in one message.
@@ -190,10 +190,10 @@ full box and the dots on the body are back.
 Stop and Start, or the person still blinks as before: Share diagnostics and say which of (a) or (b) failed.
 
 ### 7. Back to the built-in model, and the report
-1. Stop. Import the 640 file again, Start, then Stop and press **Use built-in model**, Start.
+1. Stop. Import the 640 file again, Start, then Stop and press **Remove all imported models** twice (the second tap confirms), Start.
 2. Press **Share diagnostics** and open `summary.txt` in the zip (or send it to the agent).
 
-**Pass:** after **Use built-in model** the model line says **Built-in (416)** and the `det` line says `in 416`.
+**Pass:** after **Remove all imported models** the model line says **Built-in (416)** and the `det` line says `in 416`.
 `summary.txt` names the model: `modelSource`, `modelFile`, `modelSha256`, `modelInputSize` (416 for the built-in,
 640 for the imported run). Share a second zip after an imported run to see `modelSource=imported`.
 **If it fails:** the model fields are missing from `summary.txt`: tell the agent.
@@ -227,7 +227,7 @@ the line above it shows **GPU**, and there is no red banner.
 **CPU**: Share diagnostics and write down the file name you imported.
 
 A wide model is for landscape. Held upright (portrait) people are **smaller** for it than with 640. That is
-expected, not a fault: in portrait switch back to the 640 model or **Use built-in model**.
+expected, not a fault: in portrait switch back to the 640 model or choose the built-in model for portrait.
 
 ### 3. Compare the models on the same video
 1. Landscape, same video, same starting point. For each model below, press **Stop**, import it, **Start**, play
@@ -507,6 +507,40 @@ Send the zip also when everything passed.
 
 ---
 
+## M1b-1 — a model for portrait and a model for landscape
+Needs two imported models: the 640 file and a landscape file (for example `yolo26n-pose_832x384.tflite` from the
+release `models`). The model block now has a list of imported models (with **Delete**), the choice
+**عمودي / Portrait** and the choice **عرضي / Landscape**, and the button **Remove all imported models**.
+If you had one imported model before this version, it is already in the list and chosen for both.
+
+### 1. Import both and choose
+1. Stop. Import the 640 file, then the 832x384 file. Both appear in the list with their size.
+2. Choose the 640 file for **Portrait** and the 832x384 file for **Landscape**.
+3. Import the same file again: the list does not get a second copy. Import until the list holds 4 models: the
+   next import is refused with "The model library is full" until you delete one.
+
+**Pass:** the list shows each model once, both choices stay after you leave and open the app.
+
+### 2. Rotate during a capture
+1. Hold the phone upright, press Start, play the video. The `det` line ends with `in 640 imp`.
+2. Rotate the phone to landscape. After a moment (the screen may pause for a fraction of a second) the line ends
+   with `in 832x384 imp` and people get marks again. Rotate back: `in 640 imp`.
+3. Press **Share diagnostics**. In `summary.txt`: `modelPortrait`, `modelLandscape` (name and 12 characters of the
+   hash, or `builtin`), `modelSwitches` (2 after the two rotations), `modelSwitchMsMax` (milliseconds of the
+   longest switch). The log has `model: <name> for landscape (switch Nms)`.
+
+**Pass:** the right model after each rotation, no crash, marks come back within a second or two of each rotation.
+**If it fails:** the `det` line keeps the old size, the app closes, or marks never return: Share diagnostics.
+
+### 3. A model that crashes the app, and delete
+1. Choose a model for a slot, rotate so that it loads. (Only if a model ever crashed the app: after the restart
+   the list says "switched off after a crash" for that model alone, the other models still work, and the slot of
+   the crashed model runs the built-in model with a notice.)
+2. Press **Delete** on a model that is chosen for a slot: it leaves the list and that slot goes back to built-in.
+   To try a switched-off model again, delete it and import it again (or import the same file again).
+
+**Pass:** delete removes only that model; the other slot keeps its model.
+
 ## What to send back
 1. The **diagnostics zip** (press **Share diagnostics** or **Save diagnostics** right after the problem, not hours
    later; a saved zip can be sent later).
@@ -553,3 +587,8 @@ These checks need a cable and `adb`, or the benchmark screen of M1b, and are not
   the frame a track was removed). The log line is
   `track: miss id=L -> new id=N lostMs=… score=… stage=… gateChi2=… iou=… headRatio=… hRatio=… cost=… reason=…`
   (at most `assocMissLogPerMin` 30 a minute). Read `reason` first, then which number is far from its limit.
+- `summary.txt` model slot fields (M1b-1), after the model fields (`modelFallbackFile` last): `modelPortrait`,
+  `modelLandscape` (`builtin` or `<name> <first 12 hex of sha256>`), `modelSwitches` (changes of model caused by a
+  change of orientation since Start; the load at Start is not counted) and `modelSwitchMsMax` (the longest, ms,
+  from closing the old detector to the new one ready). The `modelSource/modelFile/...` fields describe the model
+  loaded now. Log lines: `model: <name> for portrait|landscape (start Nms)` at Start and `(switch Nms)` after.

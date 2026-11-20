@@ -36,6 +36,7 @@ import com.memo494.posetracker.control.ImportFailure
 import com.memo494.posetracker.control.ImportResults
 import com.memo494.posetracker.control.ImportSummary
 import com.memo494.posetracker.core.TrackerConfig
+import com.memo494.posetracker.core.modelimport.ModelOrientation
 import com.memo494.posetracker.diagnostics.AppLog
 import com.memo494.posetracker.diagnostics.CrashNotice
 import com.memo494.posetracker.diagnostics.CrashStore
@@ -45,11 +46,12 @@ import com.memo494.posetracker.diagnostics.DiagnosticsSection
 import com.memo494.posetracker.diagnostics.DiagnosticsShare
 import com.memo494.posetracker.diagnostics.DiagnosticsUiState
 import com.memo494.posetracker.diagnostics.DiagnosticsZip
-import com.memo494.posetracker.modelimport.ImportedModelStore
 import com.memo494.posetracker.modelimport.ModelImporter
+import com.memo494.posetracker.modelimport.ModelLibraryStore
 import com.memo494.posetracker.modelimport.ModelStatus
 import com.memo494.posetracker.modelimport.ModelStatusHolder
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -111,7 +113,9 @@ class MainActivity : ComponentActivity() {
                     onStopClick = { dispatch(ControlEvent.StopClicked) },
                     onOpenOverlaySettingsClick = { dispatch(ControlEvent.OpenOverlaySettingsClicked) },
                     onImportClick = { dispatch(ControlEvent.ImportClicked) },
-                    onUseBuiltInClick = { dispatch(ControlEvent.UseBuiltInClicked) },
+                    onRemoveAllClick = { dispatch(ControlEvent.RemoveAllClicked) },
+                    onDeleteModelClick = { dispatch(ControlEvent.DeleteModelClicked(it)) },
+                    onSlotPick = { orientation, sha256 -> dispatch(ControlEvent.SlotPicked(orientation, sha256)) },
                     onDebugMarksChange = { dispatch(ControlEvent.DebugMarksToggled(it)) },
                     crashContent = {
                         CrashNotice(
@@ -179,6 +183,9 @@ class MainActivity : ComponentActivity() {
             ControlEffect.OPEN_MODEL_PICKER -> openModelPicker()
             ControlEffect.RUN_IMPORT -> runImport(step.importUri)
             ControlEffect.CLEAR_IMPORTED -> clearImported()
+            ControlEffect.SCHEDULE_REMOVE_ALL_DISARM -> scheduleRemoveAllDisarm()
+            ControlEffect.DELETE_MODEL -> deleteModel(step.modelSha)
+            ControlEffect.SET_SLOT -> setSlot(step.slotOrientation, step.modelSha)
             ControlEffect.LOAD_MODEL_STATE -> loadModelState()
             ControlEffect.PERSIST_DEBUG_MARKS -> saveDebugMarks(step.debugMarks == true)
             null -> Unit
@@ -314,7 +321,7 @@ class MainActivity : ComponentActivity() {
     private fun importOrFail(uri: Uri): ImportSummary =
         try {
             val (name, size) = readNameAndSize(uri)
-            val importer = ModelImporter(ImportedModelStore(applicationContext))
+            val importer = ModelImporter(ModelLibraryStore(applicationContext))
             val source = { contentResolver.openInputStream(uri) ?: throw IOException("The picked file cannot be opened") }
             ControlModelMapper.summary(importer.import(source, name, size))
         } catch (t: Throwable) {
@@ -344,7 +351,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** Deletes the imported model off the main thread, then reads the model state again. */
+    /** Deletes every imported model off the main thread, then reads the model state again. */
     private fun clearImported() {
         lifecycleScope.launch {
             withContext(Dispatchers.IO) { clearOrLog() }
@@ -353,11 +360,53 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Gives the second tap on "Remove all imported models" [TrackerConfig.removeAllConfirmMs]; then the first tap is forgotten. */
+    private fun scheduleRemoveAllDisarm() {
+        lifecycleScope.launch {
+            delay(TrackerConfig().removeAllConfirmMs)
+            dispatch(ControlEvent.RemoveAllDisarm)
+        }
+    }
+
     private fun clearOrLog() {
         try {
-            if (!ImportedModelStore(applicationContext).clear()) AppLog.log("clearing the imported model was incomplete", null)
+            if (!ModelLibraryStore(applicationContext).clearAll()) AppLog.log("removing the imported models was incomplete", null)
         } catch (t: Throwable) {
-            AppLog.log("clearing the imported model failed", t)
+            AppLog.log("removing the imported models failed", t)
+        }
+    }
+
+    /** Deletes the library model [sha256] off the main thread, then reads the model state again. */
+    private fun deleteModel(sha256: String?) {
+        if (sha256 == null) return
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) {
+                try {
+                    if (!ModelLibraryStore(applicationContext).delete(sha256)) AppLog.log("deleting the model was incomplete", null)
+                } catch (t: Throwable) {
+                    AppLog.log("deleting the model failed", t)
+                }
+            }
+            loadModelState()
+        }
+    }
+
+    /** Stores the choice of [orientation] (`null` sha256 = built-in) off the main thread, then reads the model state again. */
+    private fun setSlot(
+        orientation: ModelOrientation?,
+        sha256: String?,
+    ) {
+        if (orientation == null) return
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) {
+                try {
+                    val stored = ModelLibraryStore(applicationContext).setSlot(orientation, sha256)
+                    if (!stored) AppLog.log("storing the model choice failed", null)
+                } catch (t: Throwable) {
+                    AppLog.log("storing the model choice failed", t)
+                }
+            }
+            loadModelState()
         }
     }
 
@@ -376,8 +425,11 @@ class MainActivity : ComponentActivity() {
     private fun readModelState(): ControlEvent.ModelStateLoaded? =
         try {
             val status: ModelStatus? = ModelStatusHolder.latest().takeUnless { it === acknowledgedStatus }
-            val store = ImportedModelStore(applicationContext)
-            ControlModelMapper.stateLoaded(store.state(), status, store::storedFileMatches)
+            val store = ModelLibraryStore(applicationContext)
+            val metrics = resources.displayMetrics
+            val orientation = ModelOrientation.of(metrics.widthPixels, metrics.heightPixels)
+            val max = TrackerConfig().modelLibraryMax
+            ControlModelMapper.libraryLoaded(store.state(), status, orientation, max, store::storedFileMatches)
         } catch (t: Throwable) {
             AppLog.log("reading the model state failed", t)
             null

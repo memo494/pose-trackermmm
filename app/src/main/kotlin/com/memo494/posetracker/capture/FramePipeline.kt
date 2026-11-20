@@ -59,7 +59,8 @@ import com.memo494.posetracker.overlay.OverlayState
  * an immutable snapshot, so no other thread touches a window.
  *
  * @param detector the pose detector, or `null` when it could not be created: frames are still drained and
- *   closed and the HUD shows [OverlayWarning.DETECTOR_UNAVAILABLE].
+ *   closed and the HUD shows [OverlayWarning.DETECTOR_UNAVAILABLE]. [onModelChanged] replaces it when the capture
+ *   changes orientation and the orientation's model differs.
  * @param config source of the timestamp guard.
  * @param clock `System.nanoTime()` source.
  * @param publisher receives every new state (the overlay's holder); may throw, the pipeline contains it.
@@ -69,14 +70,19 @@ import com.memo494.posetracker.overlay.OverlayState
  *   built-in one); it adds the note [OverlayWarning.IMPORTED_MODEL_NOT_USED] with the lowest priority.
  */
 internal class FramePipeline(
-    private val detector: PoseDetector?,
+    detector: PoseDetector?,
     private val config: TrackerConfig,
     private val clock: NanoClock,
     private val publisher: (OverlayState) -> Unit,
     private val logger: (String, Throwable?) -> Unit,
-    private val modelImported: Boolean = false,
-    private val importedModelNotUsed: Boolean = false,
+    modelImported: Boolean = false,
+    importedModelNotUsed: Boolean = false,
 ) {
+    // The model can change when the orientation changes (M1b-1): see onModelChanged. Capture thread only.
+    private var detector: PoseDetector? = detector
+    private var modelImported: Boolean = modelImported
+    private var importedModelNotUsed: Boolean = importedModelNotUsed
+
     private val captureFrame = CaptureFrame()
     private val fpsMeter = FpsMeter()
     private var expectedSize: CaptureSize? = null
@@ -85,8 +91,8 @@ internal class FramePipeline(
     private var buffer: ByteArray? = null
     private var contentVisible = true
     private var displaySized = true
-    private val modelInputWidth = detector?.inputWidth ?: 0
-    private val modelInputHeight = detector?.inputHeight ?: 0
+    private var modelInputWidth = detector?.inputWidth ?: 0
+    private var modelInputHeight = detector?.inputHeight ?: 0
     private var lastState =
         OverlayState(modelInputWidth = modelInputWidth, modelInputHeight = modelInputHeight, modelImported = modelImported)
     private val tracker = Tracker(config)
@@ -294,6 +300,50 @@ internal class FramePipeline(
         val changed = this.displaySized != displaySized
         this.displaySized = displaySized
         republish(dropFrame = changed)
+    }
+
+    /**
+     * Capture thread. Sets only the detector the next frame uses, with no republish and no reset. The session calls it
+     * with `null` before the model switcher may close the running detector (so a closed detector is never used even if
+     * the switch dies half-way) and puts the running one back when the switcher changed nothing.
+     */
+    fun holdDetector(held: PoseDetector?) {
+        detector = held
+    }
+
+    /**
+     * The model changed because the orientation changed (M1b-1): [newDetector] (`null` = none could be loaded) now
+     * runs. The caller has closed the old detector. The positions of the old model's frames must not feed the new
+     * model's tracks, so the state drops its detections and tracks, and the tracker, the smoother and the lock are
+     * reset like for any geometry change (`republish`); the state carries the new model's input size and the
+     * imported mark. Never throws. Capture thread.
+     *
+     * @param imported whether [newDetector] runs an imported model (the HUD mark `imp`).
+     * @param notUsed whether an imported model is expected but the built-in one runs (the lowest-priority warning).
+     */
+    fun onModelChanged(
+        newDetector: PoseDetector?,
+        imported: Boolean,
+        notUsed: Boolean,
+    ) {
+        try {
+            detector = newDetector
+            modelImported = imported
+            importedModelNotUsed = notUsed
+            modelInputWidth = newDetector?.inputWidth ?: 0
+            modelInputHeight = newDetector?.inputHeight ?: 0
+            lastState = lastState.copy(modelInputWidth = modelInputWidth, modelInputHeight = modelInputHeight, modelImported = imported)
+            // The timing of the old model must not mix into the new model's percentiles.
+            copyWindow.clear()
+            preWindow.clear()
+            inferWindow.clear()
+            postWindow.clear()
+            frameWindow.clear()
+            resultAgeWindow.clear()
+            republish(dropFrame = true)
+        } catch (e: Throwable) {
+            safeLog("changing the model failed", e)
+        }
     }
 
     /**

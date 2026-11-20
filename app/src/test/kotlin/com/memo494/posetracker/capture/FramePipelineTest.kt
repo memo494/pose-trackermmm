@@ -2599,4 +2599,111 @@ class FramePipelineTest {
         assertThat(missLogs()).isEmpty()
         assertThat(pipeline.assocMisses).isEqualTo(0)
     }
+
+    // ---- the model changes with the orientation (M1b-1) ----
+
+    @Test
+    fun modelChanged_publishesTheNewInputSizeAndTheImportedMark() {
+        val pipeline = trackingPipeline()
+        val next = ScriptedDetector(events, 832, 384)
+
+        pipeline.onModelChanged(next, imported = true, notUsed = false)
+
+        assertThat(states.last().modelInputWidth).isEqualTo(832)
+        assertThat(states.last().modelInputHeight).isEqualTo(384)
+        assertThat(states.last().modelImported).isTrue()
+        assertThat(states.last().warning).isNull()
+    }
+
+    @Test
+    fun modelChanged_dropsDetectionsAndTracks_andResetsTheSmootherAndTheLock() {
+        val pipeline = trackingPipeline()
+        detector.people = listOf(walker())
+        framesFrom(pipeline, 0, 8)
+        assertThat(states.last().tracks.count).isAtLeast(1)
+        pipeline.requestLock(1)
+
+        pipeline.onModelChanged(ScriptedDetector(events, 832, 384), imported = true, notUsed = false)
+
+        assertThat(states.last().frame).isNull()
+        assertThat(states.last().tracks.count).isEqualTo(0)
+        assertThat(pipeline.smootherActiveCount).isEqualTo(0)
+        assertThat(pipeline.hasLock).isFalse()
+    }
+
+    @Test
+    fun modelChanged_laterFramesGoToTheNewDetectorOnly() {
+        val pipeline = trackingPipeline()
+        val next = ScriptedDetector(events, 832, 384)
+        framesFrom(pipeline, 0, 2)
+        val oldCalls = detector.calls
+
+        pipeline.onModelChanged(next, imported = false, notUsed = false)
+        framesFrom(pipeline, 200, 3)
+
+        assertThat(detector.calls).isEqualTo(oldCalls)
+        assertThat(next.calls).isEqualTo(3)
+    }
+
+    @Test
+    fun modelChanged_toNoDetector_showsTheWarningAndStillDrainsFrames() {
+        val pipeline = trackingPipeline()
+
+        pipeline.onModelChanged(null, imported = false, notUsed = false)
+        framesFrom(pipeline, 0, 2)
+
+        assertThat(states.last().warning).isEqualTo(OverlayWarning.DETECTOR_UNAVAILABLE)
+        assertThat(states.last().modelInputWidth).isEqualTo(0)
+        assertThat(pipeline.failures).isEqualTo(0L)
+    }
+
+    @Test
+    fun modelChanged_withAnImportedModelNotUsed_addsTheNote() {
+        val pipeline = trackingPipeline()
+
+        pipeline.onModelChanged(ScriptedDetector(events), imported = false, notUsed = true)
+
+        assertThat(states.last().warning).isEqualTo(OverlayWarning.IMPORTED_MODEL_NOT_USED)
+    }
+
+    @Test
+    fun modelChanged_whenThePublisherFails_isContained() {
+        val pipeline = trackingPipeline()
+        publisherError = IllegalStateException("publish broke")
+
+        pipeline.onModelChanged(ScriptedDetector(events), imported = false, notUsed = false)
+
+        assertThat(pipeline.failures).isEqualTo(0L)
+    }
+
+    @Test
+    fun modelChanged_forgetsTheTimingOfTheOldModel() {
+        val pipeline = trackingPipeline()
+        framesFrom(pipeline, 0, 5)
+        assertThat(pipeline.timingSummary().samples).isGreaterThan(0)
+
+        pipeline.onModelChanged(ScriptedDetector(events, 832, 384), imported = false, notUsed = false)
+
+        assertThat(pipeline.timingSummary().samples).isEqualTo(0)
+        framesFrom(pipeline, 200, 2)
+        assertThat(pipeline.timingSummary().samples).isEqualTo(2)
+    }
+
+    @Test
+    fun holdDetector_null_stopsDetection_andPuttingItBackResumesIt_withoutRepublishing() {
+        val pipeline = trackingPipeline()
+        framesFrom(pipeline, 0, 2)
+        val calls = detector.calls
+        val published = states.size
+
+        pipeline.holdDetector(null)
+        assertThat(states.size).isEqualTo(published)
+        framesFrom(pipeline, 200, 2)
+        assertThat(detector.calls).isEqualTo(calls)
+        assertThat(states.last().warning).isEqualTo(OverlayWarning.DETECTOR_UNAVAILABLE)
+
+        pipeline.holdDetector(detector)
+        framesFrom(pipeline, 400, 2)
+        assertThat(detector.calls).isEqualTo(calls + 2)
+    }
 }

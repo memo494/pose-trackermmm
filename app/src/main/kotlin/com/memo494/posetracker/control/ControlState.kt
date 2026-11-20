@@ -1,6 +1,7 @@
 package com.memo494.posetracker.control
 
 import com.memo494.posetracker.core.TrackerConfig
+import com.memo494.posetracker.core.modelimport.ModelOrientation
 
 /** What the control screen knows. Pure data: [ControlReducer] is the only place that changes it. */
 internal data class ControlState(
@@ -14,8 +15,21 @@ internal data class ControlState(
     val notificationPermissionAsked: Boolean = false,
     /** A message the screen shows next to the controls, or `null` when there is nothing to tell. */
     val notice: ControlNotice? = null,
-    /** The model the next start will use, as last read from the model store. */
+    /**
+     * The model the slot of the screen's current orientation holds, as last read from the model store (the control
+     * screen is shown in the orientation the next start captures).
+     */
     val activeModel: ActiveModel = ActiveModel.BuiltIn,
+    /** The imported models in the library (M1b-1), in the order the store lists them. */
+    val library: List<LibraryItem> = emptyList(),
+    /** The library model chosen for portrait (its sha256), or `null` for the built-in model. */
+    val portraitSha: String? = null,
+    /** The library model chosen for landscape (its sha256), or `null` for the built-in model. */
+    val landscapeSha: String? = null,
+    /** `true` when the library holds the most models it may; Import is disabled until one is deleted. */
+    val libraryFull: Boolean = false,
+    /** `true` after the first tap on "Remove all imported models" until the second tap or the timeout. */
+    val removeAllArmed: Boolean = false,
     /** `true` from the moment a picked file is handed to the importer until its result arrives; Start is disabled. */
     val importing: Boolean = false,
     /** What the last import said; `null` before any import, after a new one starts and after "Use built-in model". */
@@ -52,6 +66,21 @@ internal sealed interface ActiveModel {
         val inputText: String,
     ) : ActiveModel
 }
+
+/**
+ * One model of the library as the screen lists it.
+ *
+ * @property sha256 the key of the model; what a delete and a slot choice refer to.
+ * @property displayName the sanitised file name.
+ * @property inputText the input size text (`ModelInputText.text`: `640` or `832x384`).
+ * @property blocked `true` when a crash at its load switched it off; it cannot be chosen for a slot.
+ */
+internal data class LibraryItem(
+    val sha256: String,
+    val displayName: String,
+    val inputText: String,
+    val blocked: Boolean = false,
+)
 
 /** Why a picked file was refused: one value per rule of the importer, so each has its own sentence. */
 internal enum class ModelRejectionReason {
@@ -91,6 +120,9 @@ internal enum class ImportFailure {
 
     /** The crash marker could not be saved, so the import was not run. */
     GUARD_NOT_STORED,
+
+    /** The model library is full: a model must be deleted first. */
+    LIBRARY_FULL,
 
     /** An I/O or other unexpected error; [ImportSummary.Failed.message] says which. */
     IO,
@@ -145,6 +177,9 @@ internal enum class ModelNoticeKind {
 
     /** What is stored about the imported model could not be read ([ModelNotice.message] says why). */
     STATE_UNREADABLE,
+
+    /** The list of switched-off models could not be read, so every imported model counts as switched off. */
+    BLOCKED_UNREADABLE,
 }
 
 /** A [kind] of notice with the optional one-line technical [message] of the failure behind it. */
@@ -215,6 +250,12 @@ internal sealed interface ControlEvent {
     /** The user pressed "Use built-in model". */
     data object UseBuiltInClicked : ControlEvent
 
+    /** The user pressed "Remove all imported models": the first tap arms it, a second tap before the timeout removes. */
+    data object RemoveAllClicked : ControlEvent
+
+    /** The time to confirm "Remove all imported models" ran out. */
+    data object RemoveAllDisarm : ControlEvent
+
     /** The user switched "Debug marks" on or off. Allowed in every state; it is used from the next Start. */
     data class DebugMarksToggled(
         val enabled: Boolean,
@@ -225,11 +266,29 @@ internal sealed interface ControlEvent {
         val enabled: Boolean,
     ) : ControlEvent
 
-    /** The model store (and the last session) was read off the main thread: the model and the notice to show. */
+    /** The user pressed "Delete" on the library model [sha256]. */
+    data class DeleteModelClicked(
+        val sha256: String,
+    ) : ControlEvent
+
+    /** The user chose the library model [sha256] (`null` = the built-in model) for [orientation]. */
+    data class SlotPicked(
+        val orientation: ModelOrientation,
+        val sha256: String?,
+    ) : ControlEvent
+
+    /**
+     * The model store (and the last session) was read off the main thread: the model of the screen's orientation and
+     * the notice to show, and the library with the two choices.
+     */
     data class ModelStateLoaded(
         val active: ActiveModel,
         val notice: ModelNotice?,
         val fileStored: Boolean = false,
+        val library: List<LibraryItem> = emptyList(),
+        val portraitSha: String? = null,
+        val landscapeSha: String? = null,
+        val libraryFull: Boolean = false,
     ) : ControlEvent
 }
 
@@ -247,8 +306,17 @@ internal enum class ControlEffect {
     /** Import the file named by [ControlStep.importUri] on a worker thread; the answer is `ImportFinished`. */
     RUN_IMPORT,
 
-    /** Delete the imported model on a worker thread, then read the model state again. */
+    /** Delete every imported model on a worker thread, then read the model state again. */
     CLEAR_IMPORTED,
+
+    /** After `TrackerConfig.removeAllConfirmMs`, send `RemoveAllDisarm`. */
+    SCHEDULE_REMOVE_ALL_DISARM,
+
+    /** Delete the library model [ControlStep.modelSha] on a worker thread, then read the model state again. */
+    DELETE_MODEL,
+
+    /** Store the choice [ControlStep.slotOrientation] / [ControlStep.modelSha] on a worker thread, then read the model state again. */
+    SET_SLOT,
 
     /** Read the model store and the last session's model status on a worker thread; the answer is `ModelStateLoaded`. */
     LOAD_MODEL_STATE,
@@ -262,12 +330,16 @@ internal enum class ControlEffect {
  * [importUri] is set only with [ControlEffect.RUN_IMPORT]: the picked document, as text.
  * [debugMarks] is set only with [ControlEffect.START_SERVICE] (the value the service gets as an Intent extra) and
  * [ControlEffect.PERSIST_DEBUG_MARKS] (the value to save); otherwise `null`.
+ * [modelSha] is set with [ControlEffect.DELETE_MODEL] (the model to delete) and [ControlEffect.SET_SLOT] (the model to
+ * choose, `null` = built-in); [slotOrientation] only with [ControlEffect.SET_SLOT].
  */
 internal data class ControlStep(
     val state: ControlState,
     val effect: ControlEffect?,
     val importUri: String? = null,
     val debugMarks: Boolean? = null,
+    val modelSha: String? = null,
+    val slotOrientation: ModelOrientation? = null,
 )
 
 /** Pure decision logic of the control screen: total (every event in every state answers) and free of Android. */
@@ -277,6 +349,23 @@ internal object ControlReducer {
      * event (it is `true` only on API 33+ when POST_NOTIFICATIONS is not granted).
      */
     fun reduce(
+        state: ControlState,
+        event: ControlEvent,
+        notificationPermissionMissing: Boolean,
+    ): ControlStep {
+        val ends = state.removeAllArmed && event.endsRemoveAllConfirm()
+        return step(if (ends) state.copy(removeAllArmed = false) else state, event, notificationPermissionMissing)
+    }
+
+    /** Another action started: the first tap on "Remove all imported models" no longer waits for its second tap. */
+    private fun ControlEvent.endsRemoveAllConfirm(): Boolean =
+        this is ControlEvent.ImportClicked ||
+            this is ControlEvent.ImportPicked ||
+            this is ControlEvent.DeleteModelClicked ||
+            this is ControlEvent.SlotPicked ||
+            this is ControlEvent.StartClicked
+
+    private fun step(
         state: ControlState,
         event: ControlEvent,
         notificationPermissionMissing: Boolean,
@@ -294,6 +383,10 @@ internal object ControlReducer {
             is ControlEvent.ImportPicked -> onImportPicked(state, event.uriString)
             is ControlEvent.ImportFinished -> onImportFinished(state, event.summary)
             ControlEvent.UseBuiltInClicked -> onUseBuiltIn(state)
+            ControlEvent.RemoveAllClicked -> onRemoveAll(state)
+            ControlEvent.RemoveAllDisarm -> ControlStep(state.copy(removeAllArmed = false), null)
+            is ControlEvent.DeleteModelClicked -> onDeleteModel(state, event.sha256)
+            is ControlEvent.SlotPicked -> onSlotPicked(state, event.orientation, event.sha256)
             is ControlEvent.ModelStateLoaded -> onModelStateLoaded(state, event)
             is ControlEvent.DebugMarksToggled -> onDebugMarksToggled(state, event.enabled)
             is ControlEvent.DebugMarksLoaded -> onDebugMarksLoaded(state, event.enabled)
@@ -375,7 +468,7 @@ internal object ControlReducer {
     private fun modelBusy(state: ControlState): Boolean = state.running || state.awaitingConsent || state.importing
 
     private fun onImportClicked(state: ControlState): ControlStep {
-        if (modelBusy(state)) return ControlStep(state, null)
+        if (modelBusy(state) || state.libraryFull) return ControlStep(state, null)
         return ControlStep(state, ControlEffect.OPEN_MODEL_PICKER)
     }
 
@@ -383,7 +476,7 @@ internal object ControlReducer {
         state: ControlState,
         uriString: String?,
     ): ControlStep {
-        if (uriString == null || modelBusy(state)) return ControlStep(state, null)
+        if (uriString == null || modelBusy(state) || state.libraryFull) return ControlStep(state, null)
         val started = state.copy(importing = true, importResult = null)
         return ControlStep(started, ControlEffect.RUN_IMPORT, importUri = uriString)
     }
@@ -412,11 +505,60 @@ internal object ControlReducer {
         return ControlStep(next, ControlEffect.LOAD_MODEL_STATE)
     }
 
+    /** The first tap arms (and the activity schedules the disarm); the second removes everything. */
+    private fun onRemoveAll(state: ControlState): ControlStep {
+        if (modelBusy(state)) return ControlStep(state, null)
+        if (!state.removeAllArmed) return ControlStep(state.copy(removeAllArmed = true), ControlEffect.SCHEDULE_REMOVE_ALL_DISARM)
+        return onUseBuiltIn(state)
+    }
+
     private fun onUseBuiltIn(state: ControlState): ControlStep {
         if (modelBusy(state)) return ControlStep(state, null)
         val cleared =
-            state.copy(activeModel = ActiveModel.BuiltIn, importResult = null, modelNotice = null, modelFileStored = false)
+            state.copy(
+                removeAllArmed = false,
+                activeModel = ActiveModel.BuiltIn,
+                importResult = null,
+                modelNotice = null,
+                modelFileStored = false,
+                library = emptyList(),
+                portraitSha = null,
+                landscapeSha = null,
+                libraryFull = false,
+            )
         return ControlStep(cleared, ControlEffect.CLEAR_IMPORTED)
+    }
+
+    /** The model leaves the list and the choices that pointed to it at once; the reload then shows what is stored. */
+    private fun onDeleteModel(
+        state: ControlState,
+        sha256: String,
+    ): ControlStep {
+        if (modelBusy(state) || state.library.none { it.sha256 == sha256 }) return ControlStep(state, null)
+        val next =
+            state.copy(
+                library = state.library.filterNot { it.sha256 == sha256 },
+                portraitSha = state.portraitSha.takeUnless { it == sha256 },
+                landscapeSha = state.landscapeSha.takeUnless { it == sha256 },
+                libraryFull = false,
+            )
+        return ControlStep(next, ControlEffect.DELETE_MODEL, modelSha = sha256)
+    }
+
+    /** The choice shows at once; a model that is not listed (or is blocked) cannot be chosen. */
+    private fun onSlotPicked(
+        state: ControlState,
+        orientation: ModelOrientation,
+        sha256: String?,
+    ): ControlStep {
+        val pickable = sha256 == null || state.library.any { it.sha256 == sha256 && !it.blocked }
+        if (modelBusy(state) || !pickable) return ControlStep(state, null)
+        val next =
+            when (orientation) {
+                ModelOrientation.PORTRAIT -> state.copy(portraitSha = sha256)
+                ModelOrientation.LANDSCAPE -> state.copy(landscapeSha = sha256)
+            }
+        return ControlStep(next, ControlEffect.SET_SLOT, modelSha = sha256, slotOrientation = orientation)
     }
 
     private fun onModelStateLoaded(
@@ -426,7 +568,15 @@ internal object ControlReducer {
         // A read that finishes during an import may predate it; the import asks for a fresh read when it ends.
         if (state.importing) return ControlStep(state, null)
         return ControlStep(
-            state.copy(activeModel = event.active, modelNotice = event.notice, modelFileStored = event.fileStored),
+            state.copy(
+                activeModel = event.active,
+                modelNotice = event.notice,
+                modelFileStored = event.fileStored,
+                library = event.library,
+                portraitSha = event.portraitSha,
+                landscapeSha = event.landscapeSha,
+                libraryFull = event.libraryFull,
+            ),
             null,
         )
     }

@@ -18,15 +18,17 @@ import android.view.Display
 import android.view.WindowManager
 import com.memo494.posetracker.core.TrackerConfig
 import com.memo494.posetracker.core.capture.CaptureSize
+import com.memo494.posetracker.core.modelimport.ModelOrientation
 import com.memo494.posetracker.core.stats.ThermalSampler
 import com.memo494.posetracker.detector.PoseDetector
 import com.memo494.posetracker.detector.PoseDetectors
 import com.memo494.posetracker.diagnostics.CaptureStatsHolder
-import com.memo494.posetracker.modelimport.ImportedModelStore
-import com.memo494.posetracker.modelimport.LoadedModel
+import com.memo494.posetracker.modelimport.ModelLibraryStore
+import com.memo494.posetracker.modelimport.ModelSelection
 import com.memo494.posetracker.modelimport.ModelSource
+import com.memo494.posetracker.modelimport.ModelStatus
 import com.memo494.posetracker.modelimport.ModelStatusHolder
-import com.memo494.posetracker.modelimport.SessionModelLoader
+import com.memo494.posetracker.modelimport.ModelSwitcher
 import com.memo494.posetracker.overlay.LockTarget
 import com.memo494.posetracker.overlay.OverlayWindow
 import java.util.concurrent.TimeUnit
@@ -107,6 +109,7 @@ internal class CaptureSession(
     private val imageFrame = ImageFrame()
     private var thermalSampler: ThermalSampler? = null
     private var detector: PoseDetector? = null
+    private var modelSwitcher: ModelSwitcher? = null
     private var imageReader: ImageReader? = null
     private var virtualDisplay: VirtualDisplay? = null
     private var currentSize: CaptureSize? = null
@@ -257,20 +260,26 @@ internal class CaptureSession(
 
     private fun startCapture() {
         if (teardown.isStarted) return
-        val loaded = loadModel()
-        val newDetector = loaded.detector
-        detector = newDetector
-        ModelStatusHolder.publish(loaded.status())
-        CaptureLog.log(loaded.logLine(), null)
+        val switcher = createModelSwitcher()
+        modelSwitcher = switcher
+        detector = null
+        val selection = switcher.select(startOrientation())
+        val loaded = selection?.loaded
+        detector = loaded?.detector
+        publishModelStatus(switcher)
+        if (selection != null) {
+            CaptureLog.log(selection.loaded.logLine(), null)
+            CaptureLog.log(selection.logLine(), null)
+        }
         pipeline =
             FramePipeline(
-                newDetector,
+                loaded?.detector,
                 config,
                 clock,
                 overlayWindow.stateHolder::publish,
                 CaptureLog::log,
-                modelImported = loaded.source == ModelSource.IMPORTED,
-                importedModelNotUsed = loaded.importedModelNotUsed,
+                modelImported = loaded?.source == ModelSource.IMPORTED,
+                importedModelNotUsed = loaded?.importedModelNotUsed == true,
             )
         thermalSampler =
             ThermalSampler(
@@ -284,21 +293,63 @@ internal class CaptureSession(
     }
 
     /**
-     * Capture thread. Chooses and loads the model of this session: the imported one when it is present and not
-     * blocked, else the built-in one (see [SessionModelLoader]). A session without a detector is not fatal: the HUD
-     * shows DETECTOR_UNAVAILABLE and frames are still drained. The detector belongs to this thread and is closed
-     * by the teardown.
+     * Capture thread. The switcher that chooses and loads the model of each orientation (M1b-1): the library model of
+     * the orientation's slot when it is present and not blocked, else the built-in one (see [ModelSwitcher] and
+     * [com.memo494.posetracker.modelimport.SessionModelLoader]). A session without a detector is not fatal: the HUD
+     * shows DETECTOR_UNAVAILABLE and frames are still drained. The detector belongs to this thread and is closed by
+     * the switcher when the model changes and by the teardown at the end.
      */
-    private fun loadModel(): LoadedModel {
-        val store = ImportedModelStore(context)
-        return SessionModelLoader(
-            readState = store::state,
+    private fun createModelSwitcher(): ModelSwitcher {
+        val store = ModelLibraryStore(context, config)
+        return ModelSwitcher(
+            readLibrary = store::state,
             setGuard = store::setGuard,
             loadImported = { meta -> PoseDetectors.fromImported(context, store.modelFileFor(meta), meta, config) },
             loadBuiltIn = { PoseDetectors.fromAssets(context, config) },
-            log = CaptureLog::log,
             verifyStored = store::storedFileMatches,
-        ).load()
+            nowNs = clock::nowNs,
+            log = CaptureLog::log,
+        )
+    }
+
+    /** The orientation of the capture this session is about to start, from the display (the content is not known yet). */
+    private fun startOrientation(): ModelOrientation {
+        val displayPx = displaySizePx()
+        val size = CapturePlanner.plan(displayPx.x, displayPx.y, displayPx.x, displayPx.y, config.captureScale)?.size
+        return if (size != null) ModelOrientation.of(size.widthImg, size.heightImg) else ModelOrientation.of(displayPx.x, displayPx.y)
+    }
+
+    private fun publishModelStatus(switcher: ModelSwitcher) {
+        ModelStatusHolder.publish(switcher.status() ?: ModelStatus.chooseFailed())
+    }
+
+    /**
+     * Capture thread. Makes the model of the capture's orientation the running one (M1b-1): when the orientation of
+     * [size] asks for another model than the loaded one, the switcher closes the old detector and loads the new one
+     * (never stops the session; a failing model falls back to the built-in one), and the pipeline drops the old
+     * model's detections and resets the tracker.
+     */
+    private fun switchModelFor(
+        size: CaptureSize,
+        activePipeline: FramePipeline,
+    ) {
+        val switcher = modelSwitcher ?: return
+        // The switcher closes the running detector first. Nothing may keep using it, even if the switch dies half-way
+        // (an Error that escapes the switcher): both holders are cleared before, and put back when nothing changed.
+        val previous = detector
+        detector = null
+        activePipeline.holdDetector(null)
+        val selection: ModelSelection? = switcher.select(ModelOrientation.of(size.widthImg, size.heightImg))
+        if (selection == null) {
+            detector = previous
+            activePipeline.holdDetector(previous)
+            return
+        }
+        val loaded = selection.loaded
+        detector = loaded.detector
+        publishModelStatus(switcher)
+        CaptureLog.log(selection.logLine(), null)
+        activePipeline.onModelChanged(loaded.detector, loaded.source == ModelSource.IMPORTED, loaded.importedModelNotUsed)
     }
 
     /**
@@ -338,6 +389,7 @@ internal class CaptureSession(
                 return
             }
         }
+        switchModelFor(plan.size, activePipeline)
         appliedPlan = plan
         appliedNoUsablePlan = false
         activePipeline.setDisplaySizePx(displayPx.x, displayPx.y)
@@ -371,8 +423,7 @@ internal class CaptureSession(
         val widthImg = size.widthImg
         val heightImg = size.heightImg
         val densityDpi = context.resources.displayMetrics.densityDpi
-        val newReader =
-            ImageReader.newInstance(widthImg, heightImg, PixelFormat.RGBA_8888, TrackerConfig.CAPTURE_MAX_IMAGES)
+        val newReader = ImageReader.newInstance(widthImg, heightImg, PixelFormat.RGBA_8888, TrackerConfig.CAPTURE_MAX_IMAGES)
         try {
             newReader.setOnImageAvailableListener(imageListener, captureHandler)
             val display = virtualDisplay

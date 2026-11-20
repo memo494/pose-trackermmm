@@ -16,6 +16,7 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.ByteArrayInputStream
 import java.io.File
+import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
 
 class ModelLibraryStoreTest {
@@ -34,23 +35,29 @@ class ModelLibraryStoreTest {
 
     private val directory get() = File(tmp.root, "imported")
 
-    private val shaA = "a".repeat(64)
-    private val shaB = "b".repeat(64)
-    private val shaC = "c".repeat(64)
     private val bytesA = ByteArray(300) { (it % 7).toByte() }
     private val bytesB = ByteArray(400) { (it % 11).toByte() }
     private val bytesC = ByteArray(500) { (it % 13).toByte() }
-    private val metaA = meta("a.tflite", 'a', bytesA.size)
-    private val metaB = meta("b.tflite", 'b', bytesB.size, width = 832, height = 384)
-    private val metaC = meta("c.tflite", 'c', bytesC.size)
+
+    // The models carry the real sha256 of their bytes: the store checks a stored file against it.
+    private val metaA = meta("a.tflite", bytesA)
+    private val metaB = meta("b.tflite", bytesB, width = 832, height = 384)
+    private val metaC = meta("c.tflite", bytesC)
+    private val shaA = metaA.sha256
+    private val shaB = metaB.sha256
+    private val shaC = metaC.sha256
 
     private fun meta(
         name: String,
-        digit: Char,
-        bytes: Int,
+        bytes: ByteArray,
         width: Int = 640,
         height: Int = 640,
-    ) = ImportedModelMeta(name, digit.toString().repeat(64), bytes.toLong(), width, height, 300)
+    ): ImportedModelMeta {
+        val sha = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+        return ImportedModelMeta(name, sha, bytes.size.toLong(), width, height, 300)
+    }
+
+    private fun modelName(sha: String) = "model-" + sha.take(16) + ".tflite"
 
     private fun rename(
         from: File,
@@ -119,8 +126,8 @@ class ModelLibraryStoreTest {
         add(library, metaA, bytesA)
         add(library, metaB, bytesB)
 
-        assertThat(filesIn(entryDirectory(shaA))).containsExactly("meta.txt", "model-" + "a".repeat(16) + ".tflite")
-        assertThat(filesIn(entryDirectory(shaB))).containsExactly("meta.txt", "model-" + "b".repeat(16) + ".tflite")
+        assertThat(filesIn(entryDirectory(shaA))).containsExactly("meta.txt", modelName(shaA))
+        assertThat(filesIn(entryDirectory(shaB))).containsExactly("meta.txt", modelName(shaB))
     }
 
     @Test
@@ -174,7 +181,7 @@ class ModelLibraryStoreTest {
     fun store_aFailedMove_isFailedAndLeavesTheLibraryAsItWas() {
         val library = newLibrary()
         add(library, metaA, bytesA)
-        failRenameOf = "model-" + "b".repeat(16) + ".tflite"
+        failRenameOf = modelName(shaB)
 
         val result = add(library, metaB, bytesB)
 
@@ -468,7 +475,7 @@ class ModelLibraryStoreTest {
         assertThat(state.entries.map { it.meta }).containsExactly(metaA)
         assertThat(state.entries.single().fileExists).isTrue()
         assertThat(state.slots).isEqualTo(OrientationSlots(SlotChoice.Library(shaA), SlotChoice.Library(shaA)))
-        assertThat(filesIn(directory)).containsExactly("a".repeat(16), "slots.txt")
+        assertThat(filesIn(directory)).containsExactly(shaA.take(16), "slots.txt")
         assertThat(newLibrary().modelFileFor(metaA).readBytes()).isEqualTo(bytesA)
     }
 
@@ -516,7 +523,7 @@ class ModelLibraryStoreTest {
     @Test
     fun migration_aFailedMove_isRetriedByTheNextRead() {
         storeLegacyModel(metaA, bytesA)
-        failRenameOf = "model-" + "a".repeat(16) + ".tflite"
+        failRenameOf = modelName(shaA)
 
         val failed = newLibrary().state()
 
@@ -532,7 +539,7 @@ class ModelLibraryStoreTest {
     @Test
     fun migration_aMetaWithoutItsFile_keepsAnEntryThatSaysFileMissing() {
         storeLegacyModel(metaA, bytesA)
-        File(directory, "model-" + "a".repeat(16) + ".tflite").delete()
+        File(directory, modelName(shaA)).delete()
 
         val state = newLibrary().state()
 
@@ -547,7 +554,7 @@ class ModelLibraryStoreTest {
     @Test
     fun migration_aFailedMetaRename_keepsTheOldModelWhereItWas_andTheRetryFinishes() {
         storeLegacyModel(metaA, bytesA)
-        val oldFile = File(directory, "model-" + "a".repeat(16) + ".tflite")
+        val oldFile = File(directory, modelName(shaA))
         failRenameOf = "meta.txt"
 
         val failed = newLibrary().state()
@@ -585,7 +592,7 @@ class ModelLibraryStoreTest {
     @Test
     fun migration_anEntryWhoseFileIsDamagedWhileTheOldFileExists_isCopiedAgain() {
         storeLegacyModel(metaA, bytesA)
-        val oldFile = File(directory, "model-" + "a".repeat(16) + ".tflite")
+        val oldFile = File(directory, modelName(shaA))
         failRenameOf = "slots.txt"
         newLibrary().state()
         failRenameOf = null
@@ -624,7 +631,7 @@ class ModelLibraryStoreTest {
         assertThat(add(library, metaA, bytesA)).isEqualTo(StoreResult.STORED)
 
         assertThat(library.storedFileMatches(metaA)).isTrue()
-        assertThat(filesIn(entryDirectory(shaA))).containsExactly("meta.txt", "model-" + "a".repeat(16) + ".tflite")
+        assertThat(filesIn(entryDirectory(shaA))).containsExactly("meta.txt", modelName(shaA))
     }
 
     // ---- the entry stores keep their hands off the crash marker ----

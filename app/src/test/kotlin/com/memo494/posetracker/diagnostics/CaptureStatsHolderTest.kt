@@ -11,6 +11,7 @@ import com.memo494.posetracker.core.model.PoseDetection
 import com.memo494.posetracker.core.model.TimestampSource
 import com.memo494.posetracker.core.stats.ThermalReader
 import com.memo494.posetracker.core.stats.ThermalSampler
+import com.memo494.posetracker.core.stats.ThermalStepDown
 import com.memo494.posetracker.core.stats.TimingSummary
 import com.memo494.posetracker.core.tracking.TrackSnapshot
 import com.memo494.posetracker.detector.Accelerator
@@ -108,6 +109,31 @@ class CaptureStatsHolderTest {
         val stats = CaptureStatsHolder.latest!!
         assertThat(stats.thermalStatus).isEqualTo("LIGHT")
         assertThat(stats.thermalHeadroom).isEqualTo(HEADROOM)
+    }
+
+    @Test
+    fun publish_carriesTheThermalStepDown() {
+        val policy = ThermalStepDown(TrackerConfig())
+        policy.update(2, Float.NaN, 0L)
+        policy.update(2, Float.NaN, 4_000_000_000L)
+        val hotMs = 10_000L
+
+        CaptureStatsHolder.publish(OverlayState(), pipelineWithDetector(), null, policy, 14_000_000_000L)
+
+        val stats = CaptureStatsHolder.latest!!
+        assertThat(stats.thermalState).isEqualTo("HOT")
+        assertThat(stats.thermalStepDowns).isEqualTo(1)
+        assertThat(stats.thermalHotMs).isEqualTo(hotMs)
+    }
+
+    @Test
+    fun publish_withoutAStepDownPolicy_isNormal() {
+        CaptureStatsHolder.publish(OverlayState(), pipelineWithDetector(), null)
+
+        val stats = CaptureStatsHolder.latest!!
+        assertThat(stats.thermalState).isEqualTo("NORMAL")
+        assertThat(stats.thermalStepDowns).isEqualTo(0)
+        assertThat(stats.thermalHotMs).isEqualTo(0L)
     }
 
     @Test

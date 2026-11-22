@@ -4,6 +4,7 @@ import com.memo494.posetracker.capture.FramePipeline
 import com.memo494.posetracker.core.TrackerConfig
 import com.memo494.posetracker.core.stats.ThermalSampler
 import com.memo494.posetracker.core.stats.ThermalStatusText
+import com.memo494.posetracker.core.stats.ThermalStepDown
 import com.memo494.posetracker.modelimport.ModelStatusHolder
 import com.memo494.posetracker.overlay.OverlayState
 
@@ -22,12 +23,15 @@ internal object CaptureStatsHolder {
     /**
      * Capture thread, once per HUD tick: stores a snapshot of [state], the [pipeline] counters and its timing
      * percentiles (computed here, on the capture thread, so the diagnostics thread only reads the snapshot) and
-     * the last reading of [thermal] (`null` = no thermal source: not available).
+     * the last reading of [thermal] (`null` = no thermal source: not available) and the state of the thermal
+     * step-down [stepDown] at [nowNs] (`null` = no policy: `NORMAL`, never stepped down).
      */
     fun publish(
         state: OverlayState,
         pipeline: FramePipeline,
         thermal: ThermalSampler?,
+        stepDown: ThermalStepDown? = null,
+        nowNs: Long = 0L,
     ) {
         latest =
             CaptureStats(
@@ -76,6 +80,9 @@ internal object CaptureStatsHolder {
                 timing = pipeline.timingSummary(),
                 thermalStatus = thermal?.status ?: ThermalStatusText.NOT_AVAILABLE,
                 thermalHeadroom = thermal?.headroom ?: Float.NaN,
+                thermalState = (stepDown?.state ?: ThermalStepDown.State.NORMAL).name,
+                thermalStepDowns = stepDown?.stepDowns ?: 0,
+                thermalHotMs = stepDown?.hotMs(nowNs) ?: 0L,
             )
     }
 }

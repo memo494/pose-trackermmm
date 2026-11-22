@@ -15,24 +15,30 @@ import com.memo494.posetracker.detector.PoseDetector
  * @property loaded the detector (or none) with its source, fallback and message, as [SessionModelLoader] returns it.
  * @property orientation the orientation it was loaded for.
  * @property ms how long closing the old detector and loading this one took, in milliseconds.
- * @property isSwitch `true` for a change caused by a change of orientation, `false` for the load at Start.
+ * @property isSwitch `true` for a change of a running model (orientation or thermal state), `false` for the load at Start.
+ * @property thermal `true` when this is the small model the thermal step-down runs.
  */
 internal class ModelSelection(
     val loaded: LoadedModel,
     val orientation: ModelOrientation,
     val ms: Long,
     val isSwitch: Boolean,
+    val thermal: Boolean = false,
 ) {
-    /** The one log line of the choice: `model: <name> for landscape (switch 240ms)`; `start` instead of `switch` at Start. */
+    /**
+     * The one log line of the choice: `model: <name> for landscape (switch 240ms)`; `start` instead of `switch` at Start;
+     * the name of the thermal step-down's model is `built-in (thermal step-down)`.
+     */
     fun logLine(): String {
         val imported = if (loaded.source == ModelSource.IMPORTED) loaded.meta else null
-        val name = imported?.displayName ?: BUILT_IN_NAME
+        val name = imported?.displayName ?: if (thermal) THERMAL_NAME else BUILT_IN_NAME
         val what = if (isSwitch) "switch" else "start"
         return "model: $name for ${orientation.logName} ($what ${ms}ms)"
     }
 
     private companion object {
         const val BUILT_IN_NAME = "built-in"
+        const val THERMAL_NAME = "built-in (thermal step-down)"
     }
 }
 
@@ -47,6 +53,12 @@ internal class ModelSelection(
  * model), falls back to the built-in model when the model is blocked, missing or fails to load, and never stops the
  * session. A load that fails is tried again the next time its orientation comes back.
  *
+ * Thermal step-down (F7): while [setThermalHot] says `true`, the small square built-in model (320) runs instead of the
+ * slot's model, whatever the orientation (a square model fits both). It loads through the same [SessionModelLoader]
+ * (crash marker, blocked list, `Error`s contained) and **before** the running detector is closed, so a small model that
+ * does not load leaves the current model untouched: the failure is logged and not retried until the next
+ * [setThermalHot] change. Back to normal, the slot's model of the current orientation loads again.
+ *
  * @param readLibrary what is stored now (`ModelLibraryStore.state`); a failure means "built-in, unreadable".
  * @param setGuard stores the crash marker (`ModelLibraryStore.setGuard`).
  * @param loadImported builds the detector of a library model (`PoseDetectors.fromImported`).
@@ -54,6 +66,9 @@ internal class ModelSelection(
  * @param loadBuiltIn builds the detector of the built-in model of an orientation (`PoseDetectors.fromAssets`).
  * @param loadFallbackBuiltIn builds the detector of the square fallback model, used when [loadBuiltIn] fails.
  * @param verifyStored whether a stored file still has its length and sha256 (`ModelLibraryStore.storedFileMatches`).
+ * @param smallBuiltInSha256 the sha256 of the small square model (`null` = unknown): its crash marker names it.
+ * @param loadSmallBuiltIn builds the detector of the small square model (320) for the thermal step-down; like
+ *   [loadBuiltIn] it wraps only the model creation in the [CreateGuard] it is given.
  * @param nowNs a monotonic clock in nanoseconds.
  * @param log receives a message and the failure, if any; it must not throw.
  */
@@ -63,6 +78,8 @@ internal class ModelSwitcher(
     private val loadImported: (ImportedModelMeta) -> PoseDetector,
     private val builtInSha256: (ModelOrientation) -> String?,
     private val loadBuiltIn: (ModelOrientation, CreateGuard) -> BundledDetector,
+    private val smallBuiltInSha256: () -> String?,
+    private val loadSmallBuiltIn: (CreateGuard) -> BundledDetector,
     private val loadFallbackBuiltIn: () -> BundledDetector,
     private val verifyStored: (ImportedModelMeta) -> Boolean,
     private val nowNs: () -> Long,
@@ -81,13 +98,32 @@ internal class ModelSwitcher(
     private var oldClosed = false
     private var built: LoadedModel? = null
 
-    /** Changes of the model caused by a change of orientation since this switcher was made (Start not counted). */
+    /** Whether the thermal step-down asks for the small model, and whether loading it failed since that was asked. */
+    private var thermalHot = false
+    private var smallLoadFailed = false
+
+    /** Whether the small model of the thermal step-down is the running one. */
+    val steppedDown: Boolean
+        get() = current?.detector != null && loadedFor == SMALL_KEY
+
+    /** Changes of the running model since this switcher was made (Start not counted): by orientation or thermal state. */
     var switches: Int = 0
         private set
 
     /** The longest of those changes, milliseconds. */
     var switchMsMax: Long = 0L
         private set
+
+    /**
+     * Tells the switcher whether the thermal step-down wants the small model (capture thread). A change of the value
+     * clears an earlier failure to load it (so the next transition tries once more); the model itself changes at the
+     * next [select].
+     */
+    fun setThermalHot(hot: Boolean) {
+        if (hot == thermalHot) return
+        thermalHot = hot
+        smallLoadFailed = false
+    }
 
     /**
      * Makes the model of [orientation] the running one. Returns what was loaded, or `null` when the running model is
@@ -144,6 +180,14 @@ internal class ModelSwitcher(
     private fun choose(orientation: ModelOrientation): ModelSelection? {
         val library = readOrNull()
         if (library != null) lastLibrary = library
+        if (thermalHot && !smallLoadFailed) {
+            val running = current
+            if (running != null && running.detector != null && loadedFor == SMALL_KEY) return null
+            val small = chooseSmall(orientation, library, running)
+            if (small != null) return small
+            smallLoadFailed = true
+            safeLog("thermal step-down: the small model did not load, keeping the current model", null)
+        }
         val wanted = library?.let { shaOf(it.slots.choiceFor(orientation)) } ?: builtInKey(orientation)
         val running = current
         if (running != null && running.detector != null && wanted == loadedFor && builtInMatches(orientation)) return null
@@ -163,17 +207,59 @@ internal class ModelSwitcher(
                 log = ::safeLog,
                 verifyStored = verifyStored,
             ).load()
+        return commit(loaded, wanted, orientation, startNs, running, thermal = false)
+    }
+
+    /**
+     * Loads the small model through the loader (crash marker, blocked list) while the running detector stays open; only
+     * a model that loaded replaces it. Returns `null` when it did not load (nothing was closed or changed).
+     */
+    private fun chooseSmall(
+        orientation: ModelOrientation,
+        library: LibraryState?,
+        running: LoadedModel?,
+    ): ModelSelection? {
+        val startNs = nowNs()
+        val loaded =
+            SessionModelLoader(
+                readState = { StoredModelState(meta = null, fileExists = false, guard = ImportGuardState.Idle) },
+                setGuard = setGuard,
+                loadImported = loadImported,
+                builtInSha256 = smallBuiltInSha256,
+                isBuiltInBlocked = { sha256 -> blockedOrThrow(library, sha256) },
+                loadBuiltIn = loadSmallBuiltIn,
+                loadFallbackBuiltIn = { error("the small model has no fallback") },
+                log = ::safeLog,
+                verifyStored = verifyStored,
+            ).load()
+        if (loaded.detector == null) return null
+        built = loaded
+        if (running != null) closeQuietly(running.detector)
+        oldClosed = running != null
+        current = null
+        return commit(loaded, SMALL_KEY, orientation, startNs, running, thermal = true)
+    }
+
+    /** Makes [loaded] the running model: [wanted] is what [loadedFor] remembers; counts a change of a running model. */
+    private fun commit(
+        loaded: LoadedModel,
+        wanted: String?,
+        orientation: ModelOrientation,
+        startNs: Long,
+        running: LoadedModel?,
+        thermal: Boolean,
+    ): ModelSelection {
         built = loaded
         val ms = (nowNs() - startNs) / TrackerConfig.NANOS_PER_MILLI
         current = loaded
         loadedFor = wanted
-        loadedBuiltInFor = if (loaded.source == ModelSource.BUILT_IN) orientation else null
+        loadedBuiltInFor = if (!thermal && loaded.source == ModelSource.BUILT_IN) orientation else null
         val isSwitch = running != null
         if (isSwitch) {
             switches++
             if (ms > switchMsMax) switchMsMax = ms
         }
-        return ModelSelection(loaded, orientation, ms, isSwitch)
+        return ModelSelection(loaded, orientation, ms, isSwitch, thermal)
     }
 
     @Suppress("TooGenericExceptionCaught")
@@ -248,5 +334,6 @@ internal class ModelSwitcher(
 
     private companion object {
         const val BUILT_IN_KEY_PREFIX = "builtin:"
+        const val SMALL_KEY = "thermal:small"
     }
 }

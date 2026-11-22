@@ -698,10 +698,20 @@ default 1.0) and `assocMissLogPerMin` (0..600, default 30), which change no trac
 (0..1, default 0.2; 0 = no floor on the gate's sigma) and `relockEarlyMaxHeadRatio` (0.1..3, default 0.6). There is no `displayLeadMs`
 (no prediction, §6.4).
 
-### 7.2 Thermal policy (M5)
+### 7.2 Thermal policy (M5; the model step-down is implemented in F7)
 If thermal status ≥ `MODERATE` or headroom forecast > 0.9: step down the analysis fps cap 60 → 30; then 416 → 320;
 step back up after 60 s below the threshold. Every step is logged and shown in the HUD.
 
+**Implemented (F7, "smaller model when hot"; the fps-cap step is not done):**
+- `core` `ThermalStepDown` (pure) reads each new `ThermalSampler` reading (every `thermalSampleIntervalMs`): NORMAL → HOT when
+  status ≥ `MODERATE` or headroom ≥ `thermalHotHeadroom` (0.9) held `thermalHotConfirmMs` (3 s); HOT → NORMAL when every known
+  value is cool (status ≤ `LIGHT`, headroom ≤ `thermalCoolHeadroom` 0.75) held `thermalCoolDownMs` (60 s). An in-between or unavailable
+  reading restarts the timer, so it never flaps, and an unreadable device never triggers HOT (fail closed).
+- HOT: `ModelSwitcher` loads the bundled square 320 model on the capture thread through the normal `SessionModelLoader` (crash marker,
+  blocked list) **before** closing the running detector, whatever the slots hold; a rotation keeps it. NORMAL: the slot model of
+  the current orientation loads again. If the 320 model does not load, the current model stays, the failure is logged and it is not retried until the next transition.
+- Visibility: HUD note `Hot: smaller model (320)` (`OverlayWarning.THERMAL_STEPPED_DOWN`, above only the `tap a person` hint), one
+  `thermal: HOT|NORMAL (status …, headroom …)` log line per transition, `summary.txt` keys `thermalState`, `thermalStepDowns`, `thermalHotMs`.
 ---
 
 ## 8. Model pipeline & licence

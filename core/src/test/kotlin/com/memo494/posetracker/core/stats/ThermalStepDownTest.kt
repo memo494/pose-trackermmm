@@ -198,7 +198,12 @@ class ThermalStepDownTest {
     fun customThresholds_areUsed() {
         val custom =
             ThermalStepDown(
-                TrackerConfig(thermalHotHeadroom = 0.6f, thermalCoolHeadroom = 0.4f, thermalHotConfirmMs = 1_000L, thermalCoolDownMs = 5_000L),
+                TrackerConfig(
+                    thermalHotHeadroom = 0.6f,
+                    thermalCoolHeadroom = 0.4f,
+                    thermalHotConfirmMs = 1_000L,
+                    thermalCoolDownMs = 5_000L,
+                ),
             )
 
         custom.update(NONE, 0.6f, 0)
@@ -206,5 +211,19 @@ class ThermalStepDownTest {
         custom.update(NONE, 0.4f, 2 * SEC)
         assertThat(custom.update(NONE, 0.4f, 7 * SEC)).isTrue()
         assertThat(custom.state).isEqualTo(ThermalStepDown.State.NORMAL)
+    }
+
+    @Test
+    fun transitionLine_namesTheNewStateTheStatusAndTheHeadroom() {
+        assertThat(ThermalStepDown.transitionLine(ThermalStepDown.State.HOT, "MODERATE", 0.934f))
+            .isEqualTo("thermal: HOT (status MODERATE, headroom 0.93), using the small model")
+        assertThat(ThermalStepDown.transitionLine(ThermalStepDown.State.NORMAL, "LIGHT", 0.5f))
+            .isEqualTo("thermal: NORMAL (status LIGHT, headroom 0.50), using the normal model again")
+    }
+
+    @Test
+    fun transitionLine_withoutAHeadroom_saysNotAvailable() {
+        assertThat(ThermalStepDown.transitionLine(ThermalStepDown.State.HOT, "SEVERE", Float.NaN))
+            .isEqualTo("thermal: HOT (status SEVERE, headroom n/a), using the small model")
     }
 }

@@ -33,6 +33,8 @@ private class TestDetector(
     }
 }
 
+private const val SMALL = 320
+
 class ModelSwitcherTest {
     private val bundledSha = "c".repeat(64)
 
@@ -53,6 +55,9 @@ class ModelSwitcherTest {
     private var builtInFailure: Throwable? = null
     private var fallbackFailure: Throwable? = null
     private var fallbackLoads = 0
+    private val smallSha = "e".repeat(64)
+    private var smallLoads = 0
+    private var smallFailure: Throwable? = null
     private val builtInOrientations = mutableListOf<ModelOrientation>()
     private val detectors = mutableListOf<TestDetector>()
     private val logs = mutableListOf<String>()
@@ -109,6 +114,17 @@ class ModelSwitcherTest {
                         newDetector("builtin", width, height)
                     }
                 BundledDetector(detector, "yolo26n-pose_${width}x$height.tflite", bundledSha)
+            },
+            smallBuiltInSha256 = { smallSha },
+            loadSmallBuiltIn = { guarded ->
+                now += loadNs
+                val detector =
+                    guarded {
+                        smallLoads++
+                        smallFailure?.let { throw it }
+                        newDetector("small", SMALL, SMALL)
+                    }
+                BundledDetector(detector, "yolo26n-pose_320.tflite", smallSha)
             },
             loadFallbackBuiltIn = {
                 now += loadNs
@@ -542,5 +558,229 @@ class ModelSwitcherTest {
         assertThat(detectors).hasSize(1)
         assertThat(detectors.single().closeCount).isEqualTo(1)
         assertThat(switcher.status()).isNull()
+    }
+
+    // ---- thermal step-down (F7) ----
+
+    @Test
+    fun hot_loadsTheSmallModel_insteadOfTheImportedOne_withTheMarkerNamingIt() {
+        choose(portrait = library(metaA))
+        switcher.select(ModelOrientation.PORTRAIT)
+        val imported = detectors.single()
+        guardWrites.clear()
+
+        switcher.setThermalHot(true)
+        val selection = switcher.select(ModelOrientation.PORTRAIT)!!
+
+        assertThat(selection.loaded.detector!!.inputWidth).isEqualTo(SMALL)
+        assertThat(selection.loaded.detector!!.inputHeight).isEqualTo(SMALL)
+        assertThat(selection.loaded.source).isEqualTo(ModelSource.BUILT_IN)
+        assertThat(selection.loaded.builtInFile).isEqualTo("yolo26n-pose_320.tflite")
+        assertThat(selection.isSwitch).isTrue()
+        assertThat(selection.logLine()).isEqualTo("model: built-in (thermal step-down) for portrait (switch 5ms)")
+        assertThat(imported.closeCount).isEqualTo(1)
+        assertThat(switcher.steppedDown).isTrue()
+        assertThat(guardWrites).containsExactly(ImportGuardState.Pending(ImportStage.LOAD, smallSha), ImportGuardState.Idle).inOrder()
+    }
+
+    @Test
+    fun hot_withBuiltInSlots_loadsTheSmallModelInsteadOfTheOrientationsBuiltInModel() {
+        val builtIn = switcher.select(ModelOrientation.LANDSCAPE)!!.loaded.detector as TestDetector
+
+        switcher.setThermalHot(true)
+        val selection = switcher.select(ModelOrientation.LANDSCAPE)!!
+
+        assertThat(selection.loaded.detector!!.inputWidth).isEqualTo(SMALL)
+        assertThat(builtIn.closeCount).isEqualTo(1)
+        assertThat(smallLoads).isEqualTo(1)
+    }
+
+    @Test
+    fun hot_atStart_loadsOnlyTheSmallModel() {
+        switcher.setThermalHot(true)
+
+        val selection = switcher.select(ModelOrientation.PORTRAIT)!!
+
+        assertThat(selection.loaded.detector!!.inputWidth).isEqualTo(SMALL)
+        assertThat(selection.isSwitch).isFalse()
+        assertThat(builtInLoads).isEqualTo(0)
+        assertThat(loadsImported).isEmpty()
+    }
+
+    @Test
+    fun hot_whileTheSmallModelRuns_changesNothing() {
+        switcher.select(ModelOrientation.PORTRAIT)
+        switcher.setThermalHot(true)
+        switcher.select(ModelOrientation.PORTRAIT)
+
+        assertThat(switcher.select(ModelOrientation.PORTRAIT)).isNull()
+
+        assertThat(smallLoads).isEqualTo(1)
+    }
+
+    @Test
+    fun rotationWhileHot_keepsTheSmallModel() {
+        choose(portrait = library(metaA), landscape = library(metaB))
+        switcher.select(ModelOrientation.PORTRAIT)
+        switcher.setThermalHot(true)
+        switcher.select(ModelOrientation.PORTRAIT)
+        val small = detectors.last()
+
+        assertThat(switcher.select(ModelOrientation.LANDSCAPE)).isNull()
+        assertThat(switcher.select(ModelOrientation.PORTRAIT)).isNull()
+
+        assertThat(small.closeCount).isEqualTo(0)
+        assertThat(smallLoads).isEqualTo(1)
+        assertThat(loadsImported).containsExactly("a.tflite")
+    }
+
+    @Test
+    fun backToNormal_loadsTheModelOfTheCurrentOrientationsSlot() {
+        choose(portrait = library(metaA), landscape = library(metaB))
+        switcher.select(ModelOrientation.PORTRAIT)
+        switcher.setThermalHot(true)
+        switcher.select(ModelOrientation.PORTRAIT)
+        val small = detectors.last()
+        switcher.select(ModelOrientation.LANDSCAPE) // rotated while hot
+
+        switcher.setThermalHot(false)
+        val selection = switcher.select(ModelOrientation.LANDSCAPE)!!
+
+        assertThat(small.closeCount).isEqualTo(1)
+        assertThat(selection.loaded.source).isEqualTo(ModelSource.IMPORTED)
+        assertThat(selection.loaded.detector!!.inputWidth).isEqualTo(832)
+        assertThat(switcher.steppedDown).isFalse()
+    }
+
+    @Test
+    fun backToNormal_withBuiltInSlots_loadsTheBuiltInModelOfTheOrientation() {
+        switcher.setThermalHot(true)
+        switcher.select(ModelOrientation.PORTRAIT)
+        switcher.setThermalHot(false)
+
+        val selection = switcher.select(ModelOrientation.LANDSCAPE)!!
+
+        assertThat(selection.loaded.detector!!.inputWidth).isEqualTo(960)
+        assertThat(selection.loaded.detector!!.inputHeight).isEqualTo(448)
+    }
+
+    @Test
+    fun smallModelThatFailsToLoad_keepsTheCurrentModel_andIsNotRetriedUntilTheNextTransition() {
+        choose(portrait = library(metaA))
+        switcher.select(ModelOrientation.PORTRAIT)
+        val imported = detectors.single()
+        smallFailure = IllegalStateException("no small model")
+
+        switcher.setThermalHot(true)
+        assertThat(switcher.select(ModelOrientation.PORTRAIT)).isNull()
+        assertThat(switcher.select(ModelOrientation.PORTRAIT)).isNull()
+        assertThat(switcher.select(ModelOrientation.PORTRAIT)).isNull()
+
+        assertThat(smallLoads).isEqualTo(1)
+        assertThat(imported.closeCount).isEqualTo(0)
+        assertThat(switcher.steppedDown).isFalse()
+        assertThat(logs.any { it.contains("small model") }).isTrue()
+
+        // the next transitions: back to normal, then hot again, tries once more
+        smallFailure = null
+        switcher.setThermalHot(false)
+        assertThat(switcher.select(ModelOrientation.PORTRAIT)).isNull()
+        switcher.setThermalHot(true)
+        val retry = switcher.select(ModelOrientation.PORTRAIT)!!
+
+        assertThat(smallLoads).isEqualTo(2)
+        assertThat(retry.loaded.detector!!.inputWidth).isEqualTo(SMALL)
+    }
+
+    @Test
+    fun smallModelThatFailsToLoad_stillFollowsTheSlotsOnRotation_withoutTryingAgain() {
+        choose(portrait = library(metaA), landscape = library(metaB))
+        switcher.select(ModelOrientation.PORTRAIT)
+        smallFailure = IllegalStateException("no small model")
+        switcher.setThermalHot(true)
+        switcher.select(ModelOrientation.PORTRAIT)
+
+        val selection = switcher.select(ModelOrientation.LANDSCAPE)!!
+
+        assertThat(selection.loaded.detector!!.inputWidth).isEqualTo(832)
+        assertThat(smallLoads).isEqualTo(1)
+    }
+
+    @Test
+    fun smallModelThatFailsAtStart_fallsBackToTheNormalChoice() {
+        smallFailure = IllegalStateException("no small model")
+        switcher.setThermalHot(true)
+
+        val selection = switcher.select(ModelOrientation.PORTRAIT)!!
+
+        assertThat(selection.loaded.detector!!.inputWidth).isEqualTo(448)
+        assertThat(smallLoads).isEqualTo(1)
+    }
+
+    @Test
+    fun smallModelThatCannotGetItsMarker_keepsTheCurrentModel() {
+        switcher.select(ModelOrientation.PORTRAIT)
+        val running = detectors.single()
+        guardStored = false
+
+        switcher.setThermalHot(true)
+
+        assertThat(switcher.select(ModelOrientation.PORTRAIT)).isNull()
+        assertThat(smallLoads).isEqualTo(0)
+        assertThat(running.closeCount).isEqualTo(0)
+    }
+
+    @Test
+    fun smallModelOnTheBlockedList_isNotLoaded_andTheCurrentModelStays() {
+        switcher.select(ModelOrientation.PORTRAIT)
+        val running = detectors.single()
+        blocked = setOf(smallSha)
+
+        switcher.setThermalHot(true)
+
+        assertThat(switcher.select(ModelOrientation.PORTRAIT)).isNull()
+        assertThat(smallLoads).isEqualTo(0)
+        assertThat(running.closeCount).isEqualTo(0)
+    }
+
+    @Test
+    fun smallModelThatThrowsAnError_isContained_andTheCurrentModelStays() {
+        switcher.select(ModelOrientation.PORTRAIT)
+        val running = detectors.single()
+        smallFailure = OutOfMemoryError("small")
+
+        switcher.setThermalHot(true)
+
+        assertThat(switcher.select(ModelOrientation.PORTRAIT)).isNull()
+        assertThat(running.closeCount).isEqualTo(0)
+    }
+
+    @Test
+    fun status_whileHot_describesTheSmallModelAndKeepsTheSlots() {
+        choose(portrait = library(metaA))
+        switcher.select(ModelOrientation.PORTRAIT)
+        switcher.setThermalHot(true)
+        switcher.select(ModelOrientation.PORTRAIT)
+
+        val status = switcher.status()!!
+
+        assertThat(status.inputWidth).isEqualTo(SMALL)
+        assertThat(status.source).isEqualTo(ModelSource.BUILT_IN)
+        assertThat(status.builtInFile).isEqualTo("yolo26n-pose_320.tflite")
+        assertThat(status.fallback).isNull()
+        assertThat(status.portrait).startsWith("a.tflite")
+    }
+
+    @Test
+    fun setThermalHot_withTheSameValue_doesNotForgetAFailure() {
+        switcher.select(ModelOrientation.PORTRAIT)
+        smallFailure = IllegalStateException("no small model")
+        switcher.setThermalHot(true)
+        switcher.select(ModelOrientation.PORTRAIT)
+
+        switcher.setThermalHot(true)
+        switcher.select(ModelOrientation.PORTRAIT)
+
+        assertThat(smallLoads).isEqualTo(1)
     }
 }

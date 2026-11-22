@@ -1,6 +1,7 @@
 package com.memo494.posetracker.core.stats
 
 import com.memo494.posetracker.core.TrackerConfig
+import java.util.Locale
 
 /**
  * The thermal step-down policy (ARCHITECTURE §7.2): decides from the sampled thermal readings whether the device is
@@ -95,7 +96,32 @@ class ThermalStepDown(
         return true
     }
 
-    private companion object {
+    companion object {
+        private const val HEADROOM_DECIMALS = 2
+
+        /**
+         * The one log line of a transition into [state], with the [statusName] (`ThermalSampler.status`) and the
+         * [headroom] (NaN = `n/a`) that caused it. Allocates; called on a transition only.
+         */
+        fun transitionLine(
+            state: State,
+            statusName: String,
+            headroom: Float,
+        ): String {
+            val headroomText =
+                if (headroom.isFinite()) {
+                    String.format(
+                        Locale.ROOT,
+                        "%.${HEADROOM_DECIMALS}f",
+                        headroom,
+                    )
+                } else {
+                    ThermalStatusText.NOT_AVAILABLE
+                }
+            val action = if (state == State.HOT) "using the small model" else "using the normal model again"
+            return "thermal: $state (status $statusName, headroom $headroomText), $action"
+        }
+
         /** No timer is running. A clock value is never this (monotonic nanoseconds do not go negative). */
         const val NONE = Long.MIN_VALUE
     }

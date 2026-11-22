@@ -23,6 +23,7 @@ import com.memo494.posetracker.core.modelimport.ModelOrientation
 import com.memo494.posetracker.core.modelpack.ModelEntry
 import com.memo494.posetracker.core.modelpack.ModelInfo
 import com.memo494.posetracker.core.stats.ThermalSampler
+import com.memo494.posetracker.core.stats.ThermalStepDown
 import com.memo494.posetracker.detector.PoseDetector
 import com.memo494.posetracker.detector.PoseDetectors
 import com.memo494.posetracker.diagnostics.CaptureStatsHolder
@@ -48,7 +49,7 @@ import java.util.concurrent.TimeUnit
  * - **capture** (`pose-capture` [HandlerThread], created in [start]): the `ImageReader` listener, the
  *   projection callback, the display listener and the HUD tick all run on it. These fields are created,
  *   used and closed on it only and need no lock: `pipeline` (also read on main for the lock handle, `@Volatile`),
- *   `thermalSampler`, `detector`, `imageReader`, `virtualDisplay`,
+ *   `thermalSampler`, `thermalStepDown`, `detector`, `imageReader`, `virtualDisplay`,
  *   `currentSize`, `contentSizeKnown`, `contentWidthPx`, `contentHeightPx`, `imageFrame`.
  * - **shared**: `captureThread` and `captureHandler` are written once by [start] on main and read by the
  *   teardown from any thread (`@Volatile`); `teardown` is thread-safe by itself.
@@ -111,6 +112,7 @@ internal class CaptureSession(
     // Capture thread only (see the class KDoc).
     private val imageFrame = ImageFrame()
     private var thermalSampler: ThermalSampler? = null
+    private var thermalStepDown: ThermalStepDown? = null
     private var detector: PoseDetector? = null
     private var modelSwitcher: ModelSwitcher? = null
     private var imageReader: ImageReader? = null
@@ -135,8 +137,16 @@ internal class CaptureSession(
                     if (activePipeline != null) {
                         activePipeline.onHudTick()
                         val thermal = thermalSampler
-                        thermal?.sample(clock.nowNs())
-                        CaptureStatsHolder.publish(overlayWindow.stateHolder.latest(), activePipeline, thermal)
+                        val nowNs = clock.nowNs()
+                        if (thermal != null && thermal.sample(nowNs)) onThermalSample(thermal, activePipeline, nowNs)
+                        CaptureStatsHolder.publish(
+                            overlayWindow.stateHolder.latest(),
+                            activePipeline,
+                            thermal,
+                            thermalStepDown,
+                            nowNs,
+                            modelSwitcher?.thermalSmallModel ?: "no",
+                        )
                     }
                 }
             }
@@ -291,6 +301,7 @@ internal class CaptureSession(
                 config.thermalSampleIntervalNs,
                 CaptureLog::log,
             )
+        thermalStepDown = ThermalStepDown(config)
         displayManager?.registerDisplayListener(displayListener, captureHandler)
         applyGeometry()
         captureHandler?.postDelayed(hudTick, hudIntervalMs)
@@ -325,6 +336,17 @@ internal class CaptureSession(
                 ->
                 PoseDetectors.fromAssets(context, config, bundledEntry(info.value, orientation), guarded)
             },
+            smallBuiltInSha256 = {
+                try {
+                    info.value.entryFor(TrackerConfig.MODEL_INPUT_SIZE_SMALL).sha256
+                } catch (e: Exception) {
+                    CaptureLog.log("the hash of the small model is unknown (model_info.json not readable or without it)", e)
+                    null
+                }
+            },
+            loadSmallBuiltIn = { guarded ->
+                PoseDetectors.fromAssets(context, config, info.value.entryFor(TrackerConfig.MODEL_INPUT_SIZE_SMALL), guarded)
+            },
             loadFallbackBuiltIn = {
                 PoseDetectors.fromAssets(context, config, info.value.entryFor(config.modelInputSize))
             },
@@ -344,6 +366,25 @@ internal class CaptureSession(
         val displayPx = displaySizePx()
         val size = CapturePlanner.plan(displayPx.x, displayPx.y, displayPx.x, displayPx.y, config.captureScale)?.size
         return if (size != null) ModelOrientation.of(size.widthImg, size.heightImg) else ModelOrientation.of(displayPx.x, displayPx.y)
+    }
+
+    /**
+     * Capture thread, once per new thermal reading (HUD tick): feeds the thermal step-down policy and, when its state
+     * changed, logs one line and lets the switcher load the small model (HOT) or the slot's model again (NORMAL).
+     * Allocates on a transition only.
+     */
+    private fun onThermalSample(
+        sampler: ThermalSampler,
+        activePipeline: FramePipeline,
+        nowNs: Long,
+    ) {
+        val policy = thermalStepDown ?: return
+        if (!policy.update(sampler.statusCode, sampler.headroom, nowNs)) return
+        CaptureLog.log(ThermalStepDown.transitionLine(policy.state, sampler.status, sampler.headroom), null)
+        modelSwitcher?.setThermalHot(policy.state == ThermalStepDown.State.HOT)
+        // No capture size yet (before the first geometry): applyGeometry's switchModelFor then picks the model, hot flag included.
+        val size = currentSize ?: return
+        switchModelFor(size, activePipeline)
     }
 
     private fun publishModelStatus(switcher: ModelSwitcher) {
@@ -381,6 +422,7 @@ internal class CaptureSession(
             loaded.source == ModelSource.IMPORTED,
             loaded.importedModelNotUsed,
             loaded.builtInFailed,
+            thermalStepDown = selection.thermal,
         )
     }
 

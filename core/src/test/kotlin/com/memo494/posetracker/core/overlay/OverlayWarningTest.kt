@@ -19,4 +19,9 @@ class OverlayWarningTest {
     fun theBuiltInModelFailedNote_doesNotHideTheDetections() {
         assertThat(OverlayWarning.BUILT_IN_MODEL_FAILED.hidesDetections).isFalse()
     }
+
+    @Test
+    fun theThermalStepDownNote_doesNotHideTheDetections() {
+        assertThat(OverlayWarning.THERMAL_STEPPED_DOWN.hidesDetections).isFalse()
+    }
 }

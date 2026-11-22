@@ -41,25 +41,37 @@ class ThermalSampler(
     var status: String = ThermalStatusText.NOT_AVAILABLE
         private set
 
+    /** The last status as the platform number, [ThermalReader.UNAVAILABLE] when unknown (for [ThermalStepDown]). */
+    var statusCode: Int = ThermalReader.UNAVAILABLE
+        private set
+
     /** The last headroom, a finite non-negative ratio; NaN when unknown. */
     var headroom: Float = Float.NaN
         private set
 
-    /** Reads the thermal state when at least [intervalNs] has passed since the last read (the first call always reads). */
-    fun sample(nowNs: Long) {
-        if (sampled && nowNs - lastSampleNs < intervalNs) return
+    /**
+     * Reads the thermal state when at least [intervalNs] has passed since the last read (the first call always reads).
+     * Returns `true` when a read happened (a failed read counts: the values are then unknown), `false` when the last
+     * reading is still current.
+     */
+    fun sample(nowNs: Long): Boolean {
+        if (sampled && nowNs - lastSampleNs < intervalNs) return false
         sampled = true
         lastSampleNs = nowNs
         try {
-            val newStatus = ThermalStatusText.of(reader.status())
+            val newCode = reader.status()
+            val newStatus = ThermalStatusText.of(newCode)
             val newHeadroom = reader.headroom()
             status = newStatus
+            statusCode = if (newStatus == ThermalStatusText.NOT_AVAILABLE) ThermalReader.UNAVAILABLE else newCode
             headroom = if (newHeadroom.isFinite() && newHeadroom >= 0f) newHeadroom else Float.NaN
         } catch (e: Throwable) {
             status = ThermalStatusText.NOT_AVAILABLE
+            statusCode = ThermalReader.UNAVAILABLE
             headroom = Float.NaN
             logFailure(e)
         }
+        return true
     }
 
     private fun logFailure(error: Throwable) {

@@ -12,11 +12,13 @@ import com.memo494.posetracker.core.TrackerConfig
  * @property displayName shown to the owner; a clean bare file name, see [sanitiseName].
  * @property sha256 SHA-256 of the copied file, 64 lowercase hex characters.
  * @property bytes size of the copied file, in bytes.
- * @property inputWidth width `W` of the model's input tensor `[1, 3, H, W]`, in pixels (Mdl space).
- * @property inputHeight height `H` of the model's input tensor `[1, 3, H, W]`, in pixels (Mdl space).
+ * @property inputWidth real width `W` of the model's input tensor (`[1, 3, H, W]` or `[1, H, W, 3]`), in pixels (Mdl space).
+ * @property inputHeight real height `H` of the model's input tensor, in pixels (Mdl space).
  * @property outputRows rows `N` of the model's output (`[1, N, 57]`, `[1, 56, N]` or `[1, N, 56]`), unitless.
  * @property outputLayout how the output is laid out; [PoseOutputLayout.END_TO_END] for every model imported before
  *   raw outputs were supported.
+ * @property inputLayout how the input tensor is laid out; [InputLayout.NCHW] for every model imported before NHWC
+ *   inputs were supported.
  */
 data class ImportedModelMeta(
     val displayName: String,
@@ -26,14 +28,18 @@ data class ImportedModelMeta(
     val inputHeight: Int,
     val outputRows: Int,
     val outputLayout: PoseOutputLayout = PoseOutputLayout.END_TO_END,
+    val inputLayout: InputLayout = InputLayout.NCHW,
 ) {
     /**
      * The versioned text form: [HEADER] then `name=`, `sha256=`, `bytes=`, `inputWidth=`, `inputHeight=`,
      * `outputRows=`, one per line in that order, joined by `\n` with no trailing newline. Version 2 for an
      * [PoseOutputLayout.END_TO_END] model (the text is what it always was); version 3 for a raw one, which adds a
-     * last `outputLayout=` line (`raw_channels_first` or `raw_channels_last`).
+     * last `outputLayout=` line (`raw_channels_first` or `raw_channels_last`); version 4 for an [InputLayout.NHWC]
+     * model, which has both a `outputLayout=` line (`end_to_end`, `raw_channels_first` or `raw_channels_last`) and a last
+     * `inputLayout=nhwc` line. Every NCHW model keeps the text of versions 2 and 3.
      */
     fun encode(): String {
+        if (inputLayout == InputLayout.NHWC) return encodeV4()
         val lines =
             listOf(
                 if (outputLayout.isRaw) HEADER_V3 else HEADER,
@@ -48,10 +54,30 @@ data class ImportedModelMeta(
         return all.joinToString(LINE_SEPARATOR.toString())
     }
 
+    private fun encodeV4(): String =
+        listOf(
+            HEADER_V4,
+            "$KEY_NAME$displayName",
+            "$KEY_SHA256$sha256",
+            "$KEY_BYTES$bytes",
+            "$KEY_INPUT_WIDTH$inputWidth",
+            "$KEY_INPUT_HEIGHT$inputHeight",
+            "$KEY_OUTPUT_ROWS$outputRows",
+            "$KEY_OUTPUT_LAYOUT${layoutTextV4(outputLayout)}",
+            "$KEY_INPUT_LAYOUT$LAYOUT_NHWC",
+        ).joinToString(LINE_SEPARATOR.toString())
+
     companion object {
         private const val HEADER = "posetracker-imported-model v2"
         private const val HEADER_V3 = "posetracker-imported-model v3"
+        private const val HEADER_V4 = "posetracker-imported-model v4"
         private const val KEY_OUTPUT_LAYOUT = "outputLayout="
+        private const val KEY_INPUT_LAYOUT = "inputLayout="
+        private const val LAYOUT_END_TO_END = "end_to_end"
+        private const val LAYOUT_NHWC = "nhwc"
+        private const val EXPECTED_LINES_V4 = 9
+        private const val LINE_OUTPUT_LAYOUT_V4 = 7
+        private const val LINE_INPUT_LAYOUT_V4 = 8
         private const val LAYOUT_RAW_FIRST = "raw_channels_first"
         private const val LAYOUT_RAW_LAST = "raw_channels_last"
         private const val EXPECTED_LINES_V3 = 8
@@ -78,8 +104,9 @@ data class ImportedModelMeta(
         private const val DECIMAL_DIGITS_MAX = 19
 
         /**
-         * Reads the text written by [encode] (version 2) or by the first release (version 1, one `inputSize=`
-         * line, which becomes both [inputWidth] and [inputHeight]). Strict: returns `null` for anything
+         * Reads the text written by [encode] (versions 2, 3 and 4; versions 1 to 3 are [InputLayout.NCHW]) or by the first
+         * release (version 1, one `inputSize=` line, which becomes both [inputWidth] and [inputHeight]). Version 4
+         * accepts only `inputLayout=nhwc` (an NCHW model is never written as version 4). Strict: returns `null` for anything
          * unexpected (a wrong or missing version line, a missing, extra, renamed or reordered line for that
          * version, `\r`, a trailing newline, a bad number or one not in canonical decimal form, a bad SHA-256,
          * a name [sanitiseName] would change, [bytes] outside 1..[TrackerConfig.MAX_IMPORT_BYTES_LIMIT],
@@ -99,6 +126,7 @@ data class ImportedModelMeta(
         ): ImportedModelMeta? {
             val lines = text.split(LINE_SEPARATOR)
             return when {
+                lines.size == EXPECTED_LINES_V4 && lines[0] == HEADER_V4 -> decodeV4(lines, config)
                 lines.size == EXPECTED_LINES_V3 && lines[0] == HEADER_V3 -> decodeV3(lines, config)
                 lines.size == EXPECTED_LINES && lines[0] == HEADER -> decodeV2(lines, config)
                 lines.size == EXPECTED_LINES_V1 && lines[0] == HEADER_V1 -> decodeV1(lines, config)
@@ -133,6 +161,28 @@ data class ImportedModelMeta(
             return build(lines, width, height, rows, layout, config)
         }
 
+        /** Version 4: version 2 plus `outputLayout=` (any of the three) and `inputLayout=nhwc`. */
+        private fun decodeV4(
+            lines: List<String>,
+            config: TrackerConfig,
+        ): ImportedModelMeta? {
+            val width = lines[LINE_INPUT_WIDTH].removeIfStarts(KEY_INPUT_WIDTH)?.let(::parseCanonical) ?: return null
+            val height = lines[LINE_INPUT_HEIGHT].removeIfStarts(KEY_INPUT_HEIGHT)?.let(::parseCanonical) ?: return null
+            val rows = lines[LINE_OUTPUT_ROWS].removeIfStarts(KEY_OUTPUT_ROWS)?.let(::parseCanonical) ?: return null
+            val outputLayout =
+                when (lines[LINE_OUTPUT_LAYOUT_V4].removeIfStarts(KEY_OUTPUT_LAYOUT)) {
+                    LAYOUT_END_TO_END -> PoseOutputLayout.END_TO_END
+                    LAYOUT_RAW_FIRST -> PoseOutputLayout.RAW_CHANNELS_FIRST
+                    LAYOUT_RAW_LAST -> PoseOutputLayout.RAW_CHANNELS_LAST
+                    else -> return null
+                }
+            if (lines[LINE_INPUT_LAYOUT_V4].removeIfStarts(KEY_INPUT_LAYOUT) != LAYOUT_NHWC) return null
+            return build(lines, width, height, rows, outputLayout, config, InputLayout.NHWC)
+        }
+
+        private fun layoutTextV4(layout: PoseOutputLayout): String =
+            if (layout == PoseOutputLayout.END_TO_END) LAYOUT_END_TO_END else layoutText(layout)
+
         private fun layoutText(layout: PoseOutputLayout): String =
             when (layout) {
                 PoseOutputLayout.RAW_CHANNELS_FIRST -> LAYOUT_RAW_FIRST
@@ -160,6 +210,7 @@ data class ImportedModelMeta(
             outputRows: Long,
             outputLayout: PoseOutputLayout,
             config: TrackerConfig,
+            inputLayout: InputLayout = InputLayout.NCHW,
         ): ImportedModelMeta? {
             val name = lines[LINE_NAME].removeIfStarts(KEY_NAME) ?: return null
             val sha256 = lines[LINE_SHA256].removeIfStarts(KEY_SHA256) ?: return null
@@ -174,7 +225,7 @@ data class ImportedModelMeta(
                     !ImportedModelRules.tooElongated(height.toInt(), width.toInt(), config) &&
                     outputRows in 1L..maxRows(outputLayout)
             if (!valid) return null
-            return ImportedModelMeta(name, sha256, bytes, width.toInt(), height.toInt(), outputRows.toInt(), outputLayout)
+            return ImportedModelMeta(name, sha256, bytes, width.toInt(), height.toInt(), outputRows.toInt(), outputLayout, inputLayout)
         }
 
         private fun maxRows(layout: PoseOutputLayout): Long =

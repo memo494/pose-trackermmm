@@ -30,9 +30,22 @@ internal object ControlModelMapper {
     /** The importer's [outcome] as pure data for the reducer. */
     fun summary(outcome: ImportOutcome): ImportSummary =
         when (outcome) {
-            is ImportOutcome.Accepted -> ImportSummary.Accepted(outcome.meta.displayName, inputText(outcome.meta), outcome.assignedSlot)
-            is ImportOutcome.Rejected -> ImportSummary.Rejected(reason(outcome.kind), outcome.details)
-            is ImportOutcome.Failed -> ImportSummary.Failed(failure(outcome.kind), outcome.message)
+            is ImportOutcome.Accepted -> {
+                ImportSummary.Accepted(
+                    outcome.meta.displayName,
+                    inputText(outcome.meta),
+                    outcome.assignedSlot,
+                    outcome.duplicate,
+                )
+            }
+
+            is ImportOutcome.Rejected -> {
+                ImportSummary.Rejected(reason(outcome.kind), outcome.details)
+            }
+
+            is ImportOutcome.Failed -> {
+                ImportSummary.Failed(failure(outcome.kind), outcome.message)
+            }
         }
 
     /** The input size of [meta] as the screens, the HUD and the diagnostics print it (`640` or `832x384`). */

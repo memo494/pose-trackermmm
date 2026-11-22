@@ -133,11 +133,13 @@ internal sealed interface ImportSummary {
     /**
      * The model [displayName] with input size [inputText] (see [ActiveModel.Imported]) is now in the library, and
      * [slot] is the orientation whose slot it was put into, or `null` when the owner has to pick it by hand.
+     * [duplicate] is `true` when the library already held this model (nothing was added, no slot was assigned).
      */
     data class Accepted(
         val displayName: String,
         val inputText: String,
         val slot: ModelOrientation? = null,
+        val duplicate: Boolean = false,
     ) : ImportSummary
 
     /** The file was refused for [reason]; [details] names the size, the runtime's message or the shapes found. */

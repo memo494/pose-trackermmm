@@ -267,10 +267,14 @@ private fun ImportResultText(result: ImportSummary) {
     when (result) {
         is ImportSummary.Accepted -> {
             val sentence =
-                when (result.slot) {
-                    ModelOrientation.PORTRAIT -> R.string.model_result_added_portrait
-                    ModelOrientation.LANDSCAPE -> R.string.model_result_added_landscape
-                    null -> R.string.model_result_added_library
+                if (result.duplicate) {
+                    R.string.model_result_already_in_library
+                } else {
+                    when (result.slot) {
+                        ModelOrientation.PORTRAIT -> R.string.model_result_added_portrait
+                        ModelOrientation.LANDSCAPE -> R.string.model_result_added_landscape
+                        null -> R.string.model_result_added_library
+                    }
                 }
             Text(stringResource(sentence), style = MaterialTheme.typography.bodyMedium)
         }

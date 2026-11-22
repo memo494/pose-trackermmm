@@ -90,4 +90,14 @@ class ControlImportResultReducerTest {
         assertThat(ControlModelMapper.summary(ImportOutcome.Accepted(meta, null)))
             .isEqualTo(ImportSummary.Accepted("b.tflite", "832x384", null))
     }
+
+    @Test
+    fun summary_carriesTheDuplicateFlag() {
+        val meta = ImportedModelMeta("b.tflite", shaB, 1000L, 832, 384, 300)
+
+        assertThat(ControlModelMapper.summary(ImportOutcome.Accepted(meta, null, duplicate = true, libraryCount = 2)))
+            .isEqualTo(ImportSummary.Accepted("b.tflite", "832x384", null, duplicate = true))
+        assertThat(ControlModelMapper.summary(ImportOutcome.Accepted(meta, null, duplicate = false, libraryCount = 2)))
+            .isEqualTo(ImportSummary.Accepted("b.tflite", "832x384", null, duplicate = false))
+    }
 }

@@ -47,6 +47,7 @@
     <string name="model_result_added_portrait">Added. Now used for Portrait.</string>
     <string name="model_result_added_landscape">Added. Now used for Landscape.</string>
     <string name="model_result_added_library">Added to the library. Pick it under Portrait or Landscape.</string>
+    <string name="model_result_already_in_library">Already in the library. Pick it under Portrait or Landscape.</string>
     <string name="model_result_failed">The file could not be imported. Details: %1$s</string>
     <string name="model_result_library_full">The model library is full. Delete a model, then import again.</string>
     <string name="model_result_busy">Another import is still running. Wait until it has finished.</string>

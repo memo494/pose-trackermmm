@@ -12,7 +12,10 @@ import android.os.IBinder
 import androidx.core.app.ServiceCompat
 import androidx.core.content.IntentCompat
 import com.memo494.posetracker.core.TrackerConfig
+import com.memo494.posetracker.core.tuning.TuningOverrides
+import com.memo494.posetracker.diagnostics.AppLog
 import com.memo494.posetracker.diagnostics.CaptureStatsHolder
+import com.memo494.posetracker.tuning.TuningSession
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -93,12 +96,30 @@ class CaptureService : Service() {
             return
         }
         // The switch value travels in the Intent: the service must not read preferences on the main thread.
-        val config = TrackerConfig(debugMarks = intent.getBooleanExtra(EXTRA_DEBUG_MARKS, TrackerConfig.DEFAULT_DEBUG_MARKS))
-        CaptureStatsHolder.debugMarks = config.debugMarks
+        val config = sessionConfig(intent)
         val newSession = CaptureSession(this, projection, config, ::onSessionFinished)
         session = newSession
         _running.value = true
         newSession.start()
+    }
+
+    /**
+     * The config of this session: the defaults and the debug-marks switch, then the tuning sheet's overrides that travel
+     * in the Intent (a missing or unreadable extra is no override). Remembered for `config.txt` and `summary.txt`.
+     */
+    private fun sessionConfig(intent: Intent): TrackerConfig {
+        val debugMarks = intent.getBooleanExtra(EXTRA_DEBUG_MARKS, TrackerConfig.DEFAULT_DEBUG_MARKS)
+        val overrides = TuningSession.overridesOf(intent.getStringExtra(EXTRA_TUNING))
+        val result = overrides.applyTo(TrackerConfig(debugMarks = debugMarks))
+        CaptureStatsHolder.setSession(result.config, result.applied)
+        if (overrides.count > 0) AppLog.log("tuning: ${result.applied} override(s) applied: ${overrides.summaryText()}", null)
+        if (result.skipped.isNotEmpty()) {
+            AppLog.log(
+                "tuning: skipped (the config refused them): ${result.skipped.joinToString { it.id }}",
+                null,
+            )
+        }
+        return result.config
     }
 
     /** The projection for the consent result in [intent], or `null` (logged) when it cannot be created. */
@@ -132,6 +153,7 @@ class CaptureService : Service() {
         private const val EXTRA_RESULT_CODE = "com.memo494.posetracker.extra.RESULT_CODE"
         private const val EXTRA_DATA = "com.memo494.posetracker.extra.DATA"
         private const val EXTRA_DEBUG_MARKS = "com.memo494.posetracker.extra.DEBUG_MARKS"
+        private const val EXTRA_TUNING = "com.memo494.posetracker.extra.TUNING"
 
         private val _running = MutableStateFlow(false)
 
@@ -150,19 +172,22 @@ class CaptureService : Service() {
         /**
          * Intent that starts a capture session with the consent result of `createScreenCaptureIntent`
          * ([resultCode] and [data] of the activity result). Send it with `startForegroundService`.
-         * [debugMarks] is the control screen's switch for this session (a missing extra means `false`).
+         * [debugMarks] is the control screen's switch for this session (a missing extra means `false`);
+         * [tuning] is the tuning sheet's overrides for it (a missing extra means none).
          */
         fun startIntent(
             context: Context,
             resultCode: Int,
             data: Intent,
             debugMarks: Boolean = TrackerConfig.DEFAULT_DEBUG_MARKS,
+            tuning: TuningOverrides = TuningOverrides.NONE,
         ): Intent =
             Intent(context, CaptureService::class.java).apply {
                 action = ACTION_START
                 putExtra(EXTRA_RESULT_CODE, resultCode)
                 putExtra(EXTRA_DATA, data)
                 putExtra(EXTRA_DEBUG_MARKS, debugMarks)
+                putExtra(EXTRA_TUNING, tuning.encode())
             }
 
         /** Intent that stops the running capture session (the notification's Stop action). */

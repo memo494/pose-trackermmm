@@ -37,6 +37,7 @@ import com.memo494.posetracker.control.ImportResults
 import com.memo494.posetracker.control.ImportSummary
 import com.memo494.posetracker.core.TrackerConfig
 import com.memo494.posetracker.core.modelimport.ModelOrientation
+import com.memo494.posetracker.core.tuning.TuningOverrides
 import com.memo494.posetracker.diagnostics.AppLog
 import com.memo494.posetracker.diagnostics.CrashNotice
 import com.memo494.posetracker.diagnostics.CrashStore
@@ -51,6 +52,7 @@ import com.memo494.posetracker.modelimport.ModelImporter
 import com.memo494.posetracker.modelimport.ModelLibraryStore
 import com.memo494.posetracker.modelimport.ModelStatus
 import com.memo494.posetracker.modelimport.ModelStatusHolder
+import com.memo494.posetracker.tuning.TuningStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -118,6 +120,9 @@ class MainActivity : ComponentActivity() {
                     onDeleteModelClick = { dispatch(ControlEvent.DeleteModelClicked(it)) },
                     onSlotPick = { orientation, sha256 -> dispatch(ControlEvent.SlotPicked(orientation, sha256)) },
                     onDebugMarksChange = { dispatch(ControlEvent.DebugMarksToggled(it)) },
+                    onTuningChange = { key, value -> dispatch(ControlEvent.TuningChanged(key, value)) },
+                    onTuningCommit = { dispatch(ControlEvent.TuningCommitted) },
+                    onTuningReset = { dispatch(ControlEvent.TuningResetClicked) },
                     crashContent = {
                         CrashNotice(
                             state = diagnosticsState.value,
@@ -158,6 +163,7 @@ class MainActivity : ComponentActivity() {
         }
         showCrashNoticeIfAny()
         loadDebugMarks()
+        loadTuning()
     }
 
     override fun onResume() {
@@ -179,7 +185,7 @@ class MainActivity : ComponentActivity() {
             ControlEffect.OPEN_OVERLAY_SETTINGS -> openOverlaySettings()
             ControlEffect.REQUEST_NOTIFICATION_PERMISSION -> requestNotificationPermission()
             ControlEffect.LAUNCH_CONSENT -> launchConsent()
-            ControlEffect.START_SERVICE -> startCapture(consentResult, step.debugMarks == true)
+            ControlEffect.START_SERVICE -> startCapture(consentResult, step.debugMarks == true, step.tuning ?: TuningOverrides.NONE)
             ControlEffect.STOP_SERVICE -> stopCapture()
             ControlEffect.OPEN_MODEL_PICKER -> openModelPicker()
             ControlEffect.RUN_IMPORT -> runImport(step.importUri)
@@ -189,6 +195,7 @@ class MainActivity : ComponentActivity() {
             ControlEffect.SET_SLOT -> setSlot(step.slotOrientation, step.modelSha)
             ControlEffect.LOAD_MODEL_STATE -> loadModelState()
             ControlEffect.PERSIST_DEBUG_MARKS -> saveDebugMarks(step.debugMarks == true)
+            ControlEffect.PERSIST_TUNING -> saveTuning(step.tuning ?: TuningOverrides.NONE)
             null -> Unit
         }
     }
@@ -260,6 +267,7 @@ class MainActivity : ComponentActivity() {
     private fun startCapture(
         consentResult: ActivityResult?,
         debugMarks: Boolean,
+        tuning: TuningOverrides,
     ) {
         val data = consentResult?.data
         if (consentResult == null || data == null) {
@@ -268,7 +276,7 @@ class MainActivity : ComponentActivity() {
             return
         }
         try {
-            ContextCompat.startForegroundService(this, CaptureService.startIntent(this, consentResult.resultCode, data, debugMarks))
+            ContextCompat.startForegroundService(this, CaptureService.startIntent(this, consentResult.resultCode, data, debugMarks, tuning))
         } catch (e: Exception) {
             CaptureLog.log("starting the capture service failed", e)
             dispatch(ControlEvent.ConsentResult(false))
@@ -452,6 +460,17 @@ class MainActivity : ComponentActivity() {
             if (saved != null) dispatch(ControlEvent.DebugMarksLoaded(saved))
         }
     }
+
+    /** Reads the saved tuning sheet off the main thread, after any save still being written; the store never throws and logs an unreadable file itself. */
+    private fun loadTuning() {
+        lifecycleScope.launch {
+            val saved = withContext(Dispatchers.IO) { TuningStore(applicationContext).read() }
+            dispatch(ControlEvent.TuningLoaded(saved))
+        }
+    }
+
+    /** Saves the tuning sheet in the background (app-wide scope, in the order asked, see [TuningStore.saveInBackground]). */
+    private fun saveTuning(overrides: TuningOverrides) = TuningStore.saveInBackground(applicationContext, overrides)
 
     /** Saves the "Debug marks" switch off the main thread; a failed write is logged and the switch still works this run. */
     private fun saveDebugMarks(enabled: Boolean) {

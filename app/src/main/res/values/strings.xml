@@ -25,6 +25,18 @@
     <string name="marks_debug_label">Debug marks (box and body points)</string>
     <string name="marks_debug_note">Used from the next Start. Off: only a ring on each head and corner marks, which keep the detection steady.</string>
 
+    <!-- Tuning sheet of the control screen (ControlScreen, TuningSheetMapper; slider names come from TuningKey). -->
+    <string name="tuning_title">Tuning</string>
+    <string name="tuning_note">Applies on the next Start.</string>
+    <string name="tuning_reset">Reset to defaults</string>
+    <string name="tuning_group_detection">Detection</string>
+    <string name="tuning_group_smoothing">Smoothing</string>
+    <string name="tuning_group_tracking">Tracking</string>
+    <string name="tuning_group_lock">Lock</string>
+    <string name="tuning_group_lead">Ring lead</string>
+    <string name="tuning_lead_caption">Stronger lead = less lag on moving heads, a little overshoot when they stop.</string>
+    <string name="tuning_lock_warning">Higher distance / lower margin = more risk of the ring going to a wrong person.</string>
+
     <!-- Model block of the control screen (ControlScreen, ControlModelMapper). -->
     <string name="model_title">Model</string>
     <string name="model_now">In this orientation: %1$s</string>

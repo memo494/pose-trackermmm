@@ -696,8 +696,8 @@ data class TrackerConfig(
         require(relockMaxDistance in MIN_RELOCK_MAX_DISTANCE..MAX_RELOCK_MAX_DISTANCE) {
             "relockMaxDistance $relockMaxDistance outside [$MIN_RELOCK_MAX_DISTANCE, $MAX_RELOCK_MAX_DISTANCE]"
         }
-        require(relockMinMargin in 0f..MAX_RELOCK_MIN_MARGIN) {
-            "relockMinMargin $relockMinMargin outside [0, $MAX_RELOCK_MIN_MARGIN]"
+        require(relockMinMargin in MIN_RELOCK_MIN_MARGIN..MAX_RELOCK_MIN_MARGIN) {
+            "relockMinMargin $relockMinMargin outside [$MIN_RELOCK_MIN_MARGIN, $MAX_RELOCK_MIN_MARGIN]"
         }
         require(relockMinSamplePixels in MIN_RELOCK_MIN_SAMPLE_PIXELS..MAX_RELOCK_MIN_SAMPLE_PIXELS) {
             "relockMinSamplePixels $relockMinSamplePixels outside [$MIN_RELOCK_MIN_SAMPLE_PIXELS, $MAX_RELOCK_MIN_SAMPLE_PIXELS]"
@@ -776,6 +776,69 @@ data class TrackerConfig(
         get() = hudRateHz + HUD_IDLE_FPS_MARGIN
 
     companion object {
+        /** Highest [relockMaxDistance] the tuning sheet offers (the config accepts up to [MAX_RELOCK_MAX_DISTANCE]): a safety number. */
+        const val TUNING_MAX_RELOCK_MAX_DISTANCE = 0.6f
+
+        /** Lowest [relockMinMargin] the tuning sheet offers (the config accepts down to [MIN_RELOCK_MIN_MARGIN]): a safety number. */
+        const val TUNING_MIN_RELOCK_MIN_MARGIN = 0.05f
+
+        /** Lowest [smoothMinCutoffHz] the tuning sheet offers, in hertz. */
+        const val TUNING_MIN_SMOOTH_MIN_CUTOFF_HZ = 0.05f
+
+        /** Highest [smoothMinCutoffHz] the tuning sheet offers, in hertz. */
+        const val TUNING_MAX_SMOOTH_MIN_CUTOFF_HZ = 5f
+
+        /** Lowest [smoothBeta] the tuning sheet offers. */
+        const val TUNING_MIN_SMOOTH_BETA = 0f
+
+        /** Highest [smoothBeta] the tuning sheet offers. */
+        const val TUNING_MAX_SMOOTH_BETA = 20f
+
+        /** Lowest [trackMaxLostMs] the tuning sheet offers, in milliseconds. */
+        const val TUNING_MIN_TRACK_MAX_LOST_MS = 100f
+
+        /** Highest [trackMaxLostMs] the tuning sheet offers, in milliseconds. */
+        const val TUNING_MAX_TRACK_MAX_LOST_MS = 3000f
+
+        /** Longest time, in milliseconds, a read of the tuning file waits for a save that is still being written. */
+        const val TUNING_SAVE_WAIT_MS = 2000L
+
+        /** Slider step of the tuning sheet for [scoreThreshold], unitless. */
+        const val TUNING_STEP_SCORE = 0.01f
+
+        /** Slider step of the tuning sheet for [smoothMinCutoffHz], in hertz. */
+        const val TUNING_STEP_CUTOFF_HZ = 0.05f
+
+        /** Slider step of the tuning sheet for [smoothBeta], unitless. */
+        const val TUNING_STEP_BETA = 0.5f
+
+        /** Slider step of the tuning sheet for [trackMaxLostMs], in milliseconds. */
+        const val TUNING_STEP_LOST_MS = 50f
+
+        /** Slider step of the tuning sheet for [trackMatchMaxCost] and [trackLowMatchMaxCost], unitless. */
+        const val TUNING_STEP_COST = 0.05f
+
+        /** Slider step of the tuning sheet for [relockMaxDistance] and [relockMinMargin], unitless. */
+        const val TUNING_STEP_RELOCK = 0.01f
+
+        /** Slider step of the tuning sheet for [displayLeadMaxMs], in milliseconds. */
+        const val TUNING_STEP_LEAD_MS = 5f
+
+        /** Slider step of the tuning sheet for [displayLeadMaxRatio], unitless. */
+        const val TUNING_STEP_LEAD_RATIO = 0.01f
+
+        /** Slider step of the tuning sheet for [displayLeadSpeedLowHps], in track heights per second. */
+        const val TUNING_STEP_LEAD_SPEED = 0.05f
+
+        /** Lowest value of an on/off slider of the tuning sheet: off. */
+        const val TUNING_SWITCH_OFF = 0f
+
+        /** Highest value of an on/off slider of the tuning sheet: on. */
+        const val TUNING_SWITCH_ON = 1f
+
+        /** Slider step of the tuning sheet for [relockJudgeFrames], in frames. */
+        const val TUNING_STEP_FRAMES = 1f
+
         /** Default [scoreThreshold]: unitless confidence. */
         const val DEFAULT_SCORE_THRESHOLD = 0.15f
 
@@ -1513,6 +1576,9 @@ data class TrackerConfig(
 
         /** Default [relockMinMargin], unitless; a guess like [DEFAULT_RELOCK_MAX_DISTANCE]. */
         const val DEFAULT_RELOCK_MIN_MARGIN = 0.10f
+
+        /** Lowest accepted [relockMinMargin]: 0 = no margin required. */
+        const val MIN_RELOCK_MIN_MARGIN = 0f
 
         /** Highest accepted [relockMinMargin]. */
         const val MAX_RELOCK_MIN_MARGIN = 1f

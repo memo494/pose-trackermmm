@@ -84,6 +84,22 @@ class AutoSlotTest {
     }
 
     @Test
+    fun everyAssignment_fitsItsSlot() {
+        val models = listOf(tall, wide, square, meta('d', 384, 832), meta('e', 832, 384), meta('f', 320, 320))
+        val slotChoices = listOf(SlotChoice.BuiltIn) + models.map { slot(it) }
+        for (newModel in models) {
+            for (portrait in slotChoices) {
+                for (landscape in slotChoices) {
+                    val library = ModelLibrary.of(models.filter { it != newModel })
+                    val target = autoSlotFor(newModel, OrientationSlots(portrait, landscape), library) ?: continue
+
+                    assertThat(fitsSlot(newModel, target)).isTrue()
+                }
+            }
+        }
+    }
+
+    @Test
     fun onlyTheMatchingSlotIsLookedAt() {
         val slots = OrientationSlots(portrait = slot(tall), landscape = SlotChoice.BuiltIn)
 

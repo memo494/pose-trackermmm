@@ -106,6 +106,40 @@ class ControlLibraryReducerTest {
         assertThat(blocked.state).isEqualTo(withBlocked)
     }
 
+    @Test
+    fun slotPicked_aWideModelForPortrait_isRefusedWithoutAnEffect() {
+        val wide = itemB.copy(fitsPortrait = false)
+        val state = loaded.copy(library = listOf(itemA, wide), landscapeSha = null)
+
+        val step = reduce(state, ControlEvent.SlotPicked(ModelOrientation.PORTRAIT, shaB))
+
+        assertThat(step.effect).isNull()
+        assertThat(step.state).isEqualTo(state)
+    }
+
+    @Test
+    fun slotPicked_aWideModelForLandscape_isStored() {
+        val wide = itemB.copy(fitsPortrait = false)
+        val state = loaded.copy(library = listOf(itemA, wide), landscapeSha = null)
+
+        val step = reduce(state, ControlEvent.SlotPicked(ModelOrientation.LANDSCAPE, shaB))
+
+        assertThat(step.effect).isEqualTo(ControlEffect.SET_SLOT)
+        assertThat(step.state.landscapeSha).isEqualTo(shaB)
+        assertThat(step.slotOrientation).isEqualTo(ModelOrientation.LANDSCAPE)
+    }
+
+    @Test
+    fun slotPicked_aTallModelForLandscape_isRefused() {
+        val tall = itemA.copy(inputText = "448x960", fitsLandscape = false)
+        val state = loaded.copy(library = listOf(tall, itemB))
+
+        val step = reduce(state, ControlEvent.SlotPicked(ModelOrientation.LANDSCAPE, shaA))
+
+        assertThat(step.effect).isNull()
+        assertThat(step.state).isEqualTo(state)
+    }
+
     // ---- import into a full library ----
 
     @Test
@@ -149,6 +183,18 @@ class ControlLibraryReducerTest {
         assertThat(state.portraitSha).isEqualTo(shaA)
         assertThat(state.landscapeSha).isNull()
         assertThat(state.libraryFull).isTrue()
+    }
+
+    @Test
+    fun modelStateLoaded_carriesTheOtherSlotsNotice_andUseBuiltInClearsIt() {
+        val other = ModelNotice(ModelNoticeKind.OTHER_SLOT_WRONG_SHAPE, "Landscape: t.tflite (tall) is not used")
+        val event = ControlEvent.ModelStateLoaded(ActiveModel.BuiltIn, null, library = listOf(itemA), otherSlotNotice = other)
+
+        val state = reduce(loaded, event).state
+
+        assertThat(state.otherSlotNotice).isEqualTo(other)
+        assertThat(reduce(state, ControlEvent.UseBuiltInClicked).state.otherSlotNotice).isNull()
+        assertThat(reduce(state, event.copy(otherSlotNotice = null)).state.otherSlotNotice).isNull()
     }
 
     @Test

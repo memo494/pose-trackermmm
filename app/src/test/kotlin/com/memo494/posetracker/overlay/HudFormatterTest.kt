@@ -467,6 +467,15 @@ class HudFormatterTest {
     }
 
     @Test
+    fun warning_aModelOfTheWrongShape_hasItsOwnShortNote() {
+        val state = sample.copy(warning = OverlayWarning.MODEL_WRONG_SHAPE)
+
+        assertThat(warning(state)).isEqualTo("Model wrong shape: built-in runs")
+        assertThat(warning(sample.copy(dotsVisible = false, warning = OverlayWarning.MODEL_WRONG_SHAPE)))
+            .isEqualTo("Content not visible: dots hidden")
+    }
+
+    @Test
     fun warning_namesTheThermalStepDown() {
         val state = sample.copy(warning = OverlayWarning.THERMAL_STEPPED_DOWN)
 

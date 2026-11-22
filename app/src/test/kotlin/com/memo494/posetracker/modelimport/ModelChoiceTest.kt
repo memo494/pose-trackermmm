@@ -165,4 +165,20 @@ class ModelChoiceTest {
             }
         }
     }
+
+    @Test
+    fun wrongShape_winsOverEveryGuardAndFileCheck_andNamesTheRefusedModel() {
+        val wide = ImportedModelMeta("wide.tflite", "b".repeat(64), 1_000L, 960, 448, 300)
+        var asked = 0
+        for (guard in listOf(idle, pendingProbe, pendingLoad, trippedProbe, trippedLoad)) {
+            for (fileExists in listOf(true, false)) {
+                val state = StoredModelState(wide, fileExists, guard, wrongShape = true)
+
+                val choice = ModelChoice.resolve(state) { asked++ >= 0 }
+
+                assertThat(choice).isEqualTo(ModelChoice.BuiltIn(BuiltInReason.WRONG_SHAPE, refused = wide))
+            }
+        }
+        assertThat(asked).isEqualTo(0)
+    }
 }

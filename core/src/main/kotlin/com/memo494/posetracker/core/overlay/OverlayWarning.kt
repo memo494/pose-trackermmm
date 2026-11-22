@@ -31,6 +31,13 @@ enum class OverlayWarning(
     IMPORTED_MODEL_NOT_USED(false),
 
     /**
+     * The slot of the orientation holds a model whose input shape does not fit it (`fitsSlot`), so this session runs
+     * the built-in model of the orientation. A more precise form of [IMPORTED_MODEL_NOT_USED] with its own short note;
+     * detection works, so the dots stay visible.
+     */
+    MODEL_WRONG_SHAPE(false),
+
+    /**
      * The device is hot, so the small built-in model (320) runs instead of the chosen one (thermal step-down,
      * ARCHITECTURE §7.2). Detection works, so the dots stay visible; this is a note only, the lowest of the warnings.
      */

@@ -229,6 +229,51 @@ class ModelLibraryStoreTest {
     }
 
     @Test
+    fun setSlot_aModelThatDoesNotFitTheOrientation_isRefusedAndSlotsTxtIsUnchanged() {
+        val library = newLibrary()
+        add(library, metaB, bytesB)
+        val tall = meta("tall.tflite", bytesC, width = 384, height = 832)
+        add(library, tall, bytesC)
+        library.setSlot(ModelOrientation.PORTRAIT, null)
+        library.setSlot(ModelOrientation.LANDSCAPE, null)
+        val before = File(directory, "slots.txt").readText()
+
+        // metaB is wide (832x384): Landscape only; the tall model is Portrait only.
+        assertThat(library.setSlot(ModelOrientation.PORTRAIT, shaB)).isFalse()
+        assertThat(library.setSlot(ModelOrientation.LANDSCAPE, tall.sha256)).isFalse()
+
+        assertThat(File(directory, "slots.txt").readText()).isEqualTo(before)
+        assertThat(library.setSlot(ModelOrientation.LANDSCAPE, shaB)).isTrue()
+        assertThat(library.setSlot(ModelOrientation.PORTRAIT, tall.sha256)).isTrue()
+    }
+
+    @Test
+    fun setSlot_aSquareModel_fitsBothOrientations() {
+        val library = newLibrary()
+        add(library, metaA, bytesA)
+
+        assertThat(library.setSlot(ModelOrientation.PORTRAIT, shaA)).isTrue()
+        assertThat(library.setSlot(ModelOrientation.LANDSCAPE, shaA)).isTrue()
+    }
+
+    @Test
+    fun viewFor_aSlotHoldingAModelOfTheWrongShape_isMarkedAndResolvesToBuiltInWrongShape() {
+        val library = newLibrary()
+        add(library, metaB, bytesB)
+        File(directory, "slots.txt").writeText(OrientationSlots(SlotChoice.Library(shaB), SlotChoice.Library(shaB)).encode())
+
+        val state = library.state()
+
+        assertThat(state.viewFor(ModelOrientation.PORTRAIT).wrongShape).isTrue()
+        assertThat(state.viewFor(ModelOrientation.LANDSCAPE).wrongShape).isFalse()
+        assertThat(state.slotsRefused()).containsExactly(ModelOrientation.PORTRAIT)
+        assertThat(ModelChoice.resolve(state.viewFor(ModelOrientation.PORTRAIT)))
+            .isEqualTo(ModelChoice.BuiltIn(BuiltInReason.WRONG_SHAPE, refused = metaB))
+        // The stored choice is never rewritten by a read.
+        assertThat(state.slots).isEqualTo(OrientationSlots(SlotChoice.Library(shaB), SlotChoice.Library(shaB)))
+    }
+
+    @Test
     fun setSlot_aFailedWrite_keepsTheOldChoice() {
         val library = newLibrary()
         add(library, metaA, bytesA)
@@ -497,6 +542,26 @@ class ModelLibraryStoreTest {
         assertThat(state.slots).isEqualTo(OrientationSlots(SlotChoice.Library(shaA), SlotChoice.Library(shaA)))
         assertThat(filesIn(directory)).containsExactly(shaA.take(16), "slots.txt")
         assertThat(newLibrary().modelFileFor(metaA).readBytes()).isEqualTo(bytesA)
+    }
+
+    @Test
+    fun migration_aWideSingleModel_goesIntoLandscapeOnly() {
+        storeLegacyModel(metaB, bytesB)
+
+        val state = newLibrary().state()
+
+        assertThat(state.entries.map { it.meta }).containsExactly(metaB)
+        assertThat(state.slots).isEqualTo(OrientationSlots(SlotChoice.BuiltIn, SlotChoice.Library(shaB)))
+    }
+
+    @Test
+    fun migration_aTallSingleModel_goesIntoPortraitOnly() {
+        val tall = meta("tall.tflite", bytesC, width = 384, height = 832)
+        storeLegacyModel(tall, bytesC)
+
+        val state = newLibrary().state()
+
+        assertThat(state.slots).isEqualTo(OrientationSlots(SlotChoice.Library(tall.sha256), SlotChoice.BuiltIn))
     }
 
     @Test

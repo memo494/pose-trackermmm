@@ -22,12 +22,16 @@ import java.util.concurrent.atomic.AtomicBoolean
  * @property guard the crash marker, with the app-start step already applied (a stale `Pending` is `Tripped`).
  * @property anyFileStored whether any stored model file exists, with or without a [meta] (an orphan left by a
  *   process death); the screen then offers **Use built-in model**, which removes it. Defaults to [fileExists].
+ * @property wrongShape whether [meta] is the model of a slot whose orientation it does not fit
+ *   (`fitsSlot`: a wide model in Portrait, a tall one in Landscape); it is then never loaded
+ *   ([BuiltInReason.WRONG_SHAPE]).
  */
 data class StoredModelState(
     val meta: ImportedModelMeta?,
     val fileExists: Boolean,
     val guard: ImportGuardState,
     val anyFileStored: Boolean = fileExists,
+    val wrongShape: Boolean = false,
 )
 
 /** The one string value that holds the encoded [ImportGuardState]; the Android shell is [SharedPreferences]. */

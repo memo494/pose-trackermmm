@@ -48,6 +48,8 @@
     <string name="model_library_title">Imported models</string>
     <string name="model_library_empty">No imported models yet. Import one to choose it for portrait or landscape.</string>
     <string name="model_library_item">%1$s (%2$s)</string>
+    <string name="model_slot_item_wide_only">%1$s (%2$s), wide model — Landscape only</string>
+    <string name="model_slot_item_tall_only">%1$s (%2$s), tall model — Portrait only</string>
     <string name="model_library_item_blocked">%1$s (%2$s), switched off after a crash; delete it, then import again</string>
     <string name="model_delete">Delete</string>
     <string name="model_slot_portrait">عمودي / Portrait</string>
@@ -91,6 +93,8 @@
     <string name="model_notice_guard_not_stored">The imported model was not used because its safety marker could not be saved. The built-in model ran instead.</string>
     <string name="model_notice_load_failed">The imported model could not be loaded, so the built-in model ran instead.</string>
     <string name="model_notice_blocked_unreadable">The list of switched-off models could not be read, so every imported model is treated as switched off. Delete a model and import it again to use it.</string>
+    <string name="model_notice_wrong_shape">The model chosen for this orientation has the wrong shape (a wide model is for Landscape only, a tall one for Portrait only), so the built-in model is used. Choose another model for this slot.</string>
+    <string name="model_notice_other_slot_wrong_shape">The model chosen for the other orientation has the wrong shape, so the built-in model will run when you turn the phone. Choose another model for that slot.</string>
     <string name="model_notice_built_in_failed">The built-in model could not run for this orientation, so a smaller square fallback model ran instead.</string>
     <string name="model_notice_built_in_blocked">The built-in model stopped the app while loading earlier, so it is switched off and a smaller square fallback model runs instead. Remove all imported models to try it again.</string>
     <string name="model_notice_state_unreadable">What is stored about the imported model could not be read, so the built-in model ran instead.</string>

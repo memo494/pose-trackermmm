@@ -1,6 +1,7 @@
 package com.memo494.posetracker.modelimport
 
 import com.memo494.posetracker.core.modelimport.ImportedModelMeta
+import com.memo494.posetracker.core.modelimport.ModelOrientation
 import java.util.concurrent.atomic.AtomicReference
 
 /** Which model a capture session runs. */
@@ -37,6 +38,12 @@ enum class ModelFallback {
      * it killed the process before) and the square fallback model runs instead. Not about an imported model.
      */
     BUILT_IN_FAILED,
+
+    /**
+     * The slot holds a model whose input shape does not fit the orientation (a wide model in Portrait, a tall one in
+     * Landscape), so it was not loaded and that orientation's built-in model runs; [ModelStatus.meta] names it.
+     */
+    WRONG_SHAPE,
 }
 
 /**
@@ -44,7 +51,8 @@ enum class ModelFallback {
  *
  * @property source the model that runs; [ModelSource.BUILT_IN] also when [fallback] is set.
  * @property meta the imported model that is in use ([ModelSource.IMPORTED]) or that was tried and not used
- *   ([ModelFallback.LOAD_FAILED], [ModelFallback.GUARD_NOT_STORED]); `null` when no imported model was tried.
+ *   ([ModelFallback.LOAD_FAILED], [ModelFallback.GUARD_NOT_STORED]) or refused for its shape ([ModelFallback.WRONG_SHAPE]);
+ *   `null` when no imported model was tried.
  * @property fallback why the built-in model runs although an imported one may be expected; `null` = nothing to
  *   report (an imported model in use, or nothing imported).
  * @property message the one-line failure text for [ModelFallback.LOAD_FAILED] and
@@ -64,6 +72,8 @@ enum class ModelFallback {
  * @property portrait what the portrait slot is set to (M1b-1): [SLOT_BUILT_IN] or the name and short sha256 of the
  *   library model, as `name 0123456789ab`.
  * @property landscape what the landscape slot is set to, like [portrait].
+ * @property slotsRefused the orientations whose slot holds a model that does not fit it (`fitsSlot`); each runs its
+ *   built-in model instead (`modelSlotsRefused` in `summary.txt`).
  * @property switches how many times the model was changed by a change of orientation since Start (the load at Start
  *   is not counted).
  * @property switchMsMax the longest of those changes, from closing the old detector to the new one being ready, in
@@ -82,6 +92,7 @@ data class ModelStatus(
     val builtInBlocked: Boolean = false,
     val portrait: String = SLOT_BUILT_IN,
     val landscape: String = SLOT_BUILT_IN,
+    val slotsRefused: Set<ModelOrientation> = emptySet(),
     val switches: Int = 0,
     val switchMsMax: Long = 0L,
 ) {

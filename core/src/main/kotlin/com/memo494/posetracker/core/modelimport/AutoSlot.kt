@@ -36,14 +36,6 @@ fun autoSlotFor(
     return if (replaceable) target else null
 }
 
-/** [ModelOrientation.LANDSCAPE] for `W > H`, [ModelOrientation.PORTRAIT] for `H > W`, `null` for a square tensor. */
-private fun orientationOfShape(meta: ImportedModelMeta): ModelOrientation? =
-    when {
-        meta.inputWidth > meta.inputHeight -> ModelOrientation.LANDSCAPE
-        meta.inputHeight > meta.inputWidth -> ModelOrientation.PORTRAIT
-        else -> null
-    }
-
 private fun ModelOrientation.other(): ModelOrientation =
     when (this) {
         ModelOrientation.PORTRAIT -> ModelOrientation.LANDSCAPE

@@ -176,6 +176,15 @@ private fun ModelBlock(
             )
             DetailsLine(modelNotice.message)
         }
+        val otherSlotNotice = state.otherSlotNotice
+        if (otherSlotNotice != null) {
+            Text(
+                text = stringResource(ControlModelMapper.noticeRes(otherSlotNotice.kind)),
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            DetailsLine(otherSlotNotice.message)
+        }
 
         if (state.importing) {
             Text(stringResource(R.string.model_importing), style = MaterialTheme.typography.bodyMedium)
@@ -198,7 +207,10 @@ private fun ModelBlock(
     }
 }
 
-/** The choice of one orientation: the built-in model and every library model that is not switched off. */
+/**
+ * The choice of one orientation: the built-in model and every library model. A model that is switched off, or whose
+ * shape does not fit this orientation (shown with the reason), is listed but cannot be chosen.
+ */
 @Composable
 private fun SlotPicker(
     @StringRes labelRes: Int,
@@ -213,11 +225,24 @@ private fun SlotPicker(
         val builtInText = stringResource(R.string.model_active_built_in, ControlModelMapper.builtInInputText(orientation))
         PickRow(builtInText, selectedSha == null, enabled) { onPick(null) }
         for (item in state.library) {
-            val text = stringResource(R.string.model_library_item, item.displayName, item.inputText)
-            PickRow(text, selectedSha == item.sha256, enabled && !item.blocked) { onPick(item.sha256) }
+            val fits = item.fits(orientation)
+            val text = stringResource(slotItemRes(item, fits), item.displayName, item.inputText)
+            PickRow(text, selectedSha == item.sha256, enabled && !item.blocked && fits) { onPick(item.sha256) }
         }
     }
 }
+
+/** The row text of [item] in a slot picker: with the reason when its shape does not fit ([fits] = `false`). */
+@StringRes
+private fun slotItemRes(
+    item: LibraryItem,
+    fits: Boolean,
+): Int =
+    when {
+        fits -> R.string.model_library_item
+        !item.fitsPortrait -> R.string.model_slot_item_wide_only
+        else -> R.string.model_slot_item_tall_only
+    }
 
 @Composable
 private fun PickRow(

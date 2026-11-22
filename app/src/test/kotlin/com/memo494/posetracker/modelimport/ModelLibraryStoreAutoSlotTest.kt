@@ -4,6 +4,7 @@ import com.google.common.truth.Truth.assertThat
 import com.memo494.posetracker.core.TrackerConfig
 import com.memo494.posetracker.core.modelimport.ImportedModelMeta
 import com.memo494.posetracker.core.modelimport.ModelOrientation
+import com.memo494.posetracker.core.modelimport.OrientationSlots
 import com.memo494.posetracker.core.modelimport.SlotChoice
 import com.memo494.posetracker.core.modelimport.TensorDescription
 import com.memo494.posetracker.detector.ProbeResult
@@ -97,7 +98,8 @@ class ModelLibraryStoreAutoSlotTest {
     fun ownersCase_bothSlotsHoldATallModel_aWideImportTakesLandscapeAndPortraitStays() {
         val library = newLibrary()
         add(library, tall, tallBytes)
-        assertThat(library.setSlot(ModelOrientation.LANDSCAPE, tall.sha256)).isTrue()
+        // The state an old version wrote (setSlot now refuses a tall model for Landscape).
+        File(directory, "slots.txt").writeText(OrientationSlots(SlotChoice.Library(tall.sha256), SlotChoice.Library(tall.sha256)).encode())
 
         val report = add(library, wide, wideBytes)
 

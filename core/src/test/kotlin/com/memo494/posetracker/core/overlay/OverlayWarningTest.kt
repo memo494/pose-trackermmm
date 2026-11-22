@@ -24,4 +24,9 @@ class OverlayWarningTest {
     fun theThermalStepDownNote_doesNotHideTheDetections() {
         assertThat(OverlayWarning.THERMAL_STEPPED_DOWN.hidesDetections).isFalse()
     }
+
+    @Test
+    fun theWrongShapeNote_doesNotHideTheDetections() {
+        assertThat(OverlayWarning.MODEL_WRONG_SHAPE.hidesDetections).isFalse()
+    }
 }

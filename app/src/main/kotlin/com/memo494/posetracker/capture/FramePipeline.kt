@@ -71,6 +71,8 @@ import com.memo494.posetracker.overlay.OverlayState
  *   built-in one); it adds the note [OverlayWarning.IMPORTED_MODEL_NOT_USED] with the lowest priority.
  * @param builtInModelFailed whether the square fallback model runs because the bundled model of the orientation could
  *   not; it adds the note [OverlayWarning.BUILT_IN_MODEL_FAILED], just above the imported-model note.
+ * @param modelWrongShape whether the slot's model was refused for its shape (`ModelFallback.WRONG_SHAPE`); it turns the
+ *   imported-model note into [OverlayWarning.MODEL_WRONG_SHAPE].
  */
 internal class FramePipeline(
     detector: PoseDetector?,
@@ -81,12 +83,14 @@ internal class FramePipeline(
     modelImported: Boolean = false,
     importedModelNotUsed: Boolean = false,
     builtInModelFailed: Boolean = false,
+    modelWrongShape: Boolean = false,
 ) {
     // The model can change when the orientation changes (M1b-1): see onModelChanged. Capture thread only.
     private var detector: PoseDetector? = detector
     private var modelImported: Boolean = modelImported
     private var importedModelNotUsed: Boolean = importedModelNotUsed
     private var builtInModelFailed: Boolean = builtInModelFailed
+    private var modelWrongShape: Boolean = modelWrongShape
     private var thermalStepDown: Boolean = false
 
     private val captureFrame = CaptureFrame()
@@ -334,6 +338,7 @@ internal class FramePipeline(
      * @param imported whether [newDetector] runs an imported model (the HUD mark `imp`).
      * @param notUsed whether an imported model is expected but the built-in one runs (the lowest-priority warning).
      * @param builtInFailed whether the square fallback model runs because the orientation's bundled model could not.
+     * @param wrongShape whether the slot's model was refused for its shape (the note [OverlayWarning.MODEL_WRONG_SHAPE]).
      * @param thermalStepDown whether [newDetector] is the small model of the thermal step-down (the note
      *   [OverlayWarning.THERMAL_STEPPED_DOWN], below the other notes).
      */
@@ -343,6 +348,7 @@ internal class FramePipeline(
         notUsed: Boolean,
         builtInFailed: Boolean = false,
         thermalStepDown: Boolean = false,
+        wrongShape: Boolean = false,
     ) {
         try {
             detector = newDetector
@@ -350,6 +356,7 @@ internal class FramePipeline(
             modelImported = imported
             importedModelNotUsed = notUsed
             builtInModelFailed = builtInFailed
+            modelWrongShape = wrongShape
             modelInputWidth = newDetector?.inputWidth ?: 0
             modelInputHeight = newDetector?.inputHeight ?: 0
             lastState = lastState.copy(modelInputWidth = modelInputWidth, modelInputHeight = modelInputHeight, modelImported = imported)
@@ -629,13 +636,15 @@ internal class FramePipeline(
 
     /**
      * The warning for the current flags: a missing detector wins over a wrong capture size, which wins over the
-     * note that an imported model is not used, then the thermal step-down note (neither hides the detections).
+     * note that the slot's model has the wrong shape, then that an imported model is not used, then the thermal
+     * step-down note (none hides the detections).
      */
     private fun currentWarning(): OverlayWarning? =
         when {
             detector == null -> OverlayWarning.DETECTOR_UNAVAILABLE
             !displaySized -> OverlayWarning.CAPTURE_NOT_DISPLAY_SIZED
             builtInModelFailed -> OverlayWarning.BUILT_IN_MODEL_FAILED
+            modelWrongShape -> OverlayWarning.MODEL_WRONG_SHAPE
             importedModelNotUsed -> OverlayWarning.IMPORTED_MODEL_NOT_USED
             thermalStepDown -> OverlayWarning.THERMAL_STEPPED_DOWN
             else -> null

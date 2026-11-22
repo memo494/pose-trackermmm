@@ -3,6 +3,7 @@ package com.memo494.posetracker.diagnostics
 import com.memo494.posetracker.core.TrackerConfig
 import com.memo494.posetracker.core.model.ModelInputText
 import com.memo494.posetracker.core.modelimport.ImportedModelMeta
+import com.memo494.posetracker.core.modelimport.ModelOrientation
 import com.memo494.posetracker.core.stats.LeadSummary
 import com.memo494.posetracker.core.stats.Percentiles
 import com.memo494.posetracker.modelimport.ModelSource
@@ -227,7 +228,8 @@ internal object DiagnosticsReport {
      * and `modelOutputRows` describe the imported model in use; for the built-in model `modelFile` is the bundled file
      * (`yolo26n-pose_448x960.tflite`) with its `modelSha256` (`builtin` / `none` when no bundled model runs); a refused imported
      * model is named in `modelFallbackFile`. The model fields describe the model loaded now; `modelPortrait` and
-     * `modelLandscape` (`builtin` or `name sha-prefix`) say what each orientation is set to, `modelSwitches` how many
+     * `modelLandscape` (`builtin` or `name sha-prefix`) say what each orientation is set to, `modelSlotsRefused` which slots
+     * hold a model of the wrong shape that is not used (`none`, `portrait`, `landscape`, `portrait,landscape`), `modelSwitches` how many
      * times a change of orientation changed the model since Start and `modelSwitchMsMax` the longest change (ms).
      */
     private fun appendModel(
@@ -250,9 +252,14 @@ internal object DiagnosticsReport {
         if (refused != null) line(out, "modelFallbackFile", "${refused.displayName} ${shortSha(refused)}")
         line(out, "modelPortrait", oneLine(model.portrait))
         line(out, "modelLandscape", oneLine(model.landscape))
+        line(out, "modelSlotsRefused", slotsRefusedText(model.slotsRefused))
         line(out, "modelSwitches", model.switches)
         line(out, "modelSwitchMsMax", model.switchMsMax)
     }
+
+    /** `none`, or the refused orientations in enum order joined by commas: `portrait`, `landscape`, `portrait,landscape`. */
+    private fun slotsRefusedText(refused: Set<ModelOrientation>): String =
+        if (refused.isEmpty()) NONE else ModelOrientation.entries.filter { it in refused }.joinToString(",") { it.logName }
 
     private fun shortSha(meta: ImportedModelMeta): String = meta.sha256.take(TrackerConfig.SHA256_SHORT_CHARS)
 

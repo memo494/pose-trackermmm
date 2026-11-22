@@ -195,6 +195,7 @@ class FramePipelineTest {
         importedModelNotUsed: Boolean = false,
         builtInModelFailed: Boolean = false,
         config: TrackerConfig = TrackerConfig(),
+        modelWrongShape: Boolean = false,
     ): FramePipeline {
         val pipeline =
             FramePipeline(
@@ -215,6 +216,7 @@ class FramePipelineTest {
                 modelImported,
                 importedModelNotUsed,
                 builtInModelFailed,
+                modelWrongShape,
             )
         pipeline.setExpectedSize(CaptureSize(WIDTH, HEIGHT))
         return pipeline
@@ -2956,6 +2958,33 @@ class FramePipelineTest {
         pipeline.onModelChanged(ScriptedDetector(events), imported = false, notUsed = true)
 
         assertThat(states.last().warning).isEqualTo(OverlayWarning.IMPORTED_MODEL_NOT_USED)
+    }
+
+    @Test
+    fun modelChanged_withASlotModelOfTheWrongShape_addsItsOwnNote_andKeepsTheDotsShown() {
+        val pipeline = trackingPipeline()
+
+        pipeline.onModelChanged(ScriptedDetector(events), imported = false, notUsed = true, wrongShape = true)
+
+        assertThat(states.last().warning).isEqualTo(OverlayWarning.MODEL_WRONG_SHAPE)
+        assertThat(states.last().detectionsShown).isTrue()
+
+        pipeline.onModelChanged(ScriptedDetector(events), imported = false, notUsed = true)
+
+        assertThat(states.last().warning).isEqualTo(OverlayWarning.IMPORTED_MODEL_NOT_USED)
+    }
+
+    @Test
+    fun wrongShapeAtStart_isTheNoteOfADetectedFrame_andLosesToTheMissingDetector() {
+        val pipeline = pipeline(importedModelNotUsed = true, modelWrongShape = true)
+
+        pipeline.onFrame(image(), acquireNs())
+
+        assertThat(states.last().warning).isEqualTo(OverlayWarning.MODEL_WRONG_SHAPE)
+
+        pipeline(detector = null, importedModelNotUsed = true, modelWrongShape = true).onFrame(image(), acquireNs())
+
+        assertThat(states.last().warning).isEqualTo(OverlayWarning.DETECTOR_UNAVAILABLE)
     }
 
     @Test

@@ -529,7 +529,16 @@ If you had one imported model before this version, it is already in the list and
    hash, or `builtin`), `modelSwitches` (2 after the two rotations), `modelSwitchMsMax` (milliseconds of the
    longest switch). The log has `model: <name> for landscape (switch Nms)`.
 
-**Pass:** the right model after each rotation, no crash, marks come back within a second or two of each rotation.
+4. Slot shape: stop, hold the phone upright and open the **Landscape** choice. A tall model (for example
+   `448x960`) is listed but cannot be picked, with the reason "tall model — Portrait only"; a wide one is refused
+   for **Portrait** the same way. Pick a fitting model: Share diagnostics, the log has a `slot: landscape = ...`
+   line. If a slot still holds a wrong-shape model from an older version, the model block shows a notice for it
+   (also for the other orientation: "Landscape: <name> (tall) is not used — pick a wide or square model"), the
+   HUD says `Model wrong shape: built-in runs` in that orientation, and `summary.txt` has
+   `modelSlotsRefused=landscape` (or `portrait`).
+
+**Pass:** the right model after each rotation, no crash, marks come back within a second or two of each rotation;
+a model of the wrong shape can never be picked, and a stored one is named on the screen and in `modelSlotsRefused`.
 **If it fails:** the `det` line keeps the old size, the app closes, or marks never return: Share diagnostics.
 
 ### 3. A model that crashes the app, and delete
@@ -688,7 +697,8 @@ These checks need a cable and `adb`, or the benchmark screen of M1b, and are not
   `track: miss id=L -> new id=N lostMs=… score=… stage=… gateChi2=… iou=… headRatio=… hRatio=… cost=… reason=…`
   (at most `assocMissLogPerMin` 30 a minute). Read `reason` first, then which number is far from its limit.
 - `summary.txt` model slot fields (M1b-1), after the model fields (`modelFallbackFile` last): `modelPortrait`,
-  `modelLandscape` (`builtin` or `<name> <first 12 hex of sha256>`), `modelSwitches` (changes of model caused by a
+  `modelLandscape` (`builtin` or `<name> <first 12 hex of sha256>`), `modelSlotsRefused` (`none`, `portrait`,
+  `landscape`, `portrait,landscape`: slots whose model has the wrong shape), `modelSwitches` (changes of model caused by a
   change of orientation since Start; the load at Start is not counted) and `modelSwitchMsMax` (the longest, ms,
   from closing the old detector to the new one ready). The `modelSource/modelFile/...` fields describe the model
   loaded now. Log lines: `model: <name> for portrait|landscape (start Nms)` at Start and `(switch Nms)` after.

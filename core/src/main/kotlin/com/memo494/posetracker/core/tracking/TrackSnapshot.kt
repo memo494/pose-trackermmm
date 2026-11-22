@@ -13,7 +13,8 @@ package com.memo494.posetracker.core.tracking
  * (the tracker already removes tracks that are not healthy).
  *
  * Layout: `ids[i]`; `flags[2 * i]` = lost, `flags[2 * i + 1]` = head estimated; `values[6 * i ..]` = head x, head y,
- * box left, top, right, bottom, lost time in ms (0 unless lost).
+ * box left, top, right, bottom, lost time in ms (0 unless lost), lead time in ms (0 when no lead was applied), filtered
+ * speed in track heights per second (0 unless smoothed).
  */
 class TrackSnapshot private constructor(
     /** Number of tracks in the snapshot. */
@@ -59,6 +60,15 @@ class TrackSnapshot private constructor(
     /** Track box bottom edge, Img pixels. */
     fun boxBottomImg(index: Int): Float = values[VALUES_PER_TRACK * checked(index) + BOX_BOTTOM]
 
+    /**
+     * The lead time in milliseconds that moved the head point of entry [index] ahead of the smoothed point (the display
+     * lead, `gSpeed * gStop * L`, before the length cap); 0 when no lead was applied (and for [of] and [ofIdle]).
+     */
+    fun leadMs(index: Int): Float = values[VALUES_PER_TRACK * checked(index) + LEAD_MS]
+
+    /** The smoother's filtered speed of entry [index] in track heights per second; 0 unless it came from [ofSmoothed]. */
+    fun speedHps(index: Int): Float = values[VALUES_PER_TRACK * checked(index) + SPEED_HPS]
+
     /** Index of the track with [id] in this snapshot, or -1 when it is not in it. Allocation-free. */
     fun indexOfId(id: Int): Int {
         for (i in 0 until count) {
@@ -79,7 +89,7 @@ class TrackSnapshot private constructor(
         private const val FLAGS_PER_TRACK = 2
         private const val LOST = 0
         private const val ESTIMATED = 1
-        private const val VALUES_PER_TRACK = 7
+        private const val VALUES_PER_TRACK = 9
         private const val HEAD_X = 0
         private const val HEAD_Y = 1
         private const val BOX_LEFT = 2
@@ -87,6 +97,9 @@ class TrackSnapshot private constructor(
         private const val BOX_RIGHT = 4
         private const val BOX_BOTTOM = 5
         private const val LOST_MS = 6
+        private const val LEAD_MS = 7
+        private const val SPEED_HPS = 8
+        private const val MS_PER_S = 1000f
         private const val PLAIN = 0
         private const val SMOOTHED = 1
         private const val IDLE = 2
@@ -101,13 +114,17 @@ class TrackSnapshot private constructor(
             tracks: TrackList,
             widthImg: Int,
             heightImg: Int,
-        ): TrackSnapshot = build(tracks, widthImg, heightImg, null, 0L, PLAIN, 0f, 0f)
+        ): TrackSnapshot = build(tracks, widthImg, heightImg, null, 0L, PLAIN, 0f, 0f, 0f)
 
         /**
          * Like [of], with the head point of every shown track passed through [smoother] for the frame taken at
          * [timestampNs] (the timestamp the tracker was given): the smoother runs `begin`, `smooth` for each shown
          * track and `end` (also when none is shown, so the slots of vanished tracks are freed). The box is moved by
          * the same delta as the head point, so ring and brackets stay together. Capture thread; allocates like [of].
+         *
+         * The display lead (`TrackerConfig.displayLeadEnabled`, see `DisplayLead`) then moves the head of a fast, confirmed
+         * track with a measured head ahead along its velocity; [resultAgeMs] is the time since the frame was taken (a
+         * value that is not positive or not a number counts as 0). The lead never reaches the tracker or its list.
          */
         fun ofSmoothed(
             tracks: TrackList,
@@ -115,7 +132,8 @@ class TrackSnapshot private constructor(
             heightImg: Int,
             smoother: HeadSmoother,
             timestampNs: Long,
-        ): TrackSnapshot = build(tracks, widthImg, heightImg, smoother, timestampNs, SMOOTHED, 0f, 0f)
+            resultAgeMs: Float = 0f,
+        ): TrackSnapshot = build(tracks, widthImg, heightImg, smoother, timestampNs, SMOOTHED, 0f, 0f, resultAgeMs)
 
         /**
          * Like [of] for the idle republish: a shown track the [smoother] knows keeps its last smoothed head point
@@ -131,7 +149,7 @@ class TrackSnapshot private constructor(
             smoother: HeadSmoother,
             idleMs: Float,
             maxLostMs: Float,
-        ): TrackSnapshot = build(tracks, widthImg, heightImg, smoother, 0L, IDLE, if (idleMs > 0f) idleMs else 0f, maxLostMs)
+        ): TrackSnapshot = build(tracks, widthImg, heightImg, smoother, 0L, IDLE, if (idleMs > 0f) idleMs else 0f, maxLostMs, 0f)
 
         private fun build(
             tracks: TrackList,
@@ -142,6 +160,7 @@ class TrackSnapshot private constructor(
             mode: Int,
             idleMs: Float,
             maxLostMs: Float,
+            resultAgeMs: Float,
         ): TrackSnapshot {
             if (mode == SMOOTHED) smoother?.begin(timestampNs)
             var shown = 0
@@ -173,6 +192,21 @@ class TrackSnapshot private constructor(
                     smoother.smooth(ids[next], rawXImg, rawYImg, tracks.heightImg(i))
                     headXImg = smoother.outXImg
                     headYImg = smoother.outYImg
+                    values[base + SPEED_HPS] = smoother.outSpeedHps
+                    val leadMs = leadTimeFor(tracks, i, smoother, resultAgeMs)
+                    if (leadMs > 0f) {
+                        val seconds = leadMs / MS_PER_S
+                        var leadXImg = tracks.velocityXImgPerS(i) * seconds
+                        var leadYImg = tracks.velocityYImgPerS(i) * seconds
+                        val scale = DisplayLead.capScale(leadXImg, leadYImg, smoother.config.displayLeadMaxRatio * tracks.heightImg(i))
+                        leadXImg *= scale
+                        leadYImg *= scale
+                        if (scale > 0f) {
+                            headXImg += leadXImg
+                            headYImg += leadYImg
+                            values[base + LEAD_MS] = leadMs
+                        }
+                    }
                 } else if (smoother != null && smoother.recall(ids[next])) {
                     headXImg = smoother.outXImg
                     headYImg = smoother.outYImg
@@ -190,6 +224,30 @@ class TrackSnapshot private constructor(
             }
             if (mode == SMOOTHED) smoother?.end()
             return TrackSnapshot(shown, widthImg, heightImg, ids, flags, values)
+        }
+
+        /**
+         * The lead time `gSpeed * gStop * L` in milliseconds for shown track [i] right after `smoother.smooth`, or 0 when
+         * the lead is off or must not apply: a lost track, an estimated head, a track not confirmed, a first sample.
+         */
+        private fun leadTimeFor(
+            tracks: TrackList,
+            i: Int,
+            smoother: HeadSmoother,
+            resultAgeMs: Float,
+        ): Float {
+            val config = smoother.config
+            if (!config.displayLeadEnabled || tracks.state(i) != TrackState.CONFIRMED || tracks.isHeadEstimated(i)) return 0f
+            val speedGain = DisplayLead.speedGain(smoother.outSpeedHps, config)
+            if (speedGain <= 0f) return 0f
+            val stopGain =
+                DisplayLead.stopGain(
+                    tracks.velocityXImgPerS(i),
+                    tracks.velocityYImgPerS(i),
+                    tracks.measuredVelocityXImgPerS(i),
+                    tracks.measuredVelocityYImgPerS(i),
+                )
+            return speedGain * stopGain * DisplayLead.leadTimeMs(resultAgeMs, smoother.outIntervalMs, config)
         }
 
         /** [lostMs], plus [idleMs] capped at [maxLostMs] when [idle]. */

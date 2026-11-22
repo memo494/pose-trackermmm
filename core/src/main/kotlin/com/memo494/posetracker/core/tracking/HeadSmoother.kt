@@ -25,7 +25,7 @@ import kotlin.math.hypot
  * thread-safe: one thread (the capture thread) only.
  */
 class HeadSmoother(
-    private val config: TrackerConfig,
+    internal val config: TrackerConfig,
 ) {
     private val capacity = config.maxTracks
     private val ids = IntArray(capacity)
@@ -44,6 +44,18 @@ class HeadSmoother(
 
     /** Head y of the newest [smooth] or successful [recall] call, Img pixels. */
     var outYImg: Float = 0f
+        private set
+
+    /**
+     * The filtered speed of the newest [smooth] call in track heights per second (the speed the cutoff was chosen
+     * from); 0 for a first sample, a point passed through, a repeated frame time and a disabled smoother. The
+     * display lead (`DisplayLead`) reads it.
+     */
+    var outSpeedHps: Float = 0f
+        private set
+
+    /** Milliseconds between the newest [smooth] call's frame and the id's frame before it; 0 where [outSpeedHps] is 0. */
+    var outIntervalMs: Float = 0f
         private set
 
     /** Number of ids that currently hold a slot. */
@@ -77,6 +89,8 @@ class HeadSmoother(
     ) {
         outXImg = xImg
         outYImg = yImg
+        outSpeedHps = 0f
+        outIntervalMs = 0f
         if (!config.smoothEnabled) return
         var slot = find(id)
         if (!xImg.isFinite() || !yImg.isFinite() || !heightImg.isFinite() || heightImg <= 0f) {
@@ -108,6 +122,8 @@ class HeadSmoother(
         dxImgPerS[slot] += derivativeAlpha * ((xImg - storedXImg[slot]) / dtS - dxImgPerS[slot])
         dyImgPerS[slot] += derivativeAlpha * ((yImg - storedYImg[slot]) / dtS - dyImgPerS[slot])
         val speedHeightsPerS = hypot(dxImgPerS[slot], dyImgPerS[slot]) / heightImg
+        outSpeedHps = speedHeightsPerS.toFloat()
+        outIntervalMs = (dtS * MS_PER_S).toFloat()
         val cutoffHz = config.smoothMinCutoffHz + config.smoothBeta * speedHeightsPerS
         val a = alpha(cutoffHz, dtS)
         storedXImg[slot] += a * (xImg - storedXImg[slot])
@@ -181,5 +197,9 @@ class HeadSmoother(
     ): Double {
         val r = 2.0 * PI * cutoffHz * dtS
         return r / (r + 1.0)
+    }
+
+    private companion object {
+        const val MS_PER_S = 1000.0
     }
 }

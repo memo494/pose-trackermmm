@@ -16,6 +16,12 @@ internal data class FakeTrack(
     val lostMs: Float? = null,
     /** What `matchedDetectionIndex` reports; -1 = not matched in the newest frame. */
     val matchedDetection: Int = -1,
+    /** What the tracker's velocity reports, Img pixels per second. */
+    val velocityXImgPerS: Float = 0f,
+    val velocityYImgPerS: Float = 0f,
+    /** What the raw measured head velocity reports, Img pixels per second; `null` = the same as the tracker's velocity. */
+    val measuredVelocityXImgPerS: Float? = null,
+    val measuredVelocityYImgPerS: Float? = null,
 )
 
 /** A hand-built [TrackList] for tests; [state] is `TENTATIVE` when not shown, `LOST` when lost, else `CONFIRMED`. */
@@ -41,9 +47,13 @@ internal class FakeTrackList(
 
     override fun headYImg(index: Int): Float = entries[index].headYImg
 
-    override fun velocityXImgPerS(index: Int): Float = 0f
+    override fun velocityXImgPerS(index: Int): Float = entries[index].velocityXImgPerS
 
-    override fun velocityYImgPerS(index: Int): Float = 0f
+    override fun velocityYImgPerS(index: Int): Float = entries[index].velocityYImgPerS
+
+    override fun measuredVelocityXImgPerS(index: Int): Float = entries[index].measuredVelocityXImgPerS ?: entries[index].velocityXImgPerS
+
+    override fun measuredVelocityYImgPerS(index: Int): Float = entries[index].measuredVelocityYImgPerS ?: entries[index].velocityYImgPerS
 
     override fun boxLeftImg(index: Int): Float = entries[index].boxLeftImg
 

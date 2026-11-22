@@ -31,6 +31,17 @@ interface TrackList {
     /** Head point velocity y, Img pixels per second. */
     fun velocityYImgPerS(index: Int): Float
 
+    /**
+     * Velocity x of the raw measured head point between its last two measurements (the step divided by the time
+     * between the two frames), Img pixels per second. 0 when the track was not matched in the newest update (lost,
+     * tentative and missed, a call that is not an update) or has had one measurement only. The display lead reads it
+     * to see that a head has stopped before the filter does; the default is 0 (no step known).
+     */
+    fun measuredVelocityXImgPerS(index: Int): Float = 0f
+
+    /** Velocity y of the raw measured head point; see [measuredVelocityXImgPerS]. */
+    fun measuredVelocityYImgPerS(index: Int): Float = 0f
+
     /** Track box left edge, Img pixels. */
     fun boxLeftImg(index: Int): Float
 

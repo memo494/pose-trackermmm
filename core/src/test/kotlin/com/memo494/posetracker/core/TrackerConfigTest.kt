@@ -708,6 +708,52 @@ class TrackerConfigTest {
     }
 
     @Test
+    fun displayLeadFields_haveTheDocumentedDefaults() {
+        val config = TrackerConfig()
+
+        assertThat(config.displayLeadEnabled).isTrue()
+        assertThat(config.displayLeadMaxMs).isEqualTo(130f)
+        assertThat(config.displayLeadExtraMs).isEqualTo(15f)
+        assertThat(config.displayLeadSpeedLowHps).isEqualTo(0.5f)
+        assertThat(config.displayLeadSpeedHighHps).isEqualTo(1.0f)
+        assertThat(config.displayLeadMaxRatio).isEqualTo(0.25f)
+    }
+
+    @Test
+    fun displayLeadFields_acceptTheirBounds_andTheDefaultsLieInside() {
+        val config = TrackerConfig()
+        assertWithin(config.displayLeadMaxMs, TrackerConfig.MIN_DISPLAY_LEAD_MAX_MS, TrackerConfig.MAX_DISPLAY_LEAD_MAX_MS)
+        assertWithin(config.displayLeadExtraMs, TrackerConfig.MIN_DISPLAY_LEAD_EXTRA_MS, TrackerConfig.MAX_DISPLAY_LEAD_EXTRA_MS)
+        assertWithin(config.displayLeadSpeedLowHps, TrackerConfig.MIN_DISPLAY_LEAD_SPEED_HPS, TrackerConfig.MAX_DISPLAY_LEAD_SPEED_HPS)
+        assertWithin(config.displayLeadSpeedHighHps, TrackerConfig.MIN_DISPLAY_LEAD_SPEED_HPS, TrackerConfig.MAX_DISPLAY_LEAD_SPEED_HPS)
+        assertWithin(config.displayLeadMaxRatio, TrackerConfig.MIN_DISPLAY_LEAD_MAX_RATIO, TrackerConfig.MAX_DISPLAY_LEAD_MAX_RATIO)
+        TrackerConfig(displayLeadMaxMs = TrackerConfig.MIN_DISPLAY_LEAD_MAX_MS, displayLeadMaxRatio = TrackerConfig.MIN_DISPLAY_LEAD_MAX_RATIO)
+        TrackerConfig(displayLeadMaxMs = TrackerConfig.MAX_DISPLAY_LEAD_MAX_MS, displayLeadMaxRatio = TrackerConfig.MAX_DISPLAY_LEAD_MAX_RATIO)
+        TrackerConfig(displayLeadExtraMs = TrackerConfig.MIN_DISPLAY_LEAD_EXTRA_MS)
+        TrackerConfig(displayLeadExtraMs = TrackerConfig.MAX_DISPLAY_LEAD_EXTRA_MS)
+        TrackerConfig(displayLeadSpeedLowHps = 1.0f, displayLeadSpeedHighHps = 1.0f)
+    }
+
+    @Test
+    fun displayLeadFields_outsideTheirBounds_orWithLowAboveHigh_areRejected() {
+        val rejected: List<() -> TrackerConfig> =
+            listOf(
+                { TrackerConfig(displayLeadMaxMs = -1f) },
+                { TrackerConfig(displayLeadMaxMs = TrackerConfig.MAX_DISPLAY_LEAD_MAX_MS + 1f) },
+                { TrackerConfig(displayLeadMaxMs = Float.NaN) },
+                { TrackerConfig(displayLeadExtraMs = -1f) },
+                { TrackerConfig(displayLeadExtraMs = TrackerConfig.MAX_DISPLAY_LEAD_EXTRA_MS + 1f) },
+                { TrackerConfig(displayLeadSpeedLowHps = -0.1f) },
+                { TrackerConfig(displayLeadSpeedHighHps = TrackerConfig.MAX_DISPLAY_LEAD_SPEED_HPS + 1f) },
+                { TrackerConfig(displayLeadSpeedLowHps = 1.5f, displayLeadSpeedHighHps = 1.0f) },
+                { TrackerConfig(displayLeadMaxRatio = -0.1f) },
+                { TrackerConfig(displayLeadMaxRatio = TrackerConfig.MAX_DISPLAY_LEAD_MAX_RATIO + 0.1f) },
+                { TrackerConfig(displayLeadMaxRatio = Float.NaN) },
+            )
+        for (build in rejected) assertThrows(IllegalArgumentException::class.java) { build() }
+    }
+
+    @Test
     fun smoothFields_outsideTheirBounds_areRejected() {
         assertThrows(IllegalArgumentException::class.java) {
             TrackerConfig(smoothMinCutoffHz = TrackerConfig.MIN_SMOOTH_MIN_CUTOFF_HZ / 2)

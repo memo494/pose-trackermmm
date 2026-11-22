@@ -26,7 +26,7 @@ class AssociationOrderTest {
         val old = indexOfId(list, OLD_ID)
         assertThat(old).isAtLeast(0)
         assertThat(list.state(old)).isEqualTo(TrackState.CONFIRMED)
-        assertThat(indexOfId(list, SHADOW_ID)).isEqualTo(-1)
+        assertThat(indexOfId(list, SECOND_ID)).isEqualTo(-1)
     }
 
     @Test
@@ -39,7 +39,7 @@ class AssociationOrderTest {
         val old = indexOfId(list, OLD_ID)
         assertThat(old).isAtLeast(0)
         assertThat(list.state(old)).isEqualTo(TrackState.LOST)
-        val newborn = indexOfId(list, NEIGHBOUR_ID)
+        val newborn = indexOfId(list, SECOND_ID)
         assertThat(newborn).isAtLeast(0)
         assertThat(list.state(newborn)).isEqualTo(TrackState.TENTATIVE)
     }
@@ -54,7 +54,7 @@ class AssociationOrderTest {
         assertThat(tracker.birthCount).isEqualTo(2)
         assertThat(tracker.assocBirthSuppressed).isEqualTo(0)
         assertThat(list.state(indexOfId(list, OLD_ID))).isEqualTo(TrackState.LOST)
-        assertThat(list.state(indexOfId(list, NEIGHBOUR_ID))).isEqualTo(TrackState.TENTATIVE)
+        assertThat(list.state(indexOfId(list, SECOND_ID))).isEqualTo(TrackState.TENTATIVE)
         feed(HITS + 2, smallPersonInsideTheBox())
         assertThat(tracker.recoverCount).isEqualTo(0)
         assertThat(tracker.confirmCount).isEqualTo(2)
@@ -73,6 +73,23 @@ class AssociationOrderTest {
         assertThat(tracker.confirmCount).isEqualTo(1)
     }
 
+    @Test
+    fun aShadowNextToALostTrack_doesNotTakeTheDetectionOfTheLostTrack() {
+        val patient = Tracker(TrackerConfig(trackTentativeMaxMisses = 2))
+        feedInto(patient, 0, person(OLD_X_IMG))
+        feedInto(patient, 1, person(OLD_X_IMG), person(SHADOW_X_IMG))
+        feedInto(patient, 2, person(OLD_X_IMG))
+        feedInto(patient, 3)
+
+        val list = feedInto(patient, 4, person(DETECTION_X_IMG))
+
+        val old = indexOfId(list, OLD_ID)
+        assertThat(old).isAtLeast(0)
+        assertThat(list.state(old)).isEqualTo(TrackState.CONFIRMED)
+        assertThat(patient.recoverCount).isEqualTo(1)
+        assertThat(indexOfId(list, SECOND_ID)).isEqualTo(-1)
+    }
+
     private fun indexOfId(
         list: TrackList,
         id: Int,
@@ -81,9 +98,15 @@ class AssociationOrderTest {
     private fun feed(
         index: Int,
         vararg detections: PoseDetection,
+    ): TrackList = feedInto(tracker, index, *detections)
+
+    private fun feedInto(
+        target: Tracker,
+        index: Int,
+        vararg detections: PoseDetection,
     ): TrackList {
         val frame = DetectionFrame(START_NS + index * STEP_NS, TimestampSource.IMAGE, IMAGE_WIDTH, IMAGE_HEIGHT, detections.toList())
-        return tracker.update(frame)
+        return target.update(frame)
     }
 
     private fun person(xImg: Float): PoseDetection = HeadTestDetections.person(xImg, ROW_Y, HEIGHT)
@@ -101,8 +124,9 @@ class AssociationOrderTest {
         const val HEIGHT = 200f
         const val HITS = 3
         const val OLD_ID = 1
-        const val SHADOW_ID = 2
-        const val NEIGHBOUR_ID = 2
+
+        /** The id of the second track in every test: the second person born (a shadow or a neighbour). */
+        const val SECOND_ID = 2
         const val OLD_X_IMG = 100f
 
         /** 20 px right of the old person: box IoU 0.6 (below the dedupe IoU), head 0.1 h away: a near duplicate. */

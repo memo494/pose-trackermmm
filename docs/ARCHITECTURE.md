@@ -382,7 +382,9 @@ tracks, index loops); deterministic.
     `dedupeIou`, used to be born next to the live track; counted in `assocBirthSuppressed` only when a track could
     have been given). Owner's log: 14 of 19 such births had a head distance ≤ 0.12 h; the other 5 (0.29–0.54 h) may be
     another person and are born. A neighbour with a smaller overlap or a farther head is still born; no cost or gate
-    changed;
+    changed. **Known limit (pinned by a test, no height condition on purpose: the owner's duplicates have height
+    ratios 0.59–2.03):** a person directly behind another, head within 0.15 h and box IoU ≥ 0.5, is not born while
+    the front track is matched; if the front person leaves, the front track takes the back person's detection;
   - CONFIRMED, and shown, from the `trackConfirmHits`-th (3rd) consecutive hit; a tentative track survives
     `trackTentativeMaxMisses` (1, bounds 0..5) consecutive missed frames and is removed on the next one. While it
     survives it coasts like a lost track (velocity decay as for a miss, no `lostMs`), is not shown and not LOST;

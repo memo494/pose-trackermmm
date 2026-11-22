@@ -94,6 +94,25 @@ class BirthSuppressionTest {
         assertThat(full.assocBirthSuppressed).isEqualTo(0)
     }
 
+    /**
+     * KNOWN LIMIT, pinned (ARCHITECTURE §6.3, no height condition on purpose): a second person directly behind the
+     * followed one, with the head within the head ratio and a box IoU of 0.5 or more, is not born while the front
+     * track is matched; when the front person then leaves, the front track takes the back person's detection.
+     */
+    @Test
+    fun knownLimit_aPersonDirectlyBehindAnother_isNotBornAndTheFrontTrackTakesHimWhenTheFrontOneLeaves() {
+        for (k in 0 until HITS) feed(k, person(X_IMG))
+
+        feed(HITS, person(X_IMG), person(X_IMG + DUPLICATE_SHIFT_IMG))
+        val list = feed(HITS + 1, person(X_IMG + DUPLICATE_SHIFT_IMG))
+
+        assertThat(tracker.assocBirthSuppressed).isEqualTo(1)
+        assertThat(tracker.birthCount).isEqualTo(1)
+        assertThat(list.size).isEqualTo(1)
+        assertThat(list.id(0)).isEqualTo(1)
+        assertThat(list.state(0)).isEqualTo(TrackState.CONFIRMED)
+    }
+
     /** A person 150 high whose box (60 x 150, IoU 0.5625 with the first person's) lies inside that box; head 0.23 h away. */
     private fun smallerPersonInsideTheBox(): PoseDetection =
         HeadTestDetections.person(X_IMG + INSIDE_SHIFT_X_IMG, INSIDE_HEAD_Y_IMG, INSIDE_HEIGHT_IMG)

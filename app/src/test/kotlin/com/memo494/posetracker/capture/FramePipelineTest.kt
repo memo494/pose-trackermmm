@@ -2669,6 +2669,41 @@ class FramePipelineTest {
     }
 
     @Test
+    fun modelChanged_withTheThermalStepDown_addsTheNote_andKeepsTheDotsShown() {
+        val pipeline = trackingPipeline()
+
+        pipeline.onModelChanged(ScriptedDetector(events, 320, 320), imported = false, notUsed = false, thermalStepDown = true)
+
+        assertThat(states.last().warning).isEqualTo(OverlayWarning.THERMAL_STEPPED_DOWN)
+        assertThat(states.last().detectionsShown).isTrue()
+        assertThat(states.last().modelInputWidth).isEqualTo(320)
+    }
+
+    @Test
+    fun modelChanged_thermalNote_losesToTheOtherNotesAndWarnings() {
+        val pipeline = trackingPipeline()
+
+        pipeline.onModelChanged(ScriptedDetector(events), imported = false, notUsed = true, thermalStepDown = true)
+        assertThat(states.last().warning).isEqualTo(OverlayWarning.IMPORTED_MODEL_NOT_USED)
+
+        pipeline.onModelChanged(ScriptedDetector(events), imported = false, notUsed = false, builtInFailed = true, thermalStepDown = true)
+        assertThat(states.last().warning).isEqualTo(OverlayWarning.BUILT_IN_MODEL_FAILED)
+
+        pipeline.onModelChanged(null, imported = false, notUsed = false, thermalStepDown = true)
+        assertThat(states.last().warning).isEqualTo(OverlayWarning.DETECTOR_UNAVAILABLE)
+    }
+
+    @Test
+    fun modelChanged_backToNormal_removesTheThermalNote() {
+        val pipeline = trackingPipeline()
+        pipeline.onModelChanged(ScriptedDetector(events), imported = false, notUsed = false, thermalStepDown = true)
+
+        pipeline.onModelChanged(ScriptedDetector(events), imported = false, notUsed = false)
+
+        assertThat(states.last().warning).isNull()
+    }
+
+    @Test
     fun modelChanged_whenThePublisherFails_isContained() {
         val pipeline = trackingPipeline()
         publisherError = IllegalStateException("publish broke")

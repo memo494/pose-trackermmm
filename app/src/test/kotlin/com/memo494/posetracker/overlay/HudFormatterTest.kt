@@ -467,6 +467,37 @@ class HudFormatterTest {
     }
 
     @Test
+    fun warning_namesTheThermalStepDown() {
+        val state = sample.copy(warning = OverlayWarning.THERMAL_STEPPED_DOWN)
+
+        assertThat(warning(state)).isEqualTo("Hot: smaller model (320)")
+    }
+
+    @Test
+    fun warning_theThermalNoteLosesToRealWarningsAndBeatsOnlyTheArmedHint() {
+        val note = OverlayWarning.THERMAL_STEPPED_DOWN
+
+        assertThat(warning(sample.copy(dotsVisible = false, warning = note))).isEqualTo("Content not visible: dots hidden")
+        assertThat(warning(sample.copy(warning = note), armed = true)).isEqualTo("Hot: smaller model (320)")
+        assertThat(warning(sample, armed = true)).isEqualTo("tap a person")
+    }
+
+    @Test
+    fun warning_theThermalNoteFitsTheHudLine() {
+        val buffer = CharArray(TrackerConfig.HUD_LINE_CAPACITY_CHARS)
+
+        val length = HudFormatter.formatWarning(sample.copy(warning = OverlayWarning.THERMAL_STEPPED_DOWN), buffer)
+
+        assertThat(length).isEqualTo("Hot: smaller model (320)".length)
+        assertThat(length).isAtMost(TrackerConfig.HUD_LINE_CAPACITY_CHARS)
+    }
+
+    @Test
+    fun hudChanged_seesTheThermalNote() {
+        assertThat(HudFormatter.hudChanged(sample, sample.copy(warning = OverlayWarning.THERMAL_STEPPED_DOWN), idleFps)).isTrue()
+    }
+
+    @Test
     fun hudChanged_seesTheModelSizeAndTheImportedFlag() {
         assertThat(HudFormatter.hudChanged(sample, sample.copy(modelInputWidth = 640, modelInputHeight = 640), idleFps)).isTrue()
         assertThat(HudFormatter.hudChanged(sample, sample.copy(modelImported = true), idleFps)).isTrue()

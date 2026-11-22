@@ -257,7 +257,8 @@ Dependencies: `app → detector → core`, `app → core`. Nothing else.
   screen, system "stop sharing") triggers it. A restart always asks for new consent.
 - **HUD tick:** a static screen delivers no frames, so the capture handler republishes the last state at the HUD
   rate (`hudRateHz`) and the shown capture fps decays to 0. The same tick tells the tracker how long ago the newest
-  tracked frame arrived (`Tracker.onIdle`), so a still picture gets its marks (§6.5).
+  tracked frame arrived (`Tracker.onIdle`), so a still picture gets its marks (§6.5). A change of the thermal state at this
+  tick (§7.2) may load a model on the capture thread: one load stall, as on a rotation.
 - **Tracker and gaps in the data:** only a frame the detector saw goes to `Tracker.update`. A frame without a
   detector, while the capture is not display-sized, with a size mismatch or a failed copy is not given to it (no
   information is not "nobody there"). A new capture or display size resets the tracker and publishes a state
@@ -713,9 +714,21 @@ default 1.0) and `assocMissLogPerMin` (0..600, default 30), which change no trac
 (0..1, default 0.2; 0 = no floor on the gate's sigma) and `relockEarlyMaxHeadRatio` (0.1..3, default 0.6). There is no `displayLeadMs`
 (no prediction, §6.4).
 
-### 7.2 Thermal policy (M5)
+### 7.2 Thermal policy (M5; the model step-down is implemented in F7)
 If thermal status ≥ `MODERATE` or headroom forecast > 0.9: step down the analysis fps cap 60 → 30; then 416 → 320;
 step back up after 60 s below the threshold. Every step is logged and shown in the HUD.
+
+**Implemented (F7, "smaller model when hot"; the fps-cap step is not done):**
+- `core` `ThermalStepDown` (pure) reads each new `ThermalSampler` reading (every `thermalSampleIntervalMs`): NORMAL → HOT when
+  status ≥ `MODERATE` or headroom ≥ `thermalHotHeadroom` (0.9) held `thermalHotConfirmMs` (3 s: with 2 s sampling that is the third reading, about 4 s; an in-between reading pauses the timer, a cool one resets it); HOT → NORMAL when every known
+  value is cool (status ≤ `LIGHT`, headroom ≤ `thermalCoolHeadroom` 0.75) held `thermalCoolDownMs` (60 s). An in-between or unavailable
+  reading restarts the timer, so it never flaps, and an unreadable device never triggers HOT (fail closed).
+- HOT: `ModelSwitcher` loads the bundled square 320 model on the capture thread through the normal `SessionModelLoader` (crash marker,
+  blocked list) **before** closing the running detector, whatever the slots hold; a rotation keeps it. NORMAL: the slot model of
+  the current orientation loads again. If the 320 model does not load, the current model stays, the failure is logged and it is not retried until the next transition.
+- Visibility: HUD note `Hot: smaller model (320)` (`OverlayWarning.THERMAL_STEPPED_DOWN`, above only the `tap a person` hint), one
+  `thermal: HOT|NORMAL (status …, headroom …)` log line per transition, `summary.txt` keys `thermalState` (the policy's wish), `thermalSmallModel=yes|no|blocked|failed` (what runs), `thermalStepDowns`, `thermalHotMs`.
+- Risks: the 320 model is built while the running one is still open, so for a moment two LiteRT/GPU contexts exist (kept on purpose, so a failed 320 load costs nothing); a native crash while loading it puts it on the blocked list (`thermalSmallModel=blocked`) and the step-down then keeps the current model.
 
 ---
 

@@ -29,4 +29,10 @@ enum class OverlayWarning(
      * gone, or the crash guard blocks it). Detection works, so the dots stay visible; this is a note only.
      */
     IMPORTED_MODEL_NOT_USED(false),
+
+    /**
+     * The device is hot, so the small built-in model (320) runs instead of the chosen one (thermal step-down,
+     * ARCHITECTURE §7.2). Detection works, so the dots stay visible; this is a note only, the lowest of the warnings.
+     */
+    THERMAL_STEPPED_DOWN(false),
 }

@@ -52,7 +52,22 @@ import kotlin.math.sqrt
  */
 class Tracker(
     private val config: TrackerConfig,
+    boxOnly: Boolean = false,
 ) {
+    /**
+     * Whether the model is box-only (a detect-only model with no keypoints, M-legacy): the head point of every
+     * detection is then the box rule (`HeadMeasurement` with `boxOnly`), never [HeadPoint.estimated], so the display
+     * lead stays available. Decided by the session from the loaded model's output layout, never from the keypoint
+     * scores of a frame. Changing it [reset]s the tracker (a track made under the other rule must not go on).
+     */
+    var boxOnly: Boolean = boxOnly
+        set(value) {
+            if (value != field) {
+                field = value
+                reset()
+            }
+        }
+
     /** One pooled track; every field is overwritten at birth. */
     private class Track(
         config: TrackerConfig,
@@ -332,7 +347,7 @@ class Tracker(
             val index = dedupeKept[k]
             val detection = detections[index]
             if (!(detection.score.isFinite() && detection.score >= config.scoreThreshold)) continue
-            HeadMeasurement.of(detection, config, heads[index])
+            HeadMeasurement.of(detection, config, heads[index], boxOnly)
             if (!heads[index].valid) continue
             keep[keepCount++] = index
             if (detection.score >= config.trackHighScore) high[highCount++] = index else low[lowCount++] = index
@@ -517,7 +532,7 @@ class Tracker(
         track: Track,
         detection: PoseDetection,
     ): Boolean {
-        track.estimator.update(detection, point)
+        track.estimator.update(detection, point, boxOnly)
         if (!point.valid || !(point.varianceImg2 > 0f && point.varianceImg2.isFinite())) return false
         val boxHeightImg = detection.boxBottomImg - detection.boxTopImg
         noteMeasurement(track)
@@ -917,7 +932,7 @@ class Tracker(
         detection: PoseDetection,
     ): Boolean {
         track.estimator.reset()
-        track.estimator.update(detection, point)
+        track.estimator.update(detection, point, boxOnly)
         if (!point.valid) return false
         val boxHeightImg = detection.boxBottomImg - detection.boxTopImg
         val velocityNoiseImg = config.trackInitVelocitySigmaRatio * boxHeightImg

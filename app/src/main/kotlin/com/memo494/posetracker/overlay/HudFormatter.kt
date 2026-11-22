@@ -25,6 +25,8 @@ object HudFormatter {
     private const val WARNING_WRONG_SHAPE = "Model wrong shape: built-in runs"
     private const val NOTE_THERMAL_STEPPED_DOWN = "Hot: smaller model (320)"
     private const val HINT_TAP_A_PERSON = "tap a person"
+    private const val NOTE_BOX_ONLY_PREFIX = "Box-only model: head from box (class "
+    private const val NOTE_BOX_ONLY_SUFFIX = ")"
     private const val TRACKS_PREFIX = " trk "
     private const val MODEL_SIZE_PREFIX = " in "
     private const val IMPORTED_MARK = " imp"
@@ -95,9 +97,10 @@ object HudFormatter {
     /**
      * Writes the warning line into [out], by priority: a missing detector, a capture that is not display-sized,
      * content that is not visible, then the note that the built-in model failed (with the input size of the fallback that
-     * runs), then the note that the slot's model has the wrong shape or that an imported model is not used, then the thermal note `Hot: smaller model (320)`, and last, while [armed] (the
-     * overlay waits for the tap that locks a person), the hint `tap a person`. Returns the number of characters
-     * written; 0 = nothing to show.
+     * runs), then the note that the slot's model has the wrong shape or that an imported model is not used, then the thermal note `Hot: smaller model (320)`, then, while [armed] (the
+     * overlay waits for the tap that locks a person), the hint `tap a person`, and last the note of a box-only model
+     * (detect-only, the dot comes from the person box) `Box-only model: head from box (class N)`, N being its person
+     * class. Returns the number of characters written; 0 = nothing to show.
      */
     fun formatWarning(
         state: OverlayState,
@@ -114,6 +117,10 @@ object HudFormatter {
         if (state.warning == OverlayWarning.IMPORTED_MODEL_NOT_USED) return putText(out, 0, WARNING_IMPORTED_NOT_USED)
         if (state.warning == OverlayWarning.THERMAL_STEPPED_DOWN) return putText(out, 0, NOTE_THERMAL_STEPPED_DOWN)
         if (armed) return putText(out, 0, HINT_TAP_A_PERSON)
+        if (state.boxOnlyClass != OverlayState.NOT_BOX_ONLY) {
+            val pos = putWhole(out, putText(out, 0, NOTE_BOX_ONLY_PREFIX), state.boxOnlyClass)
+            return putText(out, pos, NOTE_BOX_ONLY_SUFFIX)
+        }
         return 0
     }
 
@@ -139,6 +146,7 @@ object HudFormatter {
         if (before.modelInputWidth != after.modelInputWidth) return true
         if (before.modelInputHeight != after.modelInputHeight) return true
         if (before.modelImported != after.modelImported) return true
+        if (before.boxOnlyClass != after.boxOnlyClass) return true
         if (detectionCount(before) != detectionCount(after)) return true
         if (before.tracks.count != after.tracks.count) return true
         if (shownFps(before, idleFps) != shownFps(after, idleFps)) return true

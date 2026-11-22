@@ -41,6 +41,7 @@ internal object DiagnosticsZip {
                 modelInfo = readModelInfo(context),
                 lastCrash = CrashStore.read(context),
                 tuningOverrides = CaptureStatsHolder.tuningOverrides,
+                detectPersonClass = CaptureStatsHolder.sessionConfig.detectPersonClass,
             )
         val directory = File(context.cacheDir, DIRECTORY)
         if (!directory.isDirectory && !directory.mkdirs()) throw IOException("cannot create $directory")

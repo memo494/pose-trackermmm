@@ -5,6 +5,8 @@ import com.memo494.posetracker.core.TrackerConfig
 import com.memo494.posetracker.core.modelimport.ImportCheck
 import com.memo494.posetracker.core.modelimport.ImportRejection
 import com.memo494.posetracker.core.modelimport.ImportedModelRules
+import com.memo494.posetracker.core.modelimport.InputLayout
+import com.memo494.posetracker.core.modelimport.PoseOutputLayout
 import com.memo494.posetracker.core.modelimport.TensorDescription
 import org.junit.Test
 
@@ -84,23 +86,49 @@ class ModelProbeTest {
     }
 
     @Test
-    fun nhwcInputIsRejectedAsNhwc() {
+    fun nhwcInputIsAcceptedAsNhwc() {
         val input = ModelProbe.describe(intArrayOf(1, 640, 640, 3), "FLOAT")
         val output = ModelProbe.describe(intArrayOf(1, 300, 57), "FLOAT")
 
         val check = ImportedModelRules.check(listOf(input), listOf(output), config)
 
-        assertThat((check as ImportCheck.Rejected).reason).isEqualTo(ImportRejection.INPUT_NHWC)
+        assertThat(
+            check,
+        ).isEqualTo(ImportCheck.Accepted(inputWidth = 640, inputHeight = 640, outputRows = 300, inputLayout = InputLayout.NHWC))
     }
 
     @Test
-    fun classicHeadOutputIsRejectedAsClassicHead() {
+    fun realRectangularNhwcShapesAreAcceptedWithWidthAndHeightApart() {
+        val input = ModelProbe.describe(intArrayOf(1, 384, 832, 3), "FLOAT")
+        val output = ModelProbe.describe(intArrayOf(1, 300, 57), "FLOAT")
+
+        val check = ImportedModelRules.check(listOf(input), listOf(output), config)
+
+        assertThat(
+            check,
+        ).isEqualTo(ImportCheck.Accepted(inputWidth = 832, inputHeight = 384, outputRows = 300, inputLayout = InputLayout.NHWC))
+    }
+
+    @Test
+    fun yoloV5ObjectnessHeadIsRejectedAsClassicHead() {
+        val input = ModelProbe.describe(intArrayOf(1, 3, 640, 640), "FLOAT")
+        val output = ModelProbe.describe(intArrayOf(1, 85, 8400), "FLOAT")
+
+        val check = ImportedModelRules.check(listOf(input), listOf(output), config)
+
+        assertThat((check as ImportCheck.Rejected).reason).isEqualTo(ImportRejection.OUTPUT_CLASSIC_HEAD)
+    }
+
+    @Test
+    fun cocoDetectOutputIsAcceptedAsRawDetectHead() {
         val input = ModelProbe.describe(intArrayOf(1, 3, 640, 640), "FLOAT")
         val output = ModelProbe.describe(intArrayOf(1, 84, 8400), "FLOAT")
 
         val check = ImportedModelRules.check(listOf(input), listOf(output), config)
 
-        assertThat((check as ImportCheck.Rejected).reason).isEqualTo(ImportRejection.OUTPUT_CLASSIC_HEAD)
+        assertThat(check).isEqualTo(
+            ImportCheck.Accepted(640, 640, 8400, PoseOutputLayout.DETECT_RAW_CHANNELS_FIRST, classes = 80),
+        )
     }
 
     @Test

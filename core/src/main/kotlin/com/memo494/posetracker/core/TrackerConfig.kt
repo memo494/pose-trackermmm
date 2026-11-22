@@ -262,6 +262,13 @@ package com.memo494.posetracker.core
  *   accepted only when its head is within this multiple of the held track's height of the held track's predicted
  *   head, unitless, in [[MIN_RELOCK_EARLY_MAX_HEAD_RATIO], [MAX_RELOCK_EARLY_MAX_HEAD_RATIO]]; and no other track
  *   (tentative ones too) may be within the same radius. Otherwise the lock waits for the removal of the held track.
+ * @property detectPersonClass index of the class that means "person" in an imported detect-only model (no keypoints),
+ *   count from 0, in [0, [DETECT_MAX_CLASSES]); the class score column (raw head) or class value (end-to-end head)
+ *   it names is the person score. A model with fewer raw classes than `detectPersonClass + 1` is unusable (fail closed).
+ * @property headBoxOnlyNoiseRatio measurement noise of the head point of a box-only model (detect-only, no keypoints)
+ *   as a fraction of the box height, unitless, in [[MIN_HEAD_BOX_ONLY_NOISE_RATIO], [MAX_HEAD_BOX_ONLY_NOISE_RATIO]]:
+ *   the box rule (`box top + headFallbackTopRatio * h`) is steady every frame, so it is trusted more than the
+ *   pose fallback ([headFallbackNoiseRatio]) and less than measured keypoints ([headMeasurementNoiseRatio]).
  */
 data class TrackerConfig(
     val scoreThreshold: Float = DEFAULT_SCORE_THRESHOLD,
@@ -373,6 +380,8 @@ data class TrackerConfig(
     val assocMissNearRatio: Float = DEFAULT_ASSOC_MISS_NEAR_RATIO,
     val assocMissLogPerMin: Int = DEFAULT_ASSOC_MISS_LOG_PER_MIN,
     val relockEarlyMaxHeadRatio: Float = DEFAULT_RELOCK_EARLY_MAX_HEAD_RATIO,
+    val detectPersonClass: Int = DEFAULT_DETECT_PERSON_CLASS,
+    val headBoxOnlyNoiseRatio: Float = DEFAULT_HEAD_BOX_ONLY_NOISE_RATIO,
 ) {
     init {
         require(scoreThreshold in MIN_SCORE_THRESHOLD..MAX_SCORE_THRESHOLD) {
@@ -525,6 +534,12 @@ data class TrackerConfig(
         }
         require(dedupeIou in MIN_DEDUPE_IOU..MAX_DEDUPE_IOU) {
             "dedupeIou $dedupeIou outside [$MIN_DEDUPE_IOU, $MAX_DEDUPE_IOU]"
+        }
+        require(detectPersonClass in 0 until DETECT_MAX_CLASSES) {
+            "detectPersonClass $detectPersonClass outside [0, $DETECT_MAX_CLASSES)"
+        }
+        require(headBoxOnlyNoiseRatio in MIN_HEAD_BOX_ONLY_NOISE_RATIO..MAX_HEAD_BOX_ONLY_NOISE_RATIO) {
+            "headBoxOnlyNoiseRatio $headBoxOnlyNoiseRatio outside [$MIN_HEAD_BOX_ONLY_NOISE_RATIO, $MAX_HEAD_BOX_ONLY_NOISE_RATIO]"
         }
         require(rawNmsIou in MIN_RAW_NMS_IOU..MAX_RAW_NMS_IOU) {
             "rawNmsIou $rawNmsIou outside [$MIN_RAW_NMS_IOU, $MAX_RAW_NMS_IOU]"
@@ -1078,6 +1093,15 @@ data class TrackerConfig(
 
         /** Highest accepted [headFallbackNoiseRatio]. */
         const val MAX_HEAD_FALLBACK_NOISE_RATIO = 0.5f
+
+        /** Default [headBoxOnlyNoiseRatio]: unitless fraction of the box height (between 0.03 keypoints and 0.10 fallback). */
+        const val DEFAULT_HEAD_BOX_ONLY_NOISE_RATIO = 0.05f
+
+        /** Lowest accepted [headBoxOnlyNoiseRatio]. */
+        const val MIN_HEAD_BOX_ONLY_NOISE_RATIO = 0.005f
+
+        /** Highest accepted [headBoxOnlyNoiseRatio]. */
+        const val MAX_HEAD_BOX_ONLY_NOISE_RATIO = 0.5f
 
         /** Default [headMinMeanConfidence]: unitless confidence. */
         const val DEFAULT_HEAD_MIN_MEAN_CONFIDENCE = 0.05f
@@ -1886,6 +1910,27 @@ data class TrackerConfig(
          * rule as the vendored end-to-end path, applied per row.
          */
         const val RAW_NORMALIZED_MAX_COORDINATE = 2f
+
+        /** Default [detectPersonClass]: class 0 is "person" in COCO and in the person-first models owners train. */
+        const val DEFAULT_DETECT_PERSON_CLASS = 0
+
+        /** Fewest class score columns of a raw detect-only head (`[1, 4 + C, N]`). */
+        const val DETECT_MIN_CLASSES = 1
+
+        /** Most class score columns of a raw detect-only head: the 80 COCO classes (`[1, 84, N]`). */
+        const val DETECT_MAX_CLASSES = 80
+
+        /** Strides of the three detection scales of a raw detect-only head (YOLO: 8, 16, 32); its rows are the cells of all three. */
+        const val DETECT_STRIDE_FINE = 8
+
+        /** See [DETECT_STRIDE_FINE]. */
+        const val DETECT_STRIDE_MEDIUM = 16
+
+        /** See [DETECT_STRIDE_FINE]. */
+        const val DETECT_STRIDE_COARSE = 32
+
+        /** Columns per row of an end-to-end detect-only output: x1, y1, x2, y2, score, class (`[1, N, 6]`). */
+        const val DETECT_END_TO_END_COLUMNS = 6
 
         /** Columns per output row of an accepted pose model: 4 box + 1 score + 1 class + 17 * 3 keypoint values = 57. */
         const val POSE_OUTPUT_COLUMNS =

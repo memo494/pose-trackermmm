@@ -71,4 +71,26 @@ internal object HeadTestDetections {
             keypointScores = scores,
         )
     }
+
+    /**
+     * A detection of a box-only (detect-only) model: the same box as [person] but no usable keypoints, as the
+     * detect decoder writes them (17 keypoints at (0, 0) with confidence 0).
+     */
+    fun boxOnlyPerson(
+        centreXImg: Float,
+        centreYImg: Float,
+        heightImg: Float,
+        score: Float = 0.9f,
+    ): PoseDetection {
+        val top = centreYImg - BOX_TOP_ABOVE_HEAD_IN_H * heightImg
+        return PoseDetection(
+            boxLeftImg = centreXImg - BOX_HALF_WIDTH_IN_H * heightImg,
+            boxTopImg = top,
+            boxRightImg = centreXImg + BOX_HALF_WIDTH_IN_H * heightImg,
+            boxBottomImg = top + heightImg,
+            score = score,
+            keypointsXyImg = FloatArray(TrackerConfig.POSE_KEYPOINT_COUNT * 2),
+            keypointScores = FloatArray(TrackerConfig.POSE_KEYPOINT_COUNT),
+        )
+    }
 }

@@ -296,7 +296,9 @@ internal class CaptureSession(
                 importedModelNotUsed = loaded?.importedModelNotUsed == true,
                 builtInModelFailed = loaded?.builtInFailed == true,
                 modelWrongShape = loaded?.fallback == ModelFallback.WRONG_SHAPE,
+                boxOnly = loaded?.boxOnly == true,
             )
+        if (loaded?.boxOnly == true) logBoxOnly()
         thermalSampler =
             ThermalSampler(
                 PowerManagerThermalReader(context.getSystemService(PowerManager::class.java)),
@@ -426,6 +428,16 @@ internal class CaptureSession(
             loaded.builtInFailed,
             thermalStepDown = selection.thermal,
             wrongShape = loaded.fallback == ModelFallback.WRONG_SHAPE,
+            boxOnly = loaded.boxOnly,
+        )
+        if (loaded.boxOnly) logBoxOnly()
+    }
+
+    /** One log line for a box-only model: where its head, class and re-lock torso come from. */
+    private fun logBoxOnly() {
+        CaptureLog.log(
+            "model kind: box-only, head from the person box, person class ${config.detectPersonClass}, re-lock torso from the box",
+            null,
         )
     }
 

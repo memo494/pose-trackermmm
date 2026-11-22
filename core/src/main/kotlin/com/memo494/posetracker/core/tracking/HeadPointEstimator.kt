@@ -32,6 +32,10 @@ import com.memo494.posetracker.core.model.PoseDetection
  *
  * A frame whose box height is below [TrackerConfig.minBoxHeightImg] (or not finite) gives an invalid result and changes nothing.
  *
+ * Box-only models (M-legacy, a detect-only model with no keypoints): [update] is called with `boxOnly = true` by the
+ * session's decision (the loaded model's output layout, never the keypoint scores of a frame). The point is then the
+ * box rule of every frame ([setBoxOnlyPoint]), nothing is learned and the keypoints are never read.
+ *
  * Allocation-free after construction (AGENTS rule 8): five-element arrays are made once; the caller owns the
  * [HeadPoint] passed to [update].
  *
@@ -72,15 +76,21 @@ class HeadPointEstimator(
 
     /**
      * Folds one frame of this track's [detection] into the estimator and writes the head point into [out]
-     * (the caller owns [out]; every call overwrites all of it).
+     * (the caller owns [out]; every call overwrites all of it). With [boxOnly] the point is the box rule and the
+     * state is left alone.
      */
     fun update(
         detection: PoseDetection,
         out: HeadPoint,
+        boxOnly: Boolean = false,
     ) {
         val heightImg = boxHeightImg(detection)
         if (!isUsableBox(detection, heightImg, config)) {
             out.setInvalid()
+            return
+        }
+        if (boxOnly) {
+            setBoxOnlyPoint(detection, heightImg, config, out)
             return
         }
         updateVisibility(detection)

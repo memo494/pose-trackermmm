@@ -6,6 +6,7 @@ import android.content.Context
 import android.graphics.*
 import android.util.Log
 import com.memo494.posetracker.core.TrackerConfig
+import com.memo494.posetracker.core.decode.RawDetectDecoder
 import com.memo494.posetracker.core.decode.RawPoseDecoder
 import com.memo494.posetracker.core.modelimport.PoseOutputLayout
 import kotlin.math.max
@@ -18,7 +19,8 @@ class PoseEstimator(
     private val useGpu: Boolean = true,
     private var confidenceThreshold: Float = 0.25f,   // Can be changed as needed
     private var numItemsThreshold: Int = 30,
-    rawNmsIou: Float = TrackerConfig.DEFAULT_RAW_NMS_IOU
+    rawNmsIou: Float = TrackerConfig.DEFAULT_RAW_NMS_IOU,
+    personClass: Int = TrackerConfig.DEFAULT_DETECT_PERSON_CLASS // pose-tracker: person class of a detect-only model
 ) : BasePredictor() {
 
     private enum class OutputLayout {
@@ -30,6 +32,8 @@ class PoseEstimator(
         private const val BOX_CONF_FEATURES = 5 // Normal pose prefix: box x/y/w/h plus confidence.
         private const val KEYPOINT_FEATURES = 3 // One keypoint triplet: x, y, and confidence.
         private const val END_TO_END_MAX_ROWS = 300 // Ultralytics default max_det for capped end-to-end outputs.
+        private const val END_TO_END_CLASS_FEATURE = 5 // Class value column of an end-to-end detect row (x1, y1, x2, y2, score, class).
+        private const val CLASS_HALF = 0.5f // Half a class step: a class value is a whole number written as a float.
     }
 
     // Reusable float input for the CompiledModel input buffer.
@@ -48,6 +52,21 @@ class PoseEstimator(
     private var isEndToEnd = false
     // pose-tracker: raw [1, 56, N] / [1, N, 56] output (nms=None exports), decoded by core's RawPoseDecoder; null otherwise.
     private var rawDecoder: RawPoseDecoder? = null
+    // pose-tracker: detect-only output (no keypoints), decoded by core's RawDetectDecoder; null for a pose model.
+    private var detectDecoder: RawDetectDecoder? = null
+    /** The detect-only layout the model file has (`null` for a pose model); the app compares it with what the import recorded. */
+    var detectLayout: PoseOutputLayout? = null
+        private set
+    /** Class score columns of a raw detect-only output, 0 otherwise. */
+    var detectClasses: Int = 0
+        private set
+    // Feature index of the person score for the diagnostics scan: the person class column of a raw detect head, else 4.
+    private var scoreFeature = BOX_CONF_FEATURES - 1
+    // End-to-end detect head only: the class value (column 5) whose rows the diagnostics scan counts; -1 = every row.
+    private var scanClassValue = -1
+    // One shared, never-changing keypoint list for every detection of a detect-only model (the lists are only read).
+    private val noKeypointsXy: List<Pair<Float, Float>> = List(TrackerConfig.POSE_KEYPOINT_COUNT) { 0f to 0f }
+    private val noKeypointsConf: List<Float> = List(TrackerConfig.POSE_KEYPOINT_COUNT) { 0f }
     private lateinit var outputLayout: OutputLayout
 
     // Diagnostics of the last predict (pose-tracker change, see third_party/ULTRALYTICS.md); -1 = not measured yet.
@@ -68,19 +87,78 @@ class PoseEstimator(
 
         rtModel = InferenceModel.create(context, modelPath, useGpu, "PoseEstimator")
 
-        val inDims = rtModel.inputDims
-        val inHeight = if (inDims.size >= 4) inDims[1] else 640
-        val inWidth = if (inDims.size >= 4) inDims[2] else 640
-        inputSize = com.ultralytics.yolo.Size(inWidth, inHeight)
-        modelInputSize = Pair(inWidth, inHeight)
+        try { // pose-tracker: any failure below (an Error such as OOM included) must not leak the model
+            val inDims = rtModel.inputDims
+            val inHeight = if (inDims.size >= 4) inDims[1] else 640
+            val inWidth = if (inDims.size >= 4) inDims[2] else 640
+            inputSize = com.ultralytics.yolo.Size(inWidth, inHeight)
+            modelInputSize = Pair(inWidth, inHeight)
 
-        val outputShape = rtModel.outputDims.getOrNull(0) ?: IntArray(0)
-        require(outputShape.size >= 3) {
-            "Unexpected pose output shape. Expected [batch, features, anchors] or [batch, anchors, features], Actual=${outputShape.contentToString()}"
+            val outputShape = rtModel.outputDims.getOrNull(0) ?: IntArray(0)
+            require(outputShape.size >= 3) {
+                "Unexpected pose output shape. Expected [batch, features, anchors] or [batch, anchors, features], Actual=${outputShape.contentToString()}"
+            }
+
+            batchSize = outputShape[0]
+            val rawLayout = PoseOutputLayout.rawOf(outputShape) // pose-tracker: same rule as the import check
+            detectLayout = if (rawLayout == null) PoseOutputLayout.detectOf(outputShape, inWidth, inHeight) else null
+            val detect = detectLayout
+            if (detect != null) {
+                detectClasses = PoseOutputLayout.detectClassesOf(outputShape, inWidth, inHeight)
+                initDetectOnly(detect, outputShape, inWidth, inHeight, personClass, rawNmsIou)
+            } else {
+                initPose(outputShape, rawLayout, inWidth, inHeight, rawNmsIou)
+            }
+
+            floatInput = FloatArray(inWidth * inHeight * 3)
+            inputBitmap = Bitmap.createBitmap(inWidth, inHeight, Bitmap.Config.ARGB_8888)
+            intValues = IntArray(inWidth * inHeight)
+        } catch (e: Throwable) {
+            rtModel.close()
+            throw e
         }
+    }
 
-        batchSize = outputShape[0]
-        val rawLayout = PoseOutputLayout.rawOf(outputShape) // pose-tracker: same rule as the import check
+    /**
+     * pose-tracker: a detect-only output ([PoseOutputLayout.detectOf], same rule as the import check). Throws, and so
+     * makes the model unusable, when [personClass] is not one of the model's classes.
+     */
+    private fun initDetectOnly(
+        detect: PoseOutputLayout,
+        outputShape: IntArray,
+        inWidth: Int,
+        inHeight: Int,
+        personClass: Int,
+        rawNmsIou: Float
+    ) {
+        val channelsFirst = detect == PoseOutputLayout.DETECT_RAW_CHANNELS_FIRST
+        outputLayout = if (channelsFirst) OutputLayout.FEATURES_FIRST else OutputLayout.ANCHORS_FIRST
+        numAnchors = if (channelsFirst) outputShape[2] else outputShape[1]
+        outDim2 = outputShape[2]
+        keypointCount = TrackerConfig.POSE_KEYPOINT_COUNT
+        if (detect != PoseOutputLayout.DETECT_END_TO_END) {
+            scoreFeature = TrackerConfig.POSE_BOX_VALUES + personClass
+        } else {
+            scanClassValue = personClass
+        }
+        detectDecoder = RawDetectDecoder(
+            detect,
+            numAnchors,
+            detectClasses,
+            personClass,
+            inWidth,
+            inHeight,
+            TrackerConfig(rawNmsIou = rawNmsIou)
+        )
+    }
+
+    private fun initPose(
+        outputShape: IntArray,
+        rawLayout: PoseOutputLayout?,
+        inWidth: Int,
+        inHeight: Int,
+        rawNmsIou: Float
+    ) {
         val featuresFirstPose = rawLayout == PoseOutputLayout.RAW_CHANNELS_FIRST ||
             (rawLayout == null && isPoseFeatureCount(outputShape[1]) && outputShape[2] > END_TO_END_MAX_ROWS)
         val anchorsFirstPose = rawLayout == PoseOutputLayout.RAW_CHANNELS_LAST ||
@@ -121,10 +199,6 @@ class PoseEstimator(
                 TrackerConfig(rawNmsIou = rawNmsIou)
             )
         }
-
-        floatInput = FloatArray(inWidth * inHeight * 3)
-        inputBitmap = Bitmap.createBitmap(inWidth, inHeight, Bitmap.Config.ARGB_8888)
-        intValues = IntArray(inWidth * inHeight)
     }
 
     override fun predict(bitmap: Bitmap, origWidth: Int, origHeight: Int, rotateForCamera: Boolean, isLandscape: Boolean): YOLOResult {
@@ -187,6 +261,7 @@ class PoseEstimator(
         origHeight: Int
     ): List<PoseDetection> {
         recordRawScoreStats(flat, confidenceThreshold)
+        detectDecoder?.let { return postProcessDetectOnly(it, flat, confidenceThreshold, origWidth, origHeight) }
         rawDecoder?.let { return postProcessRawPose(it, flat, confidenceThreshold, origWidth, origHeight) }
         if (isEndToEnd) {
             return postProcessEndToEndPose(flat, confidenceThreshold, origWidth, origHeight)
@@ -313,6 +388,39 @@ class PoseEstimator(
         return detections
     }
 
+    /**
+     * pose-tracker: detect-only output. The core decoder thresholds on the person class, runs class-agnostic NMS and
+     * gives boxes in model pixels; they are mapped to the image like the raw pose path does. The 17 keypoints are all
+     * at (0, 0) with confidence 0: never visible, so the head point comes from the box.
+     */
+    private fun postProcessDetectOnly(
+        decoder: RawDetectDecoder,
+        flat: FloatArray,
+        confidenceThreshold: Float,
+        origWidth: Int,
+        origHeight: Int
+    ): List<PoseDetection> {
+        val count = decoder.decode(flat, confidenceThreshold)
+        val detections = mutableListOf<PoseDetection>()
+        for (i in 0 until count) {
+            val outputRect = RectF(
+                decoder.boxLeftMdl(i),
+                decoder.boxTopMdl(i),
+                decoder.boxRightMdl(i),
+                decoder.boxBottomMdl(i)
+            )
+            val rectF = inputRectFromOutputRect(outputRect, origWidth, origHeight, false) ?: continue
+            val normBox = normalizedRectFromInputRect(rectF, origWidth, origHeight)
+            detections.add(
+                PoseDetection(
+                    box = Box(0, labelName(0), decoder.scoreOf(i), rectF, normBox),
+                    keypoints = Keypoints(xyn = noKeypointsXy, xy = noKeypointsXy, conf = noKeypointsConf)
+                )
+            )
+        }
+        return detections
+    }
+
     private fun postProcessEndToEndPose(
         flat: FloatArray,
         confidenceThreshold: Float,
@@ -378,7 +486,8 @@ class PoseEstimator(
         var above = 0
         var nanRows = 0
         for (j in 0 until numAnchors) {
-            val conf = featureValue(flat, 4, j)
+            if (scanClassValue >= 0 && !isScanClass(featureValue(flat, END_TO_END_CLASS_FEATURE, j))) continue
+            val conf = featureValue(flat, scoreFeature, j)
             if (conf.isNaN()) {
                 nanRows++
                 continue
@@ -390,6 +499,10 @@ class PoseEstimator(
         lastRawRowsAboveThreshold = above
         lastNanRawRows = nanRows
     }
+
+    /** `true` when the class value of an end-to-end detect row rounds to [scanClassValue]; a NaN is no class. */
+    private fun isScanClass(classValue: Float): Boolean =
+        classValue >= scanClassValue - CLASS_HALF && classValue < scanClassValue + CLASS_HALF
 
     private fun featureValue(
         flat: FloatArray,

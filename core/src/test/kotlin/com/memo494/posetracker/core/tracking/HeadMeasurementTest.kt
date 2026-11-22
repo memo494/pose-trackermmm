@@ -4,6 +4,7 @@ import com.google.common.truth.Truth.assertThat
 import com.memo494.posetracker.core.TrackerConfig
 import com.memo494.posetracker.core.model.PoseDetection
 import com.memo494.posetracker.core.tracking.HeadTestDetections.allHead
+import com.memo494.posetracker.core.tracking.HeadTestDetections.boxOnlyPerson
 import com.memo494.posetracker.core.tracking.HeadTestDetections.person
 import com.memo494.posetracker.core.tracking.HeadTestDetections.scoresOf
 import org.junit.jupiter.api.Test
@@ -184,6 +185,84 @@ class HeadMeasurementTest {
         assertThat(out.valid).isTrue()
         assertThat(out.estimated).isFalse()
         assertThat(out.headXImg).isWithin(TOLERANCE_PX).of(300f)
+    }
+
+    // ---- box-only models (M-legacy T3) ----
+
+    @Test
+    fun boxOnly_putsThePointAtTheTopRatioOfTheBox_andIsNotEstimated() {
+        val detection = boxOnlyPerson(centreXImg = 300f, centreYImg = 200f, heightImg = 100f)
+
+        HeadMeasurement.of(detection, config, out, boxOnly = true)
+
+        assertThat(out.valid).isTrue()
+        assertThat(out.estimated).isFalse()
+        assertThat(out.headXImg).isWithin(TOLERANCE_PX).of(300f)
+        // Box top 190 + 0.10 * 100.
+        assertThat(out.headYImg).isWithin(TOLERANCE_PX).of(200f)
+    }
+
+    @Test
+    fun boxOnly_ignoresKeypointsEvenWhenTheyAreConfident() {
+        val detection = person(300f, 200f, 100f, moved = mapOf(0 to (500f to 400f)))
+
+        HeadMeasurement.of(detection, config, out, boxOnly = true)
+
+        assertThat(out.headXImg).isWithin(TOLERANCE_PX).of(300f)
+        assertThat(out.headYImg).isWithin(TOLERANCE_PX).of(200f)
+    }
+
+    @Test
+    fun boxOnly_theTopRatioComesFromTheConfig() {
+        val detection = boxOnlyPerson(300f, 200f, 100f)
+
+        HeadMeasurement.of(detection, TrackerConfig(headFallbackTopRatio = 0.2f), out, boxOnly = true)
+
+        assertThat(out.headYImg).isWithin(TOLERANCE_PX).of(210f)
+    }
+
+    @Test
+    fun boxOnly_varianceIsTheBoxOnlyNoiseOverThePersonScore_notTheLargeFallbackNoise() {
+        val detection = boxOnlyPerson(300f, 200f, 100f, score = 0.5f)
+
+        HeadMeasurement.of(detection, config, out, boxOnly = true)
+
+        // (0.05 * 100)^2 / 0.5 = 50; the pose fallback would be (0.10 * 100)^2 = 100.
+        assertThat(out.varianceImg2).isWithin(RELATIVE_TOLERANCE * 50f).of(50f)
+    }
+
+    @Test
+    fun boxOnly_theNoiseRatioComesFromTheConfig() {
+        val detection = boxOnlyPerson(300f, 200f, 100f, score = 1f)
+
+        HeadMeasurement.of(detection, TrackerConfig(headBoxOnlyNoiseRatio = 0.1f), out, boxOnly = true)
+
+        assertThat(out.varianceImg2).isWithin(RELATIVE_TOLERANCE * 100f).of(100f)
+    }
+
+    @Test
+    fun boxOnly_varianceUsesTheMinimumMeanConfidenceAsAFloor() {
+        val detection = boxOnlyPerson(300f, 200f, 100f, score = 0.001f)
+
+        HeadMeasurement.of(detection, config, out, boxOnly = true)
+
+        // (0.05 * 100)^2 / 0.05 (the minimum mean confidence).
+        assertThat(out.varianceImg2).isWithin(RELATIVE_TOLERANCE * 500f).of(500f)
+    }
+
+    @Test
+    fun boxOnly_anUnusableBoxIsInvalid() {
+        HeadMeasurement.of(boxOnlyPerson(300f, 200f, 0f), config, out, boxOnly = true)
+
+        assertThat(out.valid).isFalse()
+        assertThat(out.headYImg.isNaN()).isTrue()
+    }
+
+    @Test
+    fun theDefaultIsThePoseRule_aKeypointFreeDetectionIsEstimated() {
+        HeadMeasurement.of(boxOnlyPerson(300f, 200f, 100f), config, out)
+
+        assertThat(out.estimated).isTrue()
     }
 
     private companion object {

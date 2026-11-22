@@ -12,21 +12,31 @@ import com.memo494.posetracker.core.model.PoseDetection
  * none qualifies it is the box fallback `(box centre x, box top + headFallbackTopRatio * h)` with
  * [HeadPoint.estimated] set. `h` is the box height; when it is below [TrackerConfig.minBoxHeightImg] (or not
  * finite) the result is invalid ([HeadPoint.valid] is `false`; fail closed, no division by zero).
+ *
+ * For a box-only (detect-only) model the session passes `boxOnly = true`: the keypoints are never read (the decoder
+ * leaves them at (0, 0) with confidence 0) and the point is the box rule of every frame, not [HeadPoint.estimated]
+ * (see `setBoxOnlyPoint`). The model's kind is decided by the loaded model, never guessed from the keypoint scores.
  */
 object HeadMeasurement {
     /**
      * Computes the head point of [detection] into [out] (allocation-free: the caller owns [out] and every
      * call overwrites all of it). The variance is `(headMeasurementNoiseRatio * h)^2 / max(mean score of the
-     * used keypoints, headMinMeanConfidence)`, or `(headFallbackNoiseRatio * h)^2` for the fallback.
+     * used keypoints, headMinMeanConfidence)`, or `(headFallbackNoiseRatio * h)^2` for the fallback. With [boxOnly]
+     * the point is the box rule and the variance `(headBoxOnlyNoiseRatio * h)^2 / max(score, headMinMeanConfidence)`.
      */
     fun of(
         detection: PoseDetection,
         config: TrackerConfig,
         out: HeadPoint,
+        boxOnly: Boolean = false,
     ) {
         val heightImg = boxHeightImg(detection)
         if (!isUsableBox(detection, heightImg, config)) {
             out.setInvalid()
+            return
+        }
+        if (boxOnly) {
+            setBoxOnlyPoint(detection, heightImg, config, out)
             return
         }
         val headCount = minOf(detection.keypointCount, TrackerConfig.HEAD_KEYPOINT_COUNT)

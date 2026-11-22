@@ -32,6 +32,9 @@ import com.memo494.posetracker.detector.Accelerator
  * @property modelInputWidth width of the running model's input, in model pixels (Mdl); 0 = no model.
  * @property modelInputHeight height of the running model's input, in model pixels (Mdl); 0 = no model.
  * @property modelImported whether the running model is the imported one, not the built-in one.
+ * @property boxOnlyClass the person class index (`TrackerConfig.detectPersonClass`) of a running box-only model
+ *   (detect-only, no keypoints: the head dot comes from the person box), or [NOT_BOX_ONLY] for a pose model; the HUD
+ *   note shows it, so a wrong class guess is visible.
  * @property tracks the shown tracks of the tracker for [frame] (or for the idle time since it), Img space, an
  *   immutable copy made on the capture thread; [TrackSnapshot.EMPTY] when there is no tracked frame.
  * @property lockedId id of the locked track (ARCHITECTURE §6.6), or [NO_LOCK]; the pipeline sets it only while that
@@ -54,6 +57,7 @@ data class OverlayState(
     val modelInputWidth: Int = 0,
     val modelInputHeight: Int = 0,
     val modelImported: Boolean = false,
+    val boxOnlyClass: Int = NOT_BOX_ONLY,
     val tracks: TrackSnapshot = TrackSnapshot.EMPTY,
     val lockedId: Int = NO_LOCK,
 ) {
@@ -72,6 +76,9 @@ data class OverlayState(
     companion object {
         /** [lockedId] when no track is locked (track ids start at 1). */
         const val NO_LOCK = -1
+
+        /** [boxOnlyClass] when the running model has keypoints (a pose model). */
+        const val NOT_BOX_ONLY = -1
 
         /** [maxRawScore] when the detector did not measure it. */
         const val NOT_MEASURED_SCORE = -1f

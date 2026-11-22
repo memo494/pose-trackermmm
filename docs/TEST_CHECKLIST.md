@@ -583,12 +583,12 @@ in the zip), the size does not change, or the app closes: Share diagnostics.
    or "Added to the library. Pick it under …") and it is not a refusal.
 2. Pick it for Portrait or Landscape, press **Start**: rings on heads like the built-in model. Import the same file
    again: "Already in the library. …".
-3. Import the old detect-only file (`[1,6,2100]`). Expected: refused with "This is a detection model without body
-   keypoints. Export a pose model (for example yolo26n-pose)."
+3. Import the old detect-only file (`[1,6,2100]` at 320x320). Since M-legacy it is accepted (see the M-legacy section).
+   A YOLOv5 head with objectness (`[1,6300,9]`) is still refused, with the list of accepted shapes.
 4. Optional: save diagnostics after one minute with people and compare `frameMsP95` with the built-in model; the raw
    model reads a bigger output, so a little slower is normal.
 
-**Pass:** the raw model is accepted and tracks; the detect-only file is refused with that message.
+**Pass:** the raw model is accepted and tracks; the detect-only file is accepted as a box-only model.
 **If it fails:** the raw model is refused, or accepted but no marks: Share diagnostics and say which file.
 
 ### 4. Walk, lock, leave, return (tracker and lock)
@@ -645,6 +645,50 @@ is cool: Share diagnostics. (`blocked` after a crash: **Remove all imported mode
 ### 8. Send the zip
 Press **Share diagnostics** once after block 7 (or **Save diagnostics** after each block, then send the last one) and
 send it with one sentence about what you did and the build id.
+
+---
+
+## M-legacy — a model without keypoints (box only)
+
+You need your detect-only model: input `[1,3,320,320]`, output `[1,6,2100]` (4 box values + 2 class scores). Block 1
+needs the capture stopped.
+
+### 1. Import and assign
+Import the model file, assign it to the portrait or landscape slot (the one that fits a 320x320 model; a square model
+fits both), press **Start**.
+**Pass:** the import is accepted (no refusal text), Start works, the HUD shows `det ... in 320 imp` and the note
+`Box-only model: head from box (class 0)`.
+**If it fails:** a refusal text or no note: Share diagnostics (`modelKind`, `detectPersonClass`, `modelFallback` in `summary.txt`).
+
+### 2. The dot on the head
+Point the phone at 1, then 2, then 3 people (a video on a screen is fine).
+**Pass:** one dot per person, on the head or just above it (the dot is 0.10 of the person's height below the top of the
+box), no second dot on one person, the dots follow when people walk and do not shake when they stand still.
+**If it fails:** dots on the wrong thing or on nothing: see block 4. Dots on the chest or far above the head with the
+right boxes: Share diagnostics and say so.
+
+### 3. Tap to lock, walk out and back
+Tap the handle, tap one person: the double ring appears on them. Let them walk out of the picture and come back (in the
+same clothes, standing full height).
+**Pass:** the ring stays while they are seen; after they come back it returns to them within a few seconds, or it stays
+off. It must **never** go to a different person.
+**If it fails:** the ring jumps to someone else (report at once), or never returns although the person is a whole standing
+body (Share diagnostics; the log lines start with `lock:`). A person who is seated or cut by the frame edge has no box
+torso, so no automatic re-lock is expected; tap again.
+
+### 4. Is class 0 really "person"?
+Look at the boxes and at `summary.txt`: `modelKind=box`, `detectPersonClass=0`.
+**Pass:** the boxes and dots are on people only.
+**If it fails:** the boxes land on something else (or on nothing while people are visible): your model's person class is
+probably 1. Share diagnostics and say so; `detectPersonClass` must then be set to 1 (it is a `TrackerConfig` value, there
+is no slider for it yet).
+
+### 5. Rotate between a box-only slot and a pose slot
+Assign the detect-only model to one orientation and a pose model (or the built-in one) to the other. Tap to lock a person,
+then rotate the phone to the other orientation.
+**Pass:** the lock is lost on purpose (a changed model kind ends the lock, fail closed); the ring is gone and the log line
+`lock: cleared (model kind changed)` is in the diagnostics. Tap to lock again works.
+**If it fails:** the ring stays on a person after the model kind changed: Share diagnostics.
 
 ---
 

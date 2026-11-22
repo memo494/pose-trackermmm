@@ -362,6 +362,59 @@ class TorsoRegionTest {
         assertThat(torso(nanTop, upperConfig)).isFalse()
     }
 
+    // ---- box-only models (M-legacy T3): the keypoints are never read ----
+
+    private fun boxOnlyTorso(
+        detection: PoseDetection,
+        config: TrackerConfig = exactConfig,
+    ): Boolean = TorsoRegion(config, boxOnly = true).of(detection, IMAGE_WIDTH, IMAGE_HEIGHT, out)
+
+    @Test
+    fun boxOnly_aKeypointFreeWholeBodyBox_givesTheBoxPart() {
+        val detection = person(leftShoulderScore = 0f, rightShoulderScore = 0f, hipScore = 0f)
+
+        assertThat(boxOnlyTorso(detection)).isTrue()
+
+        assertThat(rect()).containsExactly(122, 82, 138, 108).inOrder()
+        assertThat(out.source).isEqualTo(TorsoRect.SOURCE_BOX)
+    }
+
+    @Test
+    fun boxOnly_ignoresConfidentKeypoints_andUsesTheBoxPartEvenWhenFourAreConfident() {
+        assertThat(torso(person())).isTrue()
+        assertThat(out.source).isEqualTo(TorsoRect.SOURCE_KEYPOINTS)
+
+        assertThat(boxOnlyTorso(person())).isTrue()
+
+        assertThat(out.source).isEqualTo(TorsoRect.SOURCE_BOX)
+        assertThat(rect()).containsExactly(122, 82, 138, 108).inOrder()
+    }
+
+    @Test
+    fun boxOnly_aBoxThatIsNotAWholeBody_givesNoTorso_evenWithConfidentShoulders() {
+        val wide = person(hipScore = 0.1f, boxLeftImg = 90f, boxRightImg = 200f, boxTopImg = 20f, boxBottomImg = 92f)
+        assertThat(torso(wide, upperConfig)).isTrue()
+        assertThat(out.source).isEqualTo(TorsoRect.SOURCE_UPPER_BODY)
+
+        assertThat(boxOnlyTorso(wide, upperConfig)).isFalse()
+
+        assertThat(out.isEmpty).isTrue()
+    }
+
+    @Test
+    fun boxOnly_theFlagCanBeSwitchedOnAndOff() {
+        val region = TorsoRegion(exactConfig)
+        assertThat(region.boxOnly).isFalse()
+
+        region.boxOnly = true
+        assertThat(region.of(person(), IMAGE_WIDTH, IMAGE_HEIGHT, out)).isTrue()
+        assertThat(out.source).isEqualTo(TorsoRect.SOURCE_BOX)
+
+        region.boxOnly = false
+        assertThat(region.of(person(), IMAGE_WIDTH, IMAGE_HEIGHT, out)).isTrue()
+        assertThat(out.source).isEqualTo(TorsoRect.SOURCE_KEYPOINTS)
+    }
+
     private companion object {
         const val IMAGE_WIDTH = 320
         const val IMAGE_HEIGHT = 240

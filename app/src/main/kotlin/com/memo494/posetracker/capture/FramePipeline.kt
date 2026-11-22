@@ -73,6 +73,9 @@ import com.memo494.posetracker.overlay.OverlayState
  *   not; it adds the note [OverlayWarning.BUILT_IN_MODEL_FAILED], just above the imported-model note.
  * @param modelWrongShape whether the slot's model was refused for its shape (`ModelFallback.WRONG_SHAPE`); it turns the
  *   imported-model note into [OverlayWarning.MODEL_WRONG_SHAPE].
+ * @param boxOnly whether [detector] runs a box-only (detect-only) model, decided by the loaded model's output layout and
+ *   never from keypoint scores: the tracker then takes the head from the person box every frame, the re-lock torso is the
+ *   box part only, and every state carries the HUD note with `TrackerConfig.detectPersonClass`.
  */
 internal class FramePipeline(
     detector: PoseDetector?,
@@ -84,10 +87,12 @@ internal class FramePipeline(
     importedModelNotUsed: Boolean = false,
     builtInModelFailed: Boolean = false,
     modelWrongShape: Boolean = false,
+    boxOnly: Boolean = false,
 ) {
     // The model can change when the orientation changes (M1b-1): see onModelChanged. Capture thread only.
     private var detector: PoseDetector? = detector
     private var modelImported: Boolean = modelImported
+    private var boxOnly: Boolean = boxOnly
     private var importedModelNotUsed: Boolean = importedModelNotUsed
     private var builtInModelFailed: Boolean = builtInModelFailed
     private var modelWrongShape: Boolean = modelWrongShape
@@ -104,15 +109,20 @@ internal class FramePipeline(
     private var modelInputWidth = detector?.inputWidth ?: 0
     private var modelInputHeight = detector?.inputHeight ?: 0
     private var lastState =
-        OverlayState(modelInputWidth = modelInputWidth, modelInputHeight = modelInputHeight, modelImported = modelImported)
-    private val tracker = Tracker(config)
+        OverlayState(
+            modelInputWidth = modelInputWidth,
+            modelInputHeight = modelInputHeight,
+            modelImported = modelImported,
+            boxOnlyClass = boxOnlyClassOf(boxOnly),
+        )
+    private val tracker = Tracker(config, boxOnly)
     private val smoother = HeadSmoother(config)
 
     /** Number of ids the display smoother holds (read-only, for tests). */
     internal val smootherActiveCount: Int
         get() = smoother.activeCount
     private var trackedFrameNewest = false
-    private val lockKeeper = LockKeeper(config) { message -> safeLog(message, null) }
+    private val lockKeeper = LockKeeper(config) { message -> safeLog(message, null) }.also { it.boxOnly = boxOnly }
     private val missLog = AssociationMissLog(config.assocMissLogPerMin) { message -> safeLog(message, null) }
 
     /** Clock reading after the newest tracked frame was published (not its arrival): idle time starts here. */
@@ -339,6 +349,7 @@ internal class FramePipeline(
      * @param notUsed whether an imported model is expected but the built-in one runs (the lowest-priority warning).
      * @param builtInFailed whether the square fallback model runs because the orientation's bundled model could not.
      * @param wrongShape whether the slot's model was refused for its shape (the note [OverlayWarning.MODEL_WRONG_SHAPE]).
+     * @param boxOnly whether [newDetector] runs a box-only (detect-only) model; the tracker and the lock keeper follow it.
      * @param thermalStepDown whether [newDetector] is the small model of the thermal step-down (the note
      *   [OverlayWarning.THERMAL_STEPPED_DOWN], below the other notes).
      */
@@ -349,9 +360,14 @@ internal class FramePipeline(
         builtInFailed: Boolean = false,
         thermalStepDown: Boolean = false,
         wrongShape: Boolean = false,
+        boxOnly: Boolean = false,
     ) {
         try {
             detector = newDetector
+            if (this.boxOnly != boxOnly) lockKeeper.onModelKindChanged()
+            this.boxOnly = boxOnly
+            tracker.boxOnly = boxOnly
+            lockKeeper.boxOnly = boxOnly
             this.thermalStepDown = thermalStepDown
             modelImported = imported
             importedModelNotUsed = notUsed
@@ -359,7 +375,13 @@ internal class FramePipeline(
             modelWrongShape = wrongShape
             modelInputWidth = newDetector?.inputWidth ?: 0
             modelInputHeight = newDetector?.inputHeight ?: 0
-            lastState = lastState.copy(modelInputWidth = modelInputWidth, modelInputHeight = modelInputHeight, modelImported = imported)
+            lastState =
+                lastState.copy(
+                    modelInputWidth = modelInputWidth,
+                    modelInputHeight = modelInputHeight,
+                    modelImported = imported,
+                    boxOnlyClass = boxOnlyClassOf(boxOnly),
+                )
             // The timing of the old model must not mix into the new model's percentiles.
             copyWindow.clear()
             preWindow.clear()
@@ -531,6 +553,7 @@ internal class FramePipeline(
                 modelInputWidth = modelInputWidth,
                 modelInputHeight = modelInputHeight,
                 modelImported = modelImported,
+                boxOnlyClass = boxOnlyClassOf(boxOnly),
                 tracks = tracks,
             ),
         )
@@ -613,6 +636,7 @@ internal class FramePipeline(
                 modelInputWidth = modelInputWidth,
                 modelInputHeight = modelInputHeight,
                 modelImported = modelImported,
+                boxOnlyClass = boxOnlyClassOf(boxOnly),
             ),
         )
     }
@@ -649,6 +673,9 @@ internal class FramePipeline(
             thermalStepDown -> OverlayWarning.THERMAL_STEPPED_DOWN
             else -> null
         }
+
+    /** The HUD's person class of a box-only model, or [OverlayState.NOT_BOX_ONLY]. */
+    private fun boxOnlyClassOf(boxOnly: Boolean): Int = if (boxOnly) config.detectPersonClass else OverlayState.NOT_BOX_ONLY
 
     private fun republish(dropFrame: Boolean) {
         try {

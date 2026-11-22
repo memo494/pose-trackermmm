@@ -16,7 +16,7 @@ data class TensorDescription(
 )
 
 /**
- * Why [ImportedModelRules] refused a model: one value per rule of layout version 2 (M0c D2, M1a T1). The [key] is a stable
+ * Why [ImportedModelRules] refused a model: one value per rule of the import layout (M0c D2, M1a T1, M-legacy T1). The [key] is a stable
  * identifier for messages and logs (the app maps it to text); it never changes once released.
  */
 enum class ImportRejection(
@@ -31,10 +31,13 @@ enum class ImportRejection(
     /** The input or the output is `int8` or `uint8` (an INT8 export); only `float32` is accepted. */
     QUANTIZED_IO("quantized_io"),
 
-    /** The input is not 4-dimensional with batch 1 and 3 channels first, i.e. not NCHW `[1, 3, H, W]`. */
+    /** The input is not 4-dimensional with batch 1 and 3 channels, first (NCHW `[1, 3, H, W]`) or last (NHWC `[1, H, W, 3]`). */
     INPUT_NOT_NCHW("input_not_nchw"),
 
-    /** The input is NHWC `[1, H, W, 3]` (the common TensorFlow layout); recognised so the message can say so. */
+    /**
+     * The input is NHWC `[1, H, W, 3]`. No longer returned: NHWC is accepted since M-legacy T1 (see [InputLayout.NHWC]);
+     * the entry and its key stay because keys are never reused or removed.
+     */
     INPUT_NHWC("input_nhwc"),
 
     /** The input height or width is not a multiple of [TrackerConfig.IMPORT_INPUT_SIZE_STEP]. */
@@ -60,8 +63,10 @@ enum class ImportRejection(
 
     /**
      * The output has channels `C` with `5 <= C < 56` (`[1, C, N]` or `[1, N, C]`): 4 box values and classes, too few
-     * for 17 keypoints, so it is a detection model without body keypoints (for example `[1, 6, 2100]`); except
-     * channel counts of a pose head with another keypoint count, see [OUTPUT_KEYPOINT_COUNT].
+     * for 17 keypoints, so it is a detection model without body keypoints; except channel counts of a pose head with
+     * another keypoint count, see [OUTPUT_KEYPOINT_COUNT]. Since M-legacy T2 the detect-only shapes the app can decode
+     * (`[1, 4 + C, N]`, `[1, N, 4 + C]` with N the anchors of the input, `[1, N, 6]`, see [PoseOutputLayout.detectOf]) are accepted; this is still
+     * returned for a detect-like shape it cannot decode (for example `[1, 300, 51]` or the ambiguous `[1, 5, 6]`).
      */
     OUTPUT_DETECT_ONLY("output_detect_only"),
 
@@ -90,16 +95,21 @@ sealed interface ImportCheck {
     /**
      * The model fits layout version 2 (end-to-end) or a raw pose layout.
      *
-     * @property inputWidth width `W` of the input tensor `[1, 3, H, W]`, in pixels (Mdl space).
-     * @property inputHeight height `H` of the input tensor `[1, 3, H, W]`, in pixels (Mdl space).
+     * @property inputWidth real width `W` of the input tensor (`[1, 3, H, W]` or `[1, H, W, 3]`), in pixels (Mdl space).
+     * @property inputHeight real height `H` of the input tensor, in pixels (Mdl space).
      * @property outputRows rows `N` of the output (candidate detections per frame), unitless.
      * @property outputLayout how the output is laid out.
+     * @property inputLayout how the input tensor is laid out (channels first or last).
+     * @property classes class score columns `C` of a raw detect-only output (`[1, 4 + C, N]` or `[1, N, 4 + C]`), count;
+     *   0 for a pose output and for the end-to-end detect-only output (its class is a value of the row).
      */
     data class Accepted(
         val inputWidth: Int,
         val inputHeight: Int,
         val outputRows: Int,
         val outputLayout: PoseOutputLayout = PoseOutputLayout.END_TO_END,
+        val inputLayout: InputLayout = InputLayout.NCHW,
+        val classes: Int = 0,
     ) : ImportCheck
 
     /**
@@ -138,17 +148,23 @@ object ImportedModelRules {
     /**
      * Applies the rules in this order and returns the first that fails: input count, output count, input
      * type (`int8`/`uint8` is [ImportRejection.QUANTIZED_IO], any other non-float32 [ImportRejection.INPUT_TYPE]),
-     * input layout (NHWC recognised, otherwise NCHW rank/batch/channels, then height and width each
-     * inside the size range, then each a multiple of [TrackerConfig.IMPORT_INPUT_SIZE_STEP], then the
-     * long side at most [TrackerConfig.importMaxInputAspect] times the short side), output type, output
-     * shape (detect-only and other channels-first heads recognised). Accepts exactly one `float32` input
-     * `[1, 3, H, W]` (not necessarily square) and one `float32` output that is one of:
+     * input layout (NCHW or NHWC by rank/batch/channels, otherwise [ImportRejection.INPUT_NOT_NCHW]; then height and
+     * width each inside the size range, then each a multiple of [TrackerConfig.IMPORT_INPUT_SIZE_STEP], then the
+     * long side at most [TrackerConfig.importMaxInputAspect] times the short side, the same for both layouts),
+     * output type, output shape (detect-only and other channels-first heads recognised). Accepts exactly one
+     * `float32` input `[1, 3, H, W]` ([InputLayout.NCHW]) or `[1, H, W, 3]` ([InputLayout.NHWC]), not necessarily
+     * square, and one `float32` output that is one of:
      * - `[1, N, 57]` with `0 < N <=` [TrackerConfig.IMPORT_MAX_OUTPUT_ROWS] ([TrackerConfig.POSE_OUTPUT_COLUMNS]
      *   columns, [PoseOutputLayout.END_TO_END]; the vendored `PoseEstimator` treats 57 columns as end-to-end only up
      *   to its `END_TO_END_MAX_ROWS`, so a larger `N` is refused as [ImportRejection.OUTPUT_ROWS]);
      * - `[1, 56, N]` or `[1, N, 56]` ([TrackerConfig.POSE_RAW_CHANNELS], [PoseOutputLayout.RAW_CHANNELS_FIRST] /
      *   [PoseOutputLayout.RAW_CHANNELS_LAST]) with `56 < N <=` [TrackerConfig.IMPORT_MAX_RAW_OUTPUT_ROWS]. A shape
-     *   with 56 on both axes is ambiguous and refused as [ImportRejection.OUTPUT_SHAPE].
+     *   with 56 on both axes is ambiguous and refused as [ImportRejection.OUTPUT_SHAPE];
+     * - a detect-only output ([PoseOutputLayout.detectOf]): `[1, 4 + C, N]` or `[1, N, 4 + C]` with `1 <= C <= 80`
+     *   (raw, `N` = [PoseOutputLayout.detectAnchorCount] of the input size, so a YOLOv5 head with objectness and three
+     *   anchors per cell is refused; the class count is returned as
+     *   [ImportCheck.Accepted.classes]) or `[1, N, 6]` with `0 < N <= 300` (end-to-end). Channel counts `5 + 3k` and 57
+     *   stay refused as before, so does 85 (YOLOv5 objectness).
      */
     fun check(
         inputs: List<TensorDescription>,
@@ -168,19 +184,17 @@ object ImportedModelRules {
         }
 
         val inputShape = input.shape
-        val height: Int
-        val width: Int
-        if (isNchwPrefix(inputShape)) {
-            height = inputShape[AXIS_2]
-            width = inputShape[AXIS_3]
-            if (!inRange(height, config) || !inRange(width, config)) return reject(ImportRejection.INPUT_SIZE_OUT_OF_RANGE)
-            if (!isStepMultiple(height) || !isStepMultiple(width)) return reject(ImportRejection.INPUT_SIZE_NOT_MULTIPLE)
-            if (tooElongated(height, width, config)) return reject(ImportRejection.INPUT_ASPECT)
-        } else if (isNhwc(inputShape)) {
-            return reject(ImportRejection.INPUT_NHWC)
-        } else {
-            return reject(ImportRejection.INPUT_NOT_NCHW)
-        }
+        val inputLayout =
+            when {
+                isNchwPrefix(inputShape) -> InputLayout.NCHW
+                isNhwc(inputShape) -> InputLayout.NHWC
+                else -> return reject(ImportRejection.INPUT_NOT_NCHW)
+            }
+        val height = if (inputLayout == InputLayout.NCHW) inputShape[AXIS_2] else inputShape[AXIS_1]
+        val width = if (inputLayout == InputLayout.NCHW) inputShape[AXIS_3] else inputShape[AXIS_2]
+        if (!inRange(height, config) || !inRange(width, config)) return reject(ImportRejection.INPUT_SIZE_OUT_OF_RANGE)
+        if (!isStepMultiple(height) || !isStepMultiple(width)) return reject(ImportRejection.INPUT_SIZE_NOT_MULTIPLE)
+        if (tooElongated(height, width, config)) return reject(ImportRejection.INPUT_ASPECT)
 
         if (output.elementType != FLOAT32) {
             return reject(if (isQuantized(output)) ImportRejection.QUANTIZED_IO else ImportRejection.OUTPUT_TYPE)
@@ -189,13 +203,32 @@ object ImportedModelRules {
         if (isPoseHead(outputShape)) {
             val rows = outputShape[AXIS_1]
             if (rows > TrackerConfig.IMPORT_MAX_OUTPUT_ROWS) return reject(ImportRejection.OUTPUT_ROWS)
-            return ImportCheck.Accepted(inputWidth = width, inputHeight = height, outputRows = rows)
+            return ImportCheck.Accepted(inputWidth = width, inputHeight = height, outputRows = rows, inputLayout = inputLayout)
         }
         val rawLayout = PoseOutputLayout.rawOf(outputShape)
         if (rawLayout != null) {
             val rows = maxOf(outputShape[AXIS_1], outputShape[AXIS_2])
             if (rows > TrackerConfig.IMPORT_MAX_RAW_OUTPUT_ROWS) return reject(ImportRejection.OUTPUT_ROWS)
-            return ImportCheck.Accepted(inputWidth = width, inputHeight = height, outputRows = rows, outputLayout = rawLayout)
+            return ImportCheck.Accepted(
+                inputWidth = width,
+                inputHeight = height,
+                outputRows = rows,
+                outputLayout = rawLayout,
+                inputLayout = inputLayout,
+            )
+        }
+        val detectLayout = PoseOutputLayout.detectOf(outputShape, width, height)
+        if (detectLayout != null) {
+            val rows = if (detectLayout == PoseOutputLayout.DETECT_RAW_CHANNELS_FIRST) outputShape[AXIS_2] else outputShape[AXIS_1]
+            if (rows > TrackerConfig.IMPORT_MAX_RAW_OUTPUT_ROWS) return reject(ImportRejection.OUTPUT_ROWS)
+            return ImportCheck.Accepted(
+                inputWidth = width,
+                inputHeight = height,
+                outputRows = rows,
+                outputLayout = detectLayout,
+                inputLayout = inputLayout,
+                classes = PoseOutputLayout.detectClassesOf(outputShape, width, height),
+            )
         }
         return reject(
             when {

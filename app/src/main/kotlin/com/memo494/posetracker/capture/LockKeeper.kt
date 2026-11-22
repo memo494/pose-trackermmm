@@ -77,6 +77,19 @@ internal class LockKeeper(
     private var heldId = OverlayState.NO_LOCK
     private val matcher = RelockMatcher(config)
     private val torsoRegion = TorsoRegion(config)
+
+    /**
+     * Whether the model is box-only (no keypoints; decided by the loaded model). The torso is then the box part of a
+     * whole-body box only (`TorsoRegion.boxOnly`): the same `relock*` numbers and the same judge as a pose model whose
+     * shoulders are not confident, so a re-lock is never accepted more easily than today; a person whose box is not a
+     * whole body is "unsampled" and the judge stays fail-closed (no signature: the lock ends, logged as `cleared (no
+     * signature)`). Capture thread.
+     */
+    var boxOnly: Boolean
+        get() = torsoRegion.boxOnly
+        set(value) {
+            torsoRegion.boxOnly = value
+        }
     private val torso = TorsoRect()
     private val signature = AppearanceSignature(config)
     private val sampleSignature = AppearanceSignature(config)
@@ -195,6 +208,14 @@ internal class LockKeeper(
     /** The tracker was reset (a new geometry): ends the lock, whatever its step. */
     fun onReset() {
         if (heldId != OverlayState.NO_LOCK) end(REASON_RESET)
+    }
+
+    /**
+     * The model changed between a pose model and a box-only one (fail closed: the head point and its noise differ, so
+     * the lock does not carry over): ends the lock, whatever its step, with the line `lock: cleared (model kind changed)`.
+     */
+    fun onModelKindChanged() {
+        if (heldId != OverlayState.NO_LOCK) end(REASON_MODEL_KIND)
     }
 
     /** The session ends: ends the lock and drops the signature. */
@@ -583,6 +604,7 @@ internal class LockKeeper(
     private companion object {
         const val REASON_HANDLE = "handle"
         const val REASON_RESET = "reset"
+        const val REASON_MODEL_KIND = "model kind changed"
         const val REASON_STOP = "stop"
         const val REASON_NO_SIGNATURE = "no signature"
         const val REASON_REPLACED = "replaced"

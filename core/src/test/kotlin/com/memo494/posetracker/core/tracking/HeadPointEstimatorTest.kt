@@ -6,6 +6,7 @@ import com.memo494.posetracker.core.model.PoseDetection
 import com.memo494.posetracker.core.tracking.HeadTestDetections.OFFSET_X_IN_H
 import com.memo494.posetracker.core.tracking.HeadTestDetections.OFFSET_Y_IN_H
 import com.memo494.posetracker.core.tracking.HeadTestDetections.allHead
+import com.memo494.posetracker.core.tracking.HeadTestDetections.boxOnlyPerson
 import com.memo494.posetracker.core.tracking.HeadTestDetections.person
 import com.memo494.posetracker.core.tracking.HeadTestDetections.scoresOf
 import org.junit.jupiter.api.Test
@@ -521,6 +522,70 @@ class HeadPointEstimatorTest {
         assertThat(out.valid).isTrue()
         assertThat(out.estimated).isFalse()
         assertThat(out.headXImg).isWithin(TOLERANCE_PX).of(300f)
+    }
+
+    // ---- box-only models (M-legacy T3) ----
+
+    @Test
+    fun boxOnly_everyFrameIsTheBoxPointAtTheTopRatio_notEstimated_andNothingIsLearned() {
+        repeat(30) { i ->
+            estimator.update(boxOnlyPerson(300f + 2f * i, 400f - 1.5f * i, 100f), out, boxOnly = true)
+
+            assertThat(out.valid).isTrue()
+            assertThat(out.estimated).isFalse()
+            assertThat(out.headXImg).isWithin(TOLERANCE_PX).of(300f + 2f * i)
+            assertThat(out.headYImg).isWithin(TOLERANCE_PX).of(400f - 1.5f * i)
+        }
+        assertThat(estimator.learnedOffsetCount).isEqualTo(0)
+    }
+
+    @Test
+    fun boxOnly_ignoresConfidentKeypoints_andLearnsNothingFromThem() {
+        val detection = person(300f, 200f, 100f, moved = mapOf(0 to (500f to 400f)))
+
+        estimator.update(detection, out, boxOnly = true)
+
+        assertThat(out.headXImg).isWithin(TOLERANCE_PX).of(300f)
+        assertThat(out.headYImg).isWithin(TOLERANCE_PX).of(200f)
+        assertThat(estimator.learnedOffsetCount).isEqualTo(0)
+        assertThat(estimator.isKeypointVisible(0)).isFalse()
+    }
+
+    @Test
+    fun boxOnly_theDotMovesExactlyAsMuchAsTheBoxTop_soItNeverJittersMoreThanTheBox() {
+        val random = Random(SEED)
+        var previousTopImg = Float.NaN
+        var previousHeadYImg = Float.NaN
+        repeat(200) {
+            val centreYImg = 200f + (random.nextFloat() - 0.5f) * 4f
+            val heightImg = 100f + (random.nextFloat() - 0.5f) * 2f
+            val detection = boxOnlyPerson(300f, centreYImg, heightImg)
+
+            estimator.update(detection, out, boxOnly = true)
+
+            if (!previousTopImg.isNaN()) {
+                val topStepImg = detection.boxTopImg - previousTopImg
+                val headStepImg = out.headYImg - previousHeadYImg
+                // The point is top + 0.10 h, so the step differs from the top's by at most 0.10 of the height change.
+                assertThat(abs(headStepImg - topStepImg)).isAtMost(config.headFallbackTopRatio * 2f + TOLERANCE_PX)
+            }
+            previousTopImg = detection.boxTopImg
+            previousHeadYImg = out.headYImg
+        }
+    }
+
+    @Test
+    fun boxOnly_anUnusableBoxIsInvalid() {
+        estimator.update(boxOnlyPerson(300f, 200f, 0f), out, boxOnly = true)
+
+        assertThat(out.valid).isFalse()
+    }
+
+    @Test
+    fun theDefaultIsThePoseRule_aKeypointFreeDetectionStaysEstimated() {
+        estimator.update(boxOnlyPerson(300f, 200f, 100f), out)
+
+        assertThat(out.estimated).isTrue()
     }
 
     /** A person whose five head keypoints are at the given absolute positions; the box is [heightImg] high. */

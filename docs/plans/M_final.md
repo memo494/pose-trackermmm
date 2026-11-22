@@ -31,7 +31,21 @@ diagnostics of 2026-11-22 (v0.1.207, 16090 frames, 487 births, 180 assoc misses,
 ## Consults (budget 3)
 | # | Question | Answer | Decision |
 |---|---|---|---|
+| 1 | Ring lag on moving heads (F4) — Fable had no credits, re-run on Opus per AI_TEAM §7 (owner told) | 75–85 % of the lag is pipeline time; display-only lead with speed gate, stop guard, cap; M4 "no prediction" was scored without latency (pred.py) | Adopted; extra 15→10 ms after review for stop-overshoot margin |
 
 ## Progress
 | PR | Status | Notes |
 |---|---|---|
+| #21 | merged | PR #20 guard tests, strengthened (files + bytes); #20 closed (REST cannot un-draft) |
+| #22 | merged | M1b-fix-import: narrow auto-assign of a new import, message, log |
+| #23 F2 | merged | raw pose output; detect-only / INT8 refused; readFloat ~1.9 MB per frame for raw models (known) |
+| #24 F1 | merged | 448x960 / 960x448 bundled; crash marker around the compile; BUILT_IN_FAILED visible; APK +24 MB |
+| #25 F3 | merged | birth suppression + shadowed tentatives (IoU ≥ 0.5 AND head ≤ 0.15 h); 1 Critical fixed in review; known limit: person directly behind another |
+| #26 F7 | merged | thermal HOT → 320 model; NORMAL after 60 s cool |
+| #27 F5 | merged | re-lock: torso-OK judge frames, buckets, ≥ 3 samples, no cross-bucket; 1 Critical + 1 wrong-person warning fixed |
+| #28 F4 | merged | display lead; S3 back at 12 fps with the unchanged 0.60 limit (tracker noise scaling) |
+| #29 F6 | merged | tuning sheet, 13 sliders, sheet-only bounds (re-lock distance ≤ 0.6, margin ≥ 0.05) |
+| F8 | this PR | ARCHITECTURE §12/§13 status, TEST_CHECKLIST "M-final", handoff |
+
+Owner decisions during the milestone: S3 at 12 fps fixed in F4 rather than a new limit (protected file);
+"best decision" mandate for auto-assign; the re-lock tie rule (≥ margin) kept as is.

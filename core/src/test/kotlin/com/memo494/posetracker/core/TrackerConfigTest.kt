@@ -1464,4 +1464,40 @@ class TrackerConfigTest {
             assertThrows(IllegalArgumentException::class.java) { TrackerConfig(detectPersonClass = value) }
         }
     }
+
+    @Test
+    fun headBoxOnlyNoiseRatio_defaultsBetweenTheKeypointAndTheFallbackNoise_andStaysInItsBounds() {
+        val config = TrackerConfig()
+
+        assertThat(config.headBoxOnlyNoiseRatio).isEqualTo(0.05f)
+        assertThat(config.headBoxOnlyNoiseRatio).isGreaterThan(config.headMeasurementNoiseRatio)
+        assertThat(config.headBoxOnlyNoiseRatio).isLessThan(config.headFallbackNoiseRatio)
+        assertWithin(
+            config.headBoxOnlyNoiseRatio,
+            TrackerConfig.MIN_HEAD_BOX_ONLY_NOISE_RATIO,
+            TrackerConfig.MAX_HEAD_BOX_ONLY_NOISE_RATIO,
+        )
+        TrackerConfig(headBoxOnlyNoiseRatio = TrackerConfig.MIN_HEAD_BOX_ONLY_NOISE_RATIO)
+        TrackerConfig(headBoxOnlyNoiseRatio = TrackerConfig.MAX_HEAD_BOX_ONLY_NOISE_RATIO)
+    }
+
+    @Test
+    fun headBoxOnlyNoiseRatio_outsideItsBoundsOrNotFinite_isRejected() {
+        val bad =
+            listOf(
+                0f,
+                TrackerConfig.MIN_HEAD_BOX_ONLY_NOISE_RATIO - 0.001f,
+                TrackerConfig.MAX_HEAD_BOX_ONLY_NOISE_RATIO + 0.01f,
+                Float.NaN,
+                Float.POSITIVE_INFINITY,
+            )
+        for (value in bad) assertThrows(IllegalArgumentException::class.java) { TrackerConfig(headBoxOnlyNoiseRatio = value) }
+    }
+
+    @Test
+    fun headFallbackTopRatio_defaultPutsTheBoxOnlyDotOnTheHead() {
+        // A standing person's head centre is about 0.08 to 0.10 of the box height below its top (M-legacy T3).
+        assertThat(TrackerConfig().headFallbackTopRatio).isAtLeast(0.08f)
+        assertThat(TrackerConfig().headFallbackTopRatio).isAtMost(0.10f)
+    }
 }

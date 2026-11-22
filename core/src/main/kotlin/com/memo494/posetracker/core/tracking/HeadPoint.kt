@@ -111,3 +111,26 @@ internal fun setFallbackPoint(
         estimated = true,
     )
 }
+
+/**
+ * Writes the head point of a box-only (detect-only) model into [out]: `(box centre x, box top + headFallbackTopRatio * h)`
+ * with the variance `(headBoxOnlyNoiseRatio * h)^2 / max(person score, headMinMeanConfidence)`.
+ * It is not [HeadPoint.estimated]: for such a model the box rule is the one steady rule of every frame, not a
+ * rare fallback that flips against keypoints, so nothing that gates on "estimated" (the display lead) is switched
+ * off. A person score that is not finite is treated as 0, so the floor applies.
+ */
+internal fun setBoxOnlyPoint(
+    detection: PoseDetection,
+    heightImg: Float,
+    config: TrackerConfig,
+    out: HeadPoint,
+) {
+    val confidence = if (detection.score.isFinite()) detection.score else 0f
+    val sigmaImg = config.headBoxOnlyNoiseRatio * heightImg
+    out.setPoint(
+        xImg = (detection.boxLeftImg + detection.boxRightImg) / 2f,
+        yImg = detection.boxTopImg + config.headFallbackTopRatio * heightImg,
+        varianceImg2 = sigmaImg * sigmaImg / max(confidence, config.headMinMeanConfidence),
+        estimated = false,
+    )
+}

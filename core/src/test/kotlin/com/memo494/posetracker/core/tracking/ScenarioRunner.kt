@@ -58,8 +58,9 @@ class ScenarioRun(
  */
 class ScenarioRunner(
     config: TrackerConfig = TrackerConfig(),
+    boxOnly: Boolean = false,
 ) {
-    private val tracker = Tracker(config)
+    private val tracker = Tracker(config, boxOnly)
     private val fed = ArrayList<SceneFrame>()
     private val lists = ArrayList<List<RecordedTrack>>()
     private val steps = ArrayList<IdleStep>()
@@ -107,9 +108,17 @@ fun runScene(
     scene: SyntheticScene,
     config: TrackerConfig = TrackerConfig(),
     idleNsAfterFrame: Map<Int, LongArray> = emptyMap(),
+): ScenarioRun = runFrames(scene.frames, config, idleNsAfterFrame)
+
+/** Like [runScene] for [frames] (for example [boxOnlyFrames]); [boxOnly] makes the tracker use the box rule for every head. */
+fun runFrames(
+    frames: List<SceneFrame>,
+    config: TrackerConfig = TrackerConfig(),
+    idleNsAfterFrame: Map<Int, LongArray> = emptyMap(),
+    boxOnly: Boolean = false,
 ): ScenarioRun {
-    val runner = ScenarioRunner(config)
-    for (frame in scene.frames) {
+    val runner = ScenarioRunner(config, boxOnly)
+    for (frame in frames) {
         runner.feed(frame)
         idleNsAfterFrame[frame.index]?.forEach { runner.idle(it) }
     }

@@ -41,6 +41,7 @@
 | `LiteRtModel.kt` | One KDoc line no longer references `[OrtQnnModel]`. | The class is not vendored. |
 | `ImageUtils.kt` | Removed `toBitmap`, `yuvImageToBitmap`, `yuv420888ToNv21`, `imageToByteBuffer` and the `ImageProxy`/`ByteArrayOutputStream` imports. | CameraX-only (`androidx.camera.core.ImageProxy`) and allocates per frame; our capture adapter row-copies frames itself (ARCHITECTURE §6.1). `letterboxTransform`, `prepareBitmapForModel` and the float-array copy stay. |
 | `PoseEstimator.kt` | Added read-only diagnostics `lastMaxRawScore`, `lastRawRowsAboveThreshold`, `lastNanRawRows` and the private allocation-free `recordRawScoreStats`, called at the start of `postProcessPose` (both layouts). | Phone bug "nothing detected": the diagnostics zip could not tell an empty model output from detections lost later. The scan reads only the score column; it changes no decoded result. |
+| `PoseEstimator.kt` | Output layout detection treats `[1, 56, N]` and `[1, N, 56]` (N > 56) as RAW pose output, for any N; a new constructor parameter `rawNmsIou`; new `postProcessRawPose` (called from `postProcessPose` for that layout) decodes through `RawPoseDecoder` (core: threshold, class-agnostic NMS, cap 300, allocation-free) and maps boxes and keypoints to the image with the existing letterbox helpers, in pixel mode. The old classic-head loop and `nmsPoseDetections` stay for other feature counts and are no longer reached by imported models. | Models exported by Ultralytics Platform (LiteRT default `nms=None`) and YOLOv8/YOLO11 pose models give raw output; the old loop allocated per candidate, had a hardcoded 0.25 second threshold, and misread raw output with N <= 300 as end-to-end. The raw path shares the import check's layout rule (`PoseOutputLayout.rawOf`, batch 1). |
 | `Utils.kt` | Unchanged. | n/a |
 
 Build-side changes outside the vendored directory: root `LICENSE` (AGPL-3.0, from upstream), `detector/build.gradle.kts`
@@ -54,6 +55,12 @@ Left in place although unused by pose (harmless, would only add diff noise): `Im
 
 - **Threading.** Upstream creates the model on a throwaway executor and runs it on its camera executor. LiteRT's rule is
   create/run/close on one thread (ARCHITECTURE §5). Our adapter owns a single inference thread (true since M0b).
+- **Raw-output readback allocates.** LiteRT 2.3.2's Kotlin `TensorBuffer` only offers `readFloat(): FloatArray` (a new array per
+  call; there is no read-into-a-given-array or `FloatBuffer` variant, checked in the `litert-api` 2.3.2 class files), so
+  `LiteRtModel.run` allocates the output array every frame: 56 x 8400 floats = about 1.9 MB for a raw 640 model (end-to-end
+  outputs are far smaller). This cannot be fixed without a LiteRT version change or new API; it stays until then.
+- **The vendored wrapper allocates per detection** on the raw path as on the end-to-end path (`RectF`, `Pair`s, `Keypoints`,
+  lists in `postProcessRawPose`); only the core `RawPoseDecoder` (threshold, NMS, cap) is allocation-free.
 - **Per-frame allocations** (AGENTS rule 8). The decoder allocates every frame: `LiteRtModel.run` (`readAsFloats`, a new
   `FloatArray` per output) and `PoseEstimator.postProcessPose`/`postProcessEndToEndPose` (lists, `RectF`, `Pair`s,
   `Keypoints`). `PoseEstimator.predict` also builds `YOLOResult`. Our own code complies with rule 8 from M0b; the vendored

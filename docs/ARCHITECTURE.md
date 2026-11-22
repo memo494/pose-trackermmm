@@ -807,12 +807,20 @@ step back up after 60 s below the threshold. Every step is logged and shown in t
     `slots.txt` (`OrientationSlots`, header `posetracker-model-slots v1`) and `blocked.txt` (`ModelBlocklist`), the
     last two written to a scratch file, synced and renamed over the old one. The per-model stores have no
     crash marker of their own (only the library owns it). *Migration:* the model of the earlier version (in the root
-    directory) is **copied** (never moved) into its own directory on the first read, checked by length and sha256, both
-    slots point to it, and only then the old record goes; each step can be repeated after a process death and a
+    directory) is **copied** (never moved) into its own directory on the first read, checked by length and sha256, the
+    slots it fits point to it (square both, wide landscape only, tall portrait only), and only then the old record goes; each step can be repeated after a process death and a
     half-finished entry is finished from whichever copy exists. An old record whose file is gone becomes an entry
     that the screen reports as "file missing". *Fail closed:* a model record that does not read is
     skipped, a slot record that does not read (or names a model that is not there) is the built-in model for that
     slot, both logged; an unreadable blocked list blocks every model.
+  - *Slot shape guard.* One rule, `fitsSlot(meta, o)` (core): a model fits a slot when `W == H` or the orientation of
+    its input `(W, H)` is `o` (wide = landscape only, tall = portrait only). `autoSlotFor`, the control-screen picker
+    (non-fitting rows listed but disabled with the reason; the reducer refuses such a pick), `ModelLibraryStore.setSlot`
+    (returns `false`) and the runtime all use it. *Fail closed at runtime:* a stored slot that does not fit (written by an
+    older version) is resolved before any hash or guard check to that orientation's built-in model,
+    `ModelFallback.WRONG_SHAPE` with `meta` = the refused model, a control-screen notice, the HUD note "imported model not
+    used", the log line `model: landscape slot holds <name> 448x960 (tall), not used; built-in runs` and
+    `modelSlotsRefused=none|portrait|landscape|portrait,landscape` in `summary.txt`; `slots.txt` is not rewritten.
   - *Switch on rotation (M1b-1).* `ModelSwitcher` (capture thread; never the main thread) loads the model of the
     start geometry's slot at Start and, whenever the capture geometry changes and the slot asks for another model
     than the loaded one, closes the old detector and loads the new one through `SessionModelLoader`; the pipeline then

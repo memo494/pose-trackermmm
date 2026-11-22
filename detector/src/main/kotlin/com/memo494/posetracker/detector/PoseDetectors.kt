@@ -87,7 +87,8 @@ object PoseDetectors {
      *   [meta]; [fromAssets] throws the same type for its hash mismatch.
      * @throws java.io.IOException when the file cannot be read.
      * @throws IllegalStateException when the model is unusable (input layout differs from the recorded one, unknown accelerator,
-     *   input width or height different from the meta's).
+     *   input width or height different from the meta's, a detect-only output different from the recorded one).
+     * @throws IllegalArgumentException when a detect-only model has no class [TrackerConfig.detectPersonClass].
      * @throws Exception LiteRT exceptions when the CPU attempt cannot load the model either.
      */
     fun fromImported(
@@ -101,7 +102,17 @@ object PoseDetectors {
         val factory =
             PoseEngineFactory { accelerator ->
                 val useGpu = accelerator == Accelerator.GPU
-                UltralyticsPoseEngine.create(appContext, file, useGpu, config.scoreThreshold, config.rawNmsIou, meta.inputLayout)
+                UltralyticsPoseEngine.create(
+                    appContext,
+                    file,
+                    useGpu,
+                    config.scoreThreshold,
+                    config.rawNmsIou,
+                    meta.inputLayout,
+                    config.detectPersonClass,
+                    meta.outputLayout,
+                    meta.classes,
+                )
             }
         return LiteRtPoseDetector.create(factory, config.scoreThreshold, meta.inputWidth, meta.inputHeight)
     }

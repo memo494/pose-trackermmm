@@ -1,6 +1,6 @@
 # M-legacy — older models run, and the dot comes from the person box when there are no keypoints
 
-**Lead: Opus 5.5 · 2026-11-22 · branch `claude/great-bell-m374lx` (session branch) · status: APPROVED by the owner for T1, T2, T3 (2026-11-22)**
+**Lead: Opus 5.5 · 2026-11-22 · branch `claude/great-bell-m374lx` (session branch) · status: T1–T3 done, reviewed, review fixes done (2026-11-22)**
 
 ## Analysis — why older models do not run today
 The import guard (`core/modelimport/ImportedModelRules.check`) refuses two families that most older YOLO `.tflite`

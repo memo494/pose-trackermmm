@@ -471,7 +471,15 @@ class TrackerScenarioTest {
     ) = assertWithMessage(message).that(value).isEqualTo(expected)
 
     private companion object {
-        private val RATES = listOf(Rate(12.0, 0.0), Rate(12.0, JITTER_FRACTION), Rate(20.0, 0.0), Rate(30.0, 0.0), Rate(60.0, 0.0), Rate(30.0, JITTER_FRACTION))
+        private val RATES =
+            listOf(
+                Rate(12.0, 0.0),
+                Rate(12.0, JITTER_FRACTION),
+                Rate(20.0, 0.0),
+                Rate(30.0, 0.0),
+                Rate(60.0, 0.0),
+                Rate(30.0, JITTER_FRACTION),
+            )
         private val SEEDS = listOf(1L, 2L, 3L)
         private val IDLE_MS_AFTER_LAST_FRAME = listOf(500L, 1000L, 4000L)
 

@@ -34,6 +34,7 @@ Package root: `com.memo494.posetracker`. `applicationId` = `com.memo494.posetrac
 - `scripts/ci-status.sh` — polls GitHub Actions for the current branch.
 - `.github/workflows/android.yml` — CI; `export-model.yml` — manual model export; with `sizes` and a
   `publish_tag` that starts with `models` it only publishes the files to that pre-release (the 640 model to import).
+- `android.yml` also publishes a `beta` pre-release (debug APK) for each PR from this repo.
 - `signing/debug.keystore` — committed debug key (PROTECTED). `model/` — exported models (PROTECTED).
 - `app/build.gradle.kts` — `stage<Variant>ModelAssets`: sha256 check of `model/` against `model_info.json`,
   then the `.tflite` files and `model_info.json` become APK assets.

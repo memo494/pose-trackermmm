@@ -84,3 +84,19 @@ jobs:
             --title "latest" \
             --notes "Rolling debug build from main @ ${GITHUB_SHA::7} (run ${GITHUB_RUN_NUMBER})." \
             --target "$GITHUB_SHA"
+
+      - name: Publish 'beta' pre-release
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REF: ${{ github.head_ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          apk="$(ls app/build/outputs/apk/debug/*.apk | head -1)"
+          gh release delete beta --yes --cleanup-tag 2>/dev/null || true
+          gh release create beta "$apk" \
+            --prerelease \
+            --title "beta (PR #${PR_NUMBER})" \
+            --notes "Test build from branch ${HEAD_REF} @ ${HEAD_SHA::7} (run ${GITHUB_RUN_NUMBER}). Not merged into main. Same debug key as 'latest', installs over it." \
+            --target "$HEAD_SHA"

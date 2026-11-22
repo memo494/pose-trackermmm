@@ -138,8 +138,9 @@ class TrackSnapshot private constructor(
         ): TrackSnapshot = build(tracks, widthImg, heightImg, smoother, timestampNs, SMOOTHED, 0f, 0f, resultAgeMs)
 
         /**
-         * Like [of] for the idle republish: a shown track the [smoother] knows keeps its last drawn head point (smoothed, plus the lead that was on screen)
-         * (the box moved by the same delta), a track it does not know (newly promoted) passes through unsmoothed.
+         * Like [of] for the idle republish: a shown track the [smoother] knows keeps its last drawn head point
+         * (smoothed, plus the lead that was on screen; the box moved by the same delta), a track it does not know
+         * (newly promoted) passes through unsmoothed.
          * The smoother is not advanced. A `LOST` track's [TrackSnapshot.lostMs] is its lost time plus [idleMs] (the
          * time since the newest frame; a negative or non-numeric value counts as 0), capped at [maxLostMs]
          * (`trackMaxLostMs`).

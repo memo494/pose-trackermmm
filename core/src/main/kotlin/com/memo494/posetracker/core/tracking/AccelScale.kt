@@ -23,7 +23,7 @@ internal class AccelScale(
     ): Float {
         if (gap || !(dtS > 0f && dtS.isFinite())) return 1f
         if (primed) {
-            averageS += averageS / (tauS + averageS) * (dtS - averageS)
+            averageS += dtS / (tauS + dtS) * (dtS - averageS)
         } else {
             averageS = dtS
             primed = true

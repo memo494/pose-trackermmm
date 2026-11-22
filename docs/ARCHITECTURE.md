@@ -341,8 +341,8 @@ tracks, index loops); deterministic.
 - **Kalman:** three independent position/velocity filters per track (`KalmanAxis`): head x, head y, box height
   `h`. Discrete white-noise acceleration, noise scaled by `h`: σ_accel `trackAccelSigmaRatio`·h (8 h/s²) for the
   head (σ times `max((trackAccelRefDtMs / interval)², trackAccelMinScale)` from a moving average of the frame interval
-  (`trackAccelIntervalTauMs`), only for a track that continues a match, not LOST or after a miss, F4: still-head jitter at
-  12 fps), `trackHeightAccelSigmaRatio`·h (2 h/s²) for the height; height noise `trackHeightNoiseRatio` 0.05; the
+  (`trackAccelIntervalTauMs`), only for a track that continues a match (judged from its state before the match: not LOST,
+  no miss before), F4: still-head jitter at 12 fps), `trackHeightAccelSigmaRatio`·h (2 h/s²) for the height; height noise `trackHeightNoiseRatio` 0.05; the
   head's measurement noise comes from §6.2. A new track starts with velocity σ `trackInitVelocitySigmaRatio`·h
   (2 h/s) on all three.
 - **One time rule:** `dtEff = min(dt, trackMaxDtMs)` (250 ms) for every filter step and every lifecycle clock. A

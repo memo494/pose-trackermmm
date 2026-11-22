@@ -11,8 +11,8 @@ import com.memo494.posetracker.core.TrackerConfig
  * - [speedGain] `gSpeed`: 0 up to `displayLeadSpeedLowHps`, 1 from `displayLeadSpeedHighHps`, linear between (on the
  *   smoother's filtered speed). A still or trembling head has speed far below the low limit, so it gets no lead.
  * - [stopGain] `gStop`: the share of the tracker's speed that the raw measured head still has along the tracker's
- *   direction (full from `displayLeadStopFullRatio`), 0 to 1. A head that stops or turns shows a measured step of 0 or backwards one frame before the
- *   filters know, so the lead is dropped at once and cannot overshoot.
+ *   direction (full from `displayLeadStopFullRatio`), 0 to 1. A head that stops or turns shows a measured step of 0 or
+ *   backwards one frame before the filters know, so the lead is dropped at once and cannot overshoot.
  * - [leadTimeMs] `L = min(result age + displayLeadExtraMs + half the frame interval, displayLeadMaxMs)`.
  */
 internal object DisplayLead {
@@ -62,8 +62,9 @@ internal object DisplayLead {
     }
 
     /**
-     * The factor, at most 1, that brings a lead vector of ([dxImg], [dyImg]) down to [maxLengthImg] (`displayLeadMaxRatio`
-     * times the track height); 1 when it is not longer, 0 when it is not a finite vector or the limit is not positive.
+     * The factor, at most 1, that brings a lead vector of ([dxImg], [dyImg]) down to [maxLengthImg]
+     * (`displayLeadMaxRatio` times the track height); 1 when it is not longer, 0 when it is not a finite vector or the
+     * limit is not positive.
      */
     fun capScale(
         dxImg: Float,

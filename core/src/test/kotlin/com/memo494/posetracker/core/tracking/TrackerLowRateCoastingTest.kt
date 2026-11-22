@@ -1,7 +1,10 @@
 package com.memo494.posetracker.core.tracking
 
+import com.google.common.truth.Truth.assertThat
 import com.google.common.truth.Truth.assertWithMessage
 import com.memo494.posetracker.core.TrackerConfig
+import com.memo494.posetracker.core.model.DetectionFrame
+import com.memo494.posetracker.core.model.TimestampSource
 import org.junit.jupiter.api.Test
 
 /**
@@ -50,12 +53,49 @@ class TrackerLowRateCoastingTest {
         }
     }
 
+    /** After `reset()` the frame interval of the old stream is forgotten: a 50 ms step is not scaled (fresh tracker = same). */
+    @Test
+    fun reset_forgetsTheLowRateInterval_soTheNextStepIsUnscaled() {
+        val used = Tracker(scaled)
+        val fresh = Tracker(scaled)
+        for (k in 0 until PRIME_FRAMES) used.update(frameAt(k * LOW_STEP_NS, 100f + 30f * k))
+        used.reset()
+
+        var usedX = 0f
+        var freshX = 0f
+        for (k in 0 until AFTER_FRAMES) {
+            val frame = frameAt(START_AFTER_NS + k * FAST_STEP_NS, 300f + 15f * k + if (k % 2 == 0) 3f else -3f)
+            usedX = used.update(frame).headXImg(0)
+            freshX = fresh.update(frame).headXImg(0)
+        }
+
+        assertThat(usedX).isEqualTo(freshX)
+    }
+
+    private fun frameAt(
+        timestampNs: Long,
+        headXImg: Float,
+    ) = DetectionFrame(
+        timestampNs,
+        TimestampSource.IMAGE,
+        IMAGE_WIDTH,
+        IMAGE_HEIGHT,
+        listOf(HeadTestDetections.person(headXImg, ROW_Y.toFloat(), HEIGHT.toFloat())),
+    )
+
     private fun pt(
         timeS: Double,
         xImg: Double,
     ) = PathPoint(timeS, xImg, ROW_Y, HEIGHT)
 
     private companion object {
+        const val LOW_STEP_NS = 83_333_333L
+        const val FAST_STEP_NS = 50_000_000L
+        const val START_AFTER_NS = 20_000_000_000L
+        const val PRIME_FRAMES = 40
+        const val AFTER_FRAMES = 6
+        const val IMAGE_WIDTH = 1356
+        const val IMAGE_HEIGHT = 610
         const val FPS = 12.0
         const val JITTER = 0.3
         const val SEEDS = 6L

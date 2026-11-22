@@ -18,8 +18,8 @@ import kotlin.math.hypot
  * Use per processed frame: [begin] with the frame's timestamp, [smooth] once for each shown track, [end]. A track
  * that was not smoothed between the two loses its slot, so an id that comes back starts again as a first sample.
  * When the pool is full, a new id takes the slot of an id not yet smoothed in the frame. [recall] reads the stored
- * point of an id, and the lead on top of it, without advancing anything (the idle republish). [reset] forgets every id (call it wherever the
- * tracker is reset).
+ * point of an id, and the lead on top of it, without advancing anything (the idle republish). [reset] forgets every
+ * id (call it wherever the tracker is reset).
  *
  * Holds a pool of [TrackerConfig.maxTracks] slots keyed by track id; no call allocates after construction. Results
  * are written to [outXImg] and [outYImg]. With [TrackerConfig.smoothEnabled] `false` it is the identity. Not
@@ -154,11 +154,13 @@ class HeadSmoother(
     /**
      * Sets the lead of the track of the newest [smooth] call: the target ([targetXImg], [targetYImg], Img pixels; a
      * value that is not finite counts as 0) or, when [fade] is true, the lead that was on screen for the track decayed
-     * over this frame's interval with `displayLeadFadeMs` (cut at once when that is 0) if that is longer: a lead that is
-     * switched off by a gate (a miss, an estimated head) fades out instead of dropping to 0, and a lead never grows by
-     * fading. With [fade] false (a stop or a turn of the measured head) the target is taken as it is. The result is limited to [maxLengthImg] and written to
-     * [outLeadXImg] / [outLeadYImg]; it is kept for the next frame and for [recall] (the idle republish). A call after a
-     * [smooth] that gave no slot (smoother off, full pool) passes the target through.
+     * over this frame's interval with `displayLeadFadeMs` (cut at once when that is 0) if that is longer. So a lead
+     * that is switched off by a gate (a miss, an estimated head) fades out instead of dropping to 0, and a lead never
+     * grows by fading. With [fade] false (a stop or a turn of the measured head) the target is taken as it is. After a
+     * frame time that is not after the last one, or a point that is not finite (no interval), the lead on screen
+     * decays to 0. The result is limited to [maxLengthImg] and written to [outLeadXImg] / [outLeadYImg]; it is kept
+     * for the next frame and for [recall] (the idle republish). A call after a [smooth] that gave no slot (smoother
+     * off, full pool), after [recall], [end] or [reset] passes the target through and keeps the stored lead.
      */
     fun settleLead(
         targetXImg: Float,
@@ -209,6 +211,7 @@ class HeadSmoother(
 
     /** Frees the slot of every id that was not smoothed since [begin]. */
     fun end() {
+        lastSlot = -1
         for (i in 0 until capacity) {
             if (inUse[i] && !seen[i]) inUse[i] = false
             seen[i] = false
@@ -220,6 +223,7 @@ class HeadSmoother(
      * outputs alone) when the id has no slot or the smoother is disabled. Changes no state.
      */
     fun recall(id: Int): Boolean {
+        lastSlot = -1
         if (!config.smoothEnabled) return false
         val slot = find(id)
         if (slot < 0) return false
@@ -232,6 +236,7 @@ class HeadSmoother(
 
     /** Forgets every id: the next sample of each is a first sample. */
     fun reset() {
+        lastSlot = -1
         for (i in 0 until capacity) {
             inUse[i] = false
             seen[i] = false

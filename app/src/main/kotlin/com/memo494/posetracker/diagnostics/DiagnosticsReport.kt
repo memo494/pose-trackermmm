@@ -3,6 +3,7 @@ package com.memo494.posetracker.diagnostics
 import com.memo494.posetracker.core.TrackerConfig
 import com.memo494.posetracker.core.model.ModelInputText
 import com.memo494.posetracker.core.modelimport.ImportedModelMeta
+import com.memo494.posetracker.core.stats.LeadSummary
 import com.memo494.posetracker.core.stats.Percentiles
 import com.memo494.posetracker.modelimport.ModelSource
 import com.memo494.posetracker.modelimport.ModelStatus
@@ -37,6 +38,7 @@ internal object DiagnosticsReport {
     private const val NOT_AVAILABLE = "n/a"
     private const val MS_DECIMALS = 1
     private const val THERMAL_DECIMALS = 2
+    private const val FRACTION_DECIMALS = 2
 
     /**
      * Always five entries in this order: `summary.txt`, `config.txt`, `log.txt`, `model_info.json` (named
@@ -172,6 +174,7 @@ internal object DiagnosticsReport {
         stats: CaptureStats,
     ) {
         val timing = stats.timing
+        appendLead(out, timing.lead)
         line(out, "timingSamples", timing.samples)
         percentileLines(out, "copyMs", timing.copyMs)
         percentileLines(out, "preMs", timing.preMs)
@@ -181,6 +184,21 @@ internal object DiagnosticsReport {
         percentileLines(out, "resultAgeMs", timing.resultAgeMs)
         line(out, "thermalStatus", stats.thermalStatus)
         line(out, "thermalHeadroom", decimals(stats.thermalHeadroom, THERMAL_DECIMALS))
+    }
+
+    /**
+     * The display lead of the shown tracks (F4): `leadMsP50` (median lead time, ms, over the samples that had a lead),
+     * `leadAppliedFraction` (share of the shown-track samples that had one), `speedHpsP50` and `speedHpsP99` (the
+     * smoother's filtered speed in track heights per second). Unknown values are `n/a`.
+     */
+    private fun appendLead(
+        out: StringBuilder,
+        lead: LeadSummary,
+    ) {
+        line(out, "leadMsP50", oneDecimal(lead.leadMsP50))
+        line(out, "leadAppliedFraction", decimals(lead.appliedFraction, FRACTION_DECIMALS))
+        line(out, "speedHpsP50", decimals(lead.speedHpsP50, FRACTION_DECIMALS))
+        line(out, "speedHpsP99", decimals(lead.speedHpsP99, FRACTION_DECIMALS))
     }
 
     private fun percentileLines(

@@ -380,4 +380,61 @@ class HeadSmootherTest {
 
         assertThat(smoother.activeCount).isEqualTo(0)
     }
+
+    /** Smooths two frames of id 1 and gives the second a lead of [leadXImg]; the second frame is still open (no `end`). */
+    private fun smootherWithLead(leadXImg: Float): HeadSmoother {
+        val smoother = HeadSmoother(TrackerConfig())
+        frame(smoother, 0L, 1, BASE_X_IMG)
+        smoother.begin(STEP_20_FPS_NS)
+        smoother.smooth(1, BASE_X_IMG, BASE_Y_IMG, HEIGHT_IMG)
+        smoother.settleLead(leadXImg, 0f, HEIGHT_IMG, fade = true)
+        return smoother
+    }
+
+    @Test
+    fun settleLead_afterAFrameTimeThatIsNotAfterTheLastOne_decaysTheLeadToZeroInsteadOfHoldingIt() {
+        val smoother = smootherWithLead(20f)
+
+        smoother.begin(STEP_20_FPS_NS)
+        smoother.smooth(1, BASE_X_IMG, BASE_Y_IMG, HEIGHT_IMG)
+        smoother.settleLead(0f, 0f, HEIGHT_IMG, fade = true)
+        smoother.end()
+
+        assertThat(smoother.outLeadXImg).isEqualTo(0f)
+        assertThat(smoother.recall(1)).isTrue()
+        assertThat(smoother.outLeadXImg).isEqualTo(0f)
+    }
+
+    @Test
+    fun settleLead_afterAPointThatIsNotFinite_decaysTheLeadToZero() {
+        val smoother = smootherWithLead(20f)
+
+        smoother.begin(2 * STEP_20_FPS_NS)
+        smoother.smooth(1, Float.NaN, BASE_Y_IMG, HEIGHT_IMG)
+        smoother.settleLead(0f, 0f, HEIGHT_IMG, fade = true)
+
+        assertThat(smoother.outLeadXImg).isEqualTo(0f)
+    }
+
+    @Test
+    fun settleLead_afterRecall_passesTheTargetThroughAndKeepsTheStoredLead() {
+        val smoother = smootherWithLead(20f)
+        smoother.recall(1)
+
+        smoother.settleLead(99f, 0f, HEIGHT_IMG, fade = false)
+        smoother.recall(1)
+
+        assertThat(smoother.outLeadXImg).isEqualTo(20f)
+    }
+
+    @Test
+    fun settleLead_afterEnd_passesTheTargetThroughAndKeepsTheStoredLead() {
+        val smoother = smootherWithLead(20f)
+        smoother.end()
+
+        smoother.settleLead(99f, 0f, HEIGHT_IMG, fade = false)
+        smoother.recall(1)
+
+        assertThat(smoother.outLeadXImg).isEqualTo(20f)
+    }
 }

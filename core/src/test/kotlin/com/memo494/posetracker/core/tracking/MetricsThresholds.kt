@@ -147,4 +147,36 @@ object MetricsThresholds {
 
     /** S15: time in milliseconds from the first frame until a track is shown, at most. Model p90 600 ms at 20 fps. */
     const val S15_MAX_FIRST_SHOWN_MS = 1000.0
+
+    /**
+     * F4 (display lead): walker at 1 and 2 h/s, time-averaged error on the display model (frame on screen 75 ms after
+     * capture), with the lead over without it, at most.
+     */
+    const val F4_MAX_ERROR_RATIO_WITH_LEAD = 0.5
+
+    /** F4: the same walker's time-averaged error with the lead, in units of h, at most. */
+    const val F4_MAX_WALKER_ERROR_H = 0.08
+
+    /** F4: abrupt stop of a walker at 1 or 2 h/s: largest distance on screen past the stop point, in units of h, at most. */
+    const val F4_MAX_STOP_OVERSHOOT_H = 0.20
+
+    /** F4: the point counts as past the stop point when it is further than this, in units of h. */
+    const val F4_STOP_PAST_LIMIT_H = 0.05
+
+    /** F4: capture to screen in the display model, in milliseconds. */
+    const val F4_DISPLAY_LATENCY_MS = 75.0
+
+    /**
+     * F4: walker at 1 and 2 h/s whose detection is missing in 10 to 20 % of the frames: the largest step backwards between
+     * two frames on screen with the lead, in units of h, at most. Without the lead it is 0; measured with the lead 0.004
+     * (before the fade of a switched-off lead it was 0.09, the whole lead dropping at once).
+     */
+    const val F4_MAX_BACKWARD_STEP_H = 0.02
+
+    /**
+     * F4: walker at 1 and 2 h/s with measurement noise: the jitter of the drawn point (RMS of the second difference) with
+     * the lead over the jitter of the raw measurement, at most. Measured 1.07 (without the lead 0.43; with an unsmoothed
+     * stop gate 2.0).
+     */
+    const val F4_MAX_MOVING_JITTER_RATIO = 1.2
 }

@@ -50,6 +50,9 @@ internal fun TuningSheet(
             val rows = TuningSheetMapper.rows(overrides)
             for (group in TuningGroup.entries) {
                 Text(stringResource(groupTitle(group)), style = MaterialTheme.typography.titleSmall)
+                if (group == TuningGroup.LEAD) {
+                    Text(stringResource(R.string.tuning_lead_caption), style = MaterialTheme.typography.bodySmall)
+                }
                 if (TuningSheetMapper.hasSafetyWarning(group)) {
                     Text(
                         text = stringResource(R.string.tuning_lock_warning),
@@ -73,6 +76,7 @@ private fun groupTitle(group: TuningGroup): Int =
         TuningGroup.SMOOTHING -> R.string.tuning_group_smoothing
         TuningGroup.TRACKING -> R.string.tuning_group_tracking
         TuningGroup.LOCK -> R.string.tuning_group_lock
+        TuningGroup.LEAD -> R.string.tuning_group_lead
     }
 
 @Composable

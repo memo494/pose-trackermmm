@@ -74,6 +74,15 @@ class Tracker(
         /** Index of the detection matched or started on in the newest [update], or -1. */
         var matchedDet = -1
 
+        /** The raw measured head point of the newest match and its frame time; the step to the one before is below. */
+        var measXImg = 0f
+        var measYImg = 0f
+        var measNs = 0L
+
+        /** Step between the last two measurements over their time, Img px/s; 0 unless matched in the newest update. */
+        var stepVxImgPerS = 0f
+        var stepVyImgPerS = 0f
+
         /** Box edges relative to the head point, in units of the box height. */
         var offLeft = 0f
         var offTop = 0f
@@ -127,6 +136,7 @@ class Tracker(
     private val maxDtNs: Double = config.trackMaxDtMs.toDouble() * TrackerConfig.NANOS_PER_MILLI
     private val nanosPerSecond: Double = TrackerConfig.NANOS_PER_SECOND.toDouble()
     private val nanosPerMilli: Double = TrackerConfig.NANOS_PER_MILLI.toDouble()
+    private val accelScale = AccelScale(config)
     private val missTauS: Float = (config.trackMissVelocityTauMs.toDouble() * nanosPerMilli / nanosPerSecond).toFloat()
 
     private var hasLastFrame = false
@@ -228,12 +238,12 @@ class Tracker(
         if (hasLastFrame) {
             val dtNs = frame.timestampNs - lastTimestampNs
             if (dtNs <= 0L) {
-                for (pos in 0 until activeCount) tracks[order[pos]].matchedDet = -1
+                for (pos in 0 until activeCount) clearMatch(tracks[order[pos]])
                 return view
             }
             val gap = dtNs.toDouble() > maxDtNs
             dteNs = minOf(dtNs.toDouble(), maxDtNs)
-            predictAll((dteNs / nanosPerSecond).toFloat(), if (gap) config.trackGapNoiseInflate else 1f)
+            predictAll((dteNs / nanosPerSecond).toFloat(), if (gap) config.trackGapNoiseInflate else 1f, gap)
         }
         hasLastFrame = true
         lastTimestampNs = frame.timestampNs
@@ -285,17 +295,28 @@ class Tracker(
         missCount = 0
         removedCount = 0
         hasLastFrame = false
+        accelScale.reset()
     }
 
+    /**
+     * Moves every track forward by [dteS]. At a low frame rate (see [AccelScale]; not for a [gap] step) the head's
+     * process noise of a track that continues a match is scaled down, so the filter's smoothing of a still head does
+     * not fall off. A track that coasts (LOST, or tentative after a miss) keeps the unscaled noise: its gate and its
+     * prediction must stay as wide as at any other rate.
+     */
     private fun predictAll(
         dteS: Float,
         inflate: Float,
+        gap: Boolean,
     ) {
+        val headAccelScale = accelScale.update(dteS, gap)
         for (pos in 0 until activeCount) {
             val track = tracks[order[pos]]
             val heightImg = track.height.position
-            track.x.predict(dteS, config.trackAccelSigmaRatio * heightImg, inflate)
-            track.y.predict(dteS, config.trackAccelSigmaRatio * heightImg, inflate)
+            val coasting = track.state == TrackState.LOST || track.misses > 0
+            val headSigmaImg = config.trackAccelSigmaRatio * (if (coasting) 1f else headAccelScale) * heightImg
+            track.x.predict(dteS, headSigmaImg, inflate)
+            track.y.predict(dteS, headSigmaImg, inflate)
             track.height.predict(dteS, config.trackHeightAccelSigmaRatio * heightImg, inflate)
         }
     }
@@ -468,7 +489,7 @@ class Tracker(
             val slot = order[pos]
             val track = tracks[slot]
             val matched = trackDet[pos] >= 0 && applyHit(track, detections[trackDet[pos]])
-            track.matchedDet = if (matched) trackDet[pos] else -1
+            if (matched) track.matchedDet = trackDet[pos] else clearMatch(track)
             val alive =
                 if (matched) {
                     track.isHealthy()
@@ -499,6 +520,7 @@ class Tracker(
         track.estimator.update(detection, point)
         if (!point.valid || !(point.varianceImg2 > 0f && point.varianceImg2.isFinite())) return false
         val boxHeightImg = detection.boxBottomImg - detection.boxTopImg
+        noteMeasurement(track)
         val heightNoiseImg = config.trackHeightNoiseRatio * track.height.position
         track.x.update(point.headXImg, point.varianceImg2)
         track.y.update(point.headYImg, point.varianceImg2)
@@ -517,6 +539,28 @@ class Tracker(
             recoverCount++
         }
         return true
+    }
+
+    /** The track has no match in the newest update: no matched detection and no measured step. */
+    private fun clearMatch(track: Track) {
+        track.matchedDet = -1
+        track.stepVxImgPerS = 0f
+        track.stepVyImgPerS = 0f
+    }
+
+    /** Stores the head point of the current frame ([point]) as the track's newest measurement and the step to the one before. */
+    private fun noteMeasurement(track: Track) {
+        val dtS = ((lastTimestampNs - track.measNs).toDouble() / nanosPerSecond).toFloat()
+        if (dtS > 0f && dtS.isFinite()) {
+            track.stepVxImgPerS = (point.headXImg - track.measXImg) / dtS
+            track.stepVyImgPerS = (point.headYImg - track.measYImg) / dtS
+        } else {
+            track.stepVxImgPerS = 0f
+            track.stepVyImgPerS = 0f
+        }
+        track.measXImg = point.headXImg
+        track.measYImg = point.headYImg
+        track.measNs = lastTimestampNs
     }
 
     /** Handles a frame without a match; false when the track must be removed. */
@@ -885,6 +929,11 @@ class Tracker(
                 track.height.reset(boxHeightImg, heightNoiseImg * heightNoiseImg, velocityVariance)
         if (!started) return false
         setOffsets(track, detection, boxHeightImg)
+        track.measXImg = point.headXImg
+        track.measYImg = point.headYImg
+        track.measNs = lastTimestampNs
+        track.stepVxImgPerS = 0f
+        track.stepVyImgPerS = 0f
         track.id = nextId++
         track.hits = 1
         track.misses = 0
@@ -926,6 +975,10 @@ class Tracker(
         override fun velocityXImgPerS(index: Int): Float = at(index).x.velocity
 
         override fun velocityYImgPerS(index: Int): Float = at(index).y.velocity
+
+        override fun measuredVelocityXImgPerS(index: Int): Float = at(index).stepVxImgPerS
+
+        override fun measuredVelocityYImgPerS(index: Int): Float = at(index).stepVyImgPerS
 
         override fun boxLeftImg(index: Int): Float = at(index).boxLeftImg()
 

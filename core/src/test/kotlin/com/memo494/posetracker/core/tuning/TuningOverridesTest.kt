@@ -248,6 +248,71 @@ class TuningOverridesTest {
     }
 
     @Test
+    fun leadKeys_areBoundedByTheTrackerConfigConstants() {
+        assertThat(TuningKey.DISPLAY_LEAD_MAX_MS.min).isEqualTo(TrackerConfig.MIN_DISPLAY_LEAD_MAX_MS)
+        assertThat(TuningKey.DISPLAY_LEAD_MAX_MS.max).isEqualTo(TrackerConfig.MAX_DISPLAY_LEAD_MAX_MS)
+        assertThat(TuningKey.DISPLAY_LEAD_MAX_RATIO.min).isEqualTo(TrackerConfig.MIN_DISPLAY_LEAD_MAX_RATIO)
+        assertThat(TuningKey.DISPLAY_LEAD_MAX_RATIO.max).isEqualTo(TrackerConfig.MAX_DISPLAY_LEAD_MAX_RATIO)
+        assertThat(TuningKey.DISPLAY_LEAD_SPEED_LOW_HPS.min).isEqualTo(TrackerConfig.MIN_DISPLAY_LEAD_SPEED_HPS)
+        assertThat(TuningKey.DISPLAY_LEAD_SPEED_LOW_HPS.max).isEqualTo(TrackerConfig.MAX_DISPLAY_LEAD_SPEED_HPS)
+        assertThat(TuningKey.DISPLAY_LEAD_ENABLED.defaultValue).isEqualTo(1f)
+    }
+
+    @Test
+    fun applyTo_setsTheLeadFields() {
+        val overrides =
+            TuningOverrides.NONE
+                .with(TuningKey.DISPLAY_LEAD_ENABLED, 0f)
+                .with(TuningKey.DISPLAY_LEAD_MAX_MS, 200f)
+                .with(TuningKey.DISPLAY_LEAD_MAX_RATIO, 0.5f)
+                .with(TuningKey.DISPLAY_LEAD_SPEED_LOW_HPS, 0.2f)
+
+        val result = overrides.applyTo(TrackerConfig())
+
+        assertThat(result.applied).isEqualTo(4)
+        assertThat(result.config.displayLeadEnabled).isFalse()
+        assertThat(result.config.displayLeadMaxMs).isEqualTo(200f)
+        assertThat(result.config.displayLeadMaxRatio).isEqualTo(0.5f)
+        assertThat(result.config.displayLeadSpeedLowHps).isEqualTo(0.2f)
+    }
+
+    @Test
+    fun leadSwitch_clampsToZeroOrOneAndIsOnByDefault() {
+        assertThat(TuningOverrides.NONE.with(TuningKey.DISPLAY_LEAD_ENABLED, 7f).count).isEqualTo(0)
+        assertThat(TuningOverrides.NONE.with(TuningKey.DISPLAY_LEAD_ENABLED, -3f).applyTo().config.displayLeadEnabled).isFalse()
+        assertThat(TuningOverrides.NONE.applyTo().config.displayLeadEnabled).isTrue()
+    }
+
+    @Test
+    fun leadValues_clampToTheirBounds() {
+        val high = TuningOverrides.NONE.with(TuningKey.DISPLAY_LEAD_MAX_MS, 9999f).with(TuningKey.DISPLAY_LEAD_MAX_RATIO, 9f)
+
+        assertThat(high.valueOf(TuningKey.DISPLAY_LEAD_MAX_MS)).isEqualTo(TrackerConfig.MAX_DISPLAY_LEAD_MAX_MS)
+        assertThat(high.valueOf(TuningKey.DISPLAY_LEAD_MAX_RATIO)).isEqualTo(TrackerConfig.MAX_DISPLAY_LEAD_MAX_RATIO)
+    }
+
+    @Test
+    fun leadSpeedLow_aboveTheHighSpeedRaisesTheHighSpeed() {
+        val config = TuningOverrides.NONE.with(TuningKey.DISPLAY_LEAD_SPEED_LOW_HPS, 3f).applyTo().config
+
+        assertThat(config.displayLeadSpeedLowHps).isEqualTo(3f)
+        assertThat(config.displayLeadSpeedHighHps).isEqualTo(3f)
+    }
+
+    @Test
+    fun leadKeys_roundTripAndIgnoreOutOfRange() {
+        val overrides =
+            TuningOverrides.NONE
+                .with(TuningKey.DISPLAY_LEAD_ENABLED, 0f)
+                .with(TuningKey.DISPLAY_LEAD_MAX_MS, 250f)
+                .with(TuningKey.DISPLAY_LEAD_SPEED_LOW_HPS, 0.25f)
+
+        assertThat(TuningOverrides.decode(overrides.encode())).isEqualTo(overrides)
+        val decoded = TuningOverrides.decode(HEADER + "\ndisplayLeadMaxMs=5000\ndisplayLeadEnabled=2\n")
+        assertThat(decoded).isEqualTo(TuningOverrides.NONE)
+    }
+
+    @Test
     fun summaryText_listsOnlyOverriddenKeys() {
         val overrides = TuningOverrides.NONE.with(TuningKey.SCORE_THRESHOLD, 0.3f)
 

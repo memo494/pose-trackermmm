@@ -72,6 +72,19 @@ class TuningSheetMapperTest {
     }
 
     @Test
+    fun leadGroup_hasItsRowsAndNoSafetyWarning() {
+        val rows = TuningSheetMapper.rows(TuningOverrides.NONE).filter { it.key.group == TuningGroup.LEAD }
+
+        assertThat(rows.map { it.key }).containsExactly(
+            TuningKey.DISPLAY_LEAD_ENABLED,
+            TuningKey.DISPLAY_LEAD_MAX_MS,
+            TuningKey.DISPLAY_LEAD_MAX_RATIO,
+            TuningKey.DISPLAY_LEAD_SPEED_LOW_HPS,
+        )
+        assertThat(TuningSheetMapper.hasSafetyWarning(TuningGroup.LEAD)).isFalse()
+    }
+
+    @Test
     fun lockWarning_isOnlyForTheLockGroup() {
         assertThat(TuningSheetMapper.hasSafetyWarning(TuningGroup.LOCK)).isTrue()
         assertThat(TuningSheetMapper.hasSafetyWarning(TuningGroup.DETECTION)).isFalse()

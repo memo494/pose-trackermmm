@@ -33,6 +33,8 @@
     <string name="tuning_group_smoothing">Smoothing</string>
     <string name="tuning_group_tracking">Tracking</string>
     <string name="tuning_group_lock">Lock</string>
+    <string name="tuning_group_lead">Ring lead</string>
+    <string name="tuning_lead_caption">Stronger lead = less lag on moving heads, a little overshoot when they stop.</string>
     <string name="tuning_lock_warning">Higher distance / lower margin = more risk of the ring going to a wrong person.</string>
     <string name="tuning_row_value">%1$s (%2$s)</string>
 

@@ -8,12 +8,14 @@ enum class TuningGroup {
     SMOOTHING,
     TRACKING,
     LOCK,
+    LEAD,
 }
 
 /**
  * One slider of the tuning sheet (ARCHITECTURE §7.1): the number it changes in [TrackerConfig], its bounds (the
  * `MIN_*` / `MAX_*` constants of [TrackerConfig], so the sheet can never ask for a value the config refuses), its
- * step, and how to read and write it. **Adding a slider is adding one entry here** (and, for a new [group], its title
+ * step, and how to read and write it. A write may move a coupled number with it (`relockJudgeFrames` 1..100 raises
+ * `relockJudgeMaxFrames`; `displayLeadSpeedLowHps` raises `displayLeadSpeedHighHps`) so the config's own rules hold. **Adding a slider is adding one entry here** (and, for a new [group], its title
  * in the strings).
  *
  * @property id the key in the saved file; never reused for another meaning (an old file may still hold it).
@@ -144,6 +146,29 @@ enum class TuningKey(
             val frames = v.toInt()
             c.copy(relockJudgeFrames = frames, relockJudgeMaxFrames = maxOf(c.relockJudgeMaxFrames, frames))
         },
+    ),
+    DISPLAY_LEAD_ENABLED(
+        "displayLeadEnabled", TuningGroup.LEAD, "Ring lead (0 = off, 1 = on)", "",
+        TrackerConfig.TUNING_SWITCH_OFF, TrackerConfig.TUNING_SWITCH_ON, TrackerConfig.TUNING_SWITCH_ON, true,
+        { if (it.displayLeadEnabled) TrackerConfig.TUNING_SWITCH_ON else TrackerConfig.TUNING_SWITCH_OFF },
+        { c, v -> c.copy(displayLeadEnabled = v >= TrackerConfig.TUNING_SWITCH_ON) },
+    ),
+    DISPLAY_LEAD_MAX_MS(
+        "displayLeadMaxMs", TuningGroup.LEAD, "Longest lead time", "ms",
+        TrackerConfig.MIN_DISPLAY_LEAD_MAX_MS, TrackerConfig.MAX_DISPLAY_LEAD_MAX_MS, TrackerConfig.TUNING_STEP_LEAD_MS, false,
+        { it.displayLeadMaxMs }, { c, v -> c.copy(displayLeadMaxMs = v) },
+    ),
+    DISPLAY_LEAD_MAX_RATIO(
+        "displayLeadMaxRatio", TuningGroup.LEAD, "Longest lead (share of the person's height)", "",
+        TrackerConfig.MIN_DISPLAY_LEAD_MAX_RATIO, TrackerConfig.MAX_DISPLAY_LEAD_MAX_RATIO, TrackerConfig.TUNING_STEP_LEAD_RATIO, false,
+        { it.displayLeadMaxRatio }, { c, v -> c.copy(displayLeadMaxRatio = v) },
+    ),
+    DISPLAY_LEAD_SPEED_LOW_HPS(
+        "displayLeadSpeedLowHps", TuningGroup.LEAD, "Speed below which there is no lead", "heights/s",
+        TrackerConfig.MIN_DISPLAY_LEAD_SPEED_HPS, TrackerConfig.MAX_DISPLAY_LEAD_SPEED_HPS, TrackerConfig.TUNING_STEP_LEAD_SPEED, false,
+        { it.displayLeadSpeedLowHps },
+        // The speed for a full lead may not be below the speed for none (a TrackerConfig rule): raise the former with it.
+        { c, v -> c.copy(displayLeadSpeedLowHps = v, displayLeadSpeedHighHps = maxOf(c.displayLeadSpeedHighHps, v)) },
     ),
     ;
 

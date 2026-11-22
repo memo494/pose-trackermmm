@@ -12,6 +12,7 @@ import com.memo494.posetracker.core.modelimport.ModelLibrary
 import com.memo494.posetracker.core.modelimport.ModelOrientation
 import com.memo494.posetracker.core.modelimport.OrientationSlots
 import com.memo494.posetracker.core.modelimport.SlotChoice
+import com.memo494.posetracker.core.modelimport.autoSlotFor
 import com.memo494.posetracker.diagnostics.AppLog
 import java.io.File
 import java.io.FileOutputStream
@@ -154,10 +155,21 @@ class ModelLibraryStore internal constructor(
     override fun store(
         temp: File,
         meta: ImportedModelMeta,
-    ): StoreResult {
+    ): StoreResult = storeReporting(temp, meta).result
+
+    /**
+     * Adds the model and, in the same step under the same lock, puts a NEW model into the slot it fits
+     * ([autoSlotFor], given the library as it was before the add). A duplicate or a full library assigns nothing.
+     * Fail closed: when the slot record cannot be read or written the model stays stored and no slot is reported.
+     */
+    override fun storeReporting(
+        temp: File,
+        meta: ImportedModelMeta,
+    ): StoreReport {
         threadCheck()
         synchronized(LOCK) {
             val current = readState()
+            val before = current.entries.size
             val added = current.library.add(meta, config.modelLibraryMax)
             val entryStore = root.inDirectory(entryDirectory(meta.sha256))
             if (added == LibraryAdd.Duplicate) {
@@ -166,17 +178,38 @@ class ModelLibraryStore internal constructor(
                 val listed = current.entries.firstOrNull { it.meta.sha256 == meta.sha256 }
                 if (listed?.fileExists == true && entryStore.storedFileMatches(meta)) {
                     temp.delete()
-                    return if (unblock(current, meta.sha256)) StoreResult.STORED else StoreResult.FAILED
+                    return StoreReport(resultOf(unblock(current, meta.sha256)), null, true, before)
                 }
-                if (!entryStore.accept(temp, meta)) return StoreResult.FAILED
-                return if (unblock(current, meta.sha256)) StoreResult.STORED else StoreResult.FAILED
+                if (!entryStore.accept(temp, meta)) return StoreReport(StoreResult.FAILED, null, true, before)
+                return StoreReport(resultOf(unblock(current, meta.sha256)), null, true, before)
             }
-            if (added == LibraryAdd.Full) return StoreResult.LIBRARY_FULL
+            if (added == LibraryAdd.Full) return StoreReport(StoreResult.LIBRARY_FULL, null, false, before)
             val stored = entryStore.accept(temp, meta)
+            if (!stored) return StoreReport(StoreResult.FAILED, null, false, before)
             // A new file gets a new chance: a probe trip (or a marker without a model) is lifted; a model's crash stays.
-            if (stored) liftTripUnlessAModelCrash(current.guard)
-            return if (stored) StoreResult.STORED else StoreResult.FAILED
+            liftTripUnlessAModelCrash(current.guard)
+            return StoreReport(StoreResult.STORED, autoAssign(current, meta), false, before + 1)
         }
+    }
+
+    private fun resultOf(done: Boolean): StoreResult = if (done) StoreResult.STORED else StoreResult.FAILED
+
+    /** The slot the new model [meta] was put into, or `null` (nothing assigned, also when the slot record cannot be read or written). */
+    private fun autoAssign(
+        before: LibraryState,
+        meta: ImportedModelMeta,
+    ): ModelOrientation? {
+        if (before.slotsUnreadable.isNotEmpty()) {
+            log("the new model was not assigned to a slot: the stored choice is unreadable", null)
+            return null
+        }
+        val target = autoSlotFor(meta, before.slots, before.library) ?: return null
+        val next = before.slots.with(target, SlotChoice.Library(meta.sha256))
+        if (!writeAtomically(slotsFile(), next.encode())) {
+            log("the new model was not assigned to ${target.logName}: the choice could not be stored", null)
+            return null
+        }
+        return target
     }
 
     /** The file of [meta]'s model: `<root>/<16 hex>/model-<16 hex>.tflite`; it may not exist. */

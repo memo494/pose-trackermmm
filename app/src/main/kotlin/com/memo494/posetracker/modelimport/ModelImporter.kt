@@ -9,6 +9,7 @@ import com.memo494.posetracker.core.modelimport.ImportStage
 import com.memo494.posetracker.core.modelimport.ImportedModelMeta
 import com.memo494.posetracker.core.modelimport.ImportedModelRules
 import com.memo494.posetracker.core.modelimport.ModelFileSniffer
+import com.memo494.posetracker.core.modelimport.ModelOrientation
 import com.memo494.posetracker.core.modelimport.SniffRejection
 import com.memo494.posetracker.core.modelimport.SniffResult
 import com.memo494.posetracker.detector.ModelProbe
@@ -43,6 +44,12 @@ sealed interface ImportOutcome {
     /** The model passed every check and is now the stored imported model; [meta] describes it. */
     data class Accepted(
         val meta: ImportedModelMeta,
+        /** The orientation whose slot now holds the model, or `null` when no slot was assigned. */
+        val assignedSlot: ModelOrientation? = null,
+        /** The library already held this model. */
+        val duplicate: Boolean = false,
+        /** The number of models in the library after the import. */
+        val libraryCount: Int = 0,
     ) : ImportOutcome
 
     /**
@@ -230,8 +237,9 @@ class ModelImporter(
             return ImportOutcome.Failed(FailureKind.IO, "The model description cannot be stored")
         }
         // The target also lifts a trip (the new file replaces the one that tripped the guard), under the same lock.
-        return when (store.store(temp, meta)) {
-            StoreResult.STORED -> ImportOutcome.Accepted(meta)
+        val report = store.storeReporting(temp, meta)
+        return when (report.result) {
+            StoreResult.STORED -> ImportOutcome.Accepted(meta, report.assignedSlot, report.duplicate, report.libraryCount)
             StoreResult.LIBRARY_FULL -> ImportOutcome.Failed(FailureKind.LIBRARY_FULL)
             StoreResult.FAILED -> ImportOutcome.Failed(FailureKind.IO, "The model could not be stored")
         }

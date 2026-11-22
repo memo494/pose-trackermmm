@@ -2,6 +2,7 @@ package com.memo494.posetracker.modelimport
 
 import com.memo494.posetracker.core.modelimport.ImportGuardState
 import com.memo494.posetracker.core.modelimport.ImportedModelMeta
+import com.memo494.posetracker.core.modelimport.ModelOrientation
 import java.io.File
 
 /** What [ImportTarget.store] did with an accepted model. */
@@ -15,6 +16,22 @@ enum class StoreResult {
     /** The model could not be stored; what was stored before is unchanged. */
     FAILED,
 }
+
+/**
+ * What [ImportTarget.storeReporting] did.
+ *
+ * @property result the same answer [ImportTarget.store] gives.
+ * @property assignedSlot the orientation whose slot now holds the new model, or `null` when no slot was assigned
+ *   (a duplicate, a model that fits no free slot, a failed slot write, or a target without slots).
+ * @property duplicate the library already held this model (it was not added twice).
+ * @property libraryCount the number of models in the library after the call (`0` for a target without a library).
+ */
+data class StoreReport(
+    val result: StoreResult,
+    val assignedSlot: ModelOrientation? = null,
+    val duplicate: Boolean = false,
+    val libraryCount: Int = 0,
+)
 
 /**
  * Where [ModelImporter] puts the file it copied and checked, and the crash marker it keeps around the probe. The
@@ -39,4 +56,13 @@ interface ImportTarget {
         temp: File,
         meta: ImportedModelMeta,
     ): StoreResult
+
+    /**
+     * [store] and what else it did: a target with slots may put a new model into one and says which. The default
+     * has no slots and no library count.
+     */
+    fun storeReporting(
+        temp: File,
+        meta: ImportedModelMeta,
+    ): StoreReport = StoreReport(store(temp, meta))
 }

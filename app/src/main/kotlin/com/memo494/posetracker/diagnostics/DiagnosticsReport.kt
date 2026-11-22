@@ -145,7 +145,7 @@ internal object DiagnosticsReport {
     }
 
     /**
-     * The thermal step-down (ARCHITECTURE §7.2): `thermalState` (`NORMAL` or `HOT`), `thermalStepDowns` (times it went
+     * The thermal step-down (ARCHITECTURE §7.2): `thermalState` (`NORMAL` or `HOT`: the policy's wish), `thermalSmallModel` (`yes`, `no`, `blocked`, `failed`), `thermalStepDowns` (times it went
      * hot since Start) and `thermalHotMs` (time spent hot, milliseconds).
      */
     private fun appendThermalStepDown(
@@ -153,6 +153,7 @@ internal object DiagnosticsReport {
         stats: CaptureStats,
     ) {
         line(out, "thermalState", stats.thermalState)
+        line(out, "thermalSmallModel", stats.thermalSmallModel)
         line(out, "thermalStepDowns", stats.thermalStepDowns)
         line(out, "thermalHotMs", stats.thermalHotMs)
     }

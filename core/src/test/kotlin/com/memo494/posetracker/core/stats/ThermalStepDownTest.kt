@@ -63,13 +63,38 @@ class ThermalStepDownTest {
     }
 
     @Test
-    fun aReadingBetweenHotAndCool_resetsTheConfirmTimer() {
+    fun aReadingBetweenHotAndCool_pausesTheConfirmTimer_itsOwnIntervalDoesNotCount() {
         policy.update(NONE, 0.95f, 0)
-        policy.update(NONE, 0.8f, 2 * SEC) // not hot: the timer restarts at the next hot reading
-        policy.update(NONE, 0.95f, 4 * SEC)
+        policy.update(NONE, 0.8f, 2 * SEC) // in between: paused, the 0..2 s interval does not count
+        assertThat(policy.update(NONE, 0.95f, 4 * SEC)).isFalse() // counted 2 s (2..4)
 
-        assertThat(policy.update(NONE, 0.95f, 6 * SEC)).isFalse() // only 2 s since 4 s
-        assertThat(policy.update(NONE, 0.95f, 7 * SEC)).isTrue()
+        assertThat(policy.update(NONE, 0.95f, 5 * SEC)).isTrue() // counted 3 s
+    }
+
+    @Test
+    fun hotAndInBetweenAlternating_stepsDownEventually() {
+        // MODERATE (hot) alternating with LIGHT at a headroom above the cool threshold (in between), every 2 s.
+        val changes = mutableListOf<Long>()
+        var t = 0L
+        while (t <= 20) {
+            val hot = (t / 2) % 2 == 0L
+            if (policy.update(if (hot) MODERATE else LIGHT, 0.8f, t * SEC)) changes.add(t)
+            t += 2
+        }
+
+        assertThat(changes).containsExactly(8L)
+        assertThat(policy.state).isEqualTo(ThermalStepDown.State.HOT)
+    }
+
+    @Test
+    fun aCoolReading_resetsTheConfirmTimer() {
+        policy.update(MODERATE, 0.95f, 0)
+        policy.update(MODERATE, 0.95f, 2 * SEC)
+        policy.update(LIGHT, 0.5f, 3 * SEC) // cool: the held 2 s are forgotten
+
+        assertThat(policy.update(MODERATE, 0.95f, 4 * SEC)).isFalse()
+        assertThat(policy.update(MODERATE, 0.95f, 6 * SEC)).isFalse() // 2 s since 4 s
+        assertThat(policy.update(MODERATE, 0.95f, 7 * SEC)).isTrue()
     }
 
     @Test

@@ -58,6 +58,7 @@ class ModelSwitcherTest {
     private val smallSha = "e".repeat(64)
     private var smallLoads = 0
     private var smallFailure: Throwable? = null
+    private var oldClosedWhileSmallWasBuilt: Boolean? = null
     private val builtInOrientations = mutableListOf<ModelOrientation>()
     private val detectors = mutableListOf<TestDetector>()
     private val logs = mutableListOf<String>()
@@ -120,6 +121,7 @@ class ModelSwitcherTest {
                 now += loadNs
                 val detector =
                     guarded {
+                        oldClosedWhileSmallWasBuilt = detectors.any { it.closeCount > 0 }
                         smallLoads++
                         smallFailure?.let { throw it }
                         newDetector("small", SMALL, SMALL)
@@ -782,5 +784,58 @@ class ModelSwitcherTest {
         switcher.select(ModelOrientation.PORTRAIT)
 
         assertThat(smallLoads).isEqualTo(1)
+    }
+
+    @Test
+    fun hot_buildsTheSmallModelBeforeTheOldDetectorIsClosed() {
+        switcher.select(ModelOrientation.PORTRAIT)
+
+        switcher.setThermalHot(true)
+        switcher.select(ModelOrientation.PORTRAIT)
+
+        assertThat(oldClosedWhileSmallWasBuilt).isFalse()
+        assertThat(detectors.first().closeCount).isEqualTo(1)
+    }
+
+    @Test
+    fun loaderMessagesOfTheSmallModel_areLabelledAsThermalStepDown() {
+        switcher.select(ModelOrientation.PORTRAIT)
+        logs.clear()
+        smallFailure = IllegalStateException("no small model")
+
+        switcher.setThermalHot(true)
+        switcher.select(ModelOrientation.PORTRAIT)
+
+        assertThat(logs).isNotEmpty()
+        assertThat(logs.filter { it.contains("small model", ignoreCase = true) || it.contains("built-in") || it.contains("detector") })
+            .isNotEmpty()
+        assertThat(logs.all { it.startsWith("thermal step-down:") }).isTrue()
+    }
+
+    @Test
+    fun thermalSmallModel_saysNoYesFailedOrBlocked() {
+        assertThat(switcher.thermalSmallModel).isEqualTo("no")
+        switcher.select(ModelOrientation.PORTRAIT)
+        assertThat(switcher.thermalSmallModel).isEqualTo("no")
+
+        switcher.setThermalHot(true)
+        switcher.select(ModelOrientation.PORTRAIT)
+        assertThat(switcher.thermalSmallModel).isEqualTo("yes")
+
+        switcher.setThermalHot(false)
+        switcher.select(ModelOrientation.PORTRAIT)
+        assertThat(switcher.thermalSmallModel).isEqualTo("no")
+
+        smallFailure = IllegalStateException("no small model")
+        switcher.setThermalHot(true)
+        switcher.select(ModelOrientation.PORTRAIT)
+        assertThat(switcher.thermalSmallModel).isEqualTo("failed")
+
+        switcher.setThermalHot(false)
+        smallFailure = null
+        blocked = setOf(smallSha)
+        switcher.setThermalHot(true)
+        switcher.select(ModelOrientation.PORTRAIT)
+        assertThat(switcher.thermalSmallModel).isEqualTo("blocked")
     }
 }

@@ -24,7 +24,8 @@ internal object CaptureStatsHolder {
      * Capture thread, once per HUD tick: stores a snapshot of [state], the [pipeline] counters and its timing
      * percentiles (computed here, on the capture thread, so the diagnostics thread only reads the snapshot) and
      * the last reading of [thermal] (`null` = no thermal source: not available) and the state of the thermal
-     * step-down [stepDown] at [nowNs] (`null` = no policy: `NORMAL`, never stepped down).
+     * step-down [stepDown] at [nowNs] (`null` = no policy: `NORMAL`, never stepped down); [smallModel] is
+     * `ModelSwitcher.thermalSmallModel` (`yes`, `no`, `blocked`, `failed`).
      */
     fun publish(
         state: OverlayState,
@@ -32,6 +33,7 @@ internal object CaptureStatsHolder {
         thermal: ThermalSampler?,
         stepDown: ThermalStepDown? = null,
         nowNs: Long = 0L,
+        smallModel: String = "no",
     ) {
         latest =
             CaptureStats(
@@ -82,6 +84,7 @@ internal object CaptureStatsHolder {
                 thermalStatus = thermal?.status ?: ThermalStatusText.NOT_AVAILABLE,
                 thermalHeadroom = thermal?.headroom ?: Float.NaN,
                 thermalState = (stepDown?.state ?: ThermalStepDown.State.NORMAL).name,
+                thermalSmallModel = smallModel,
                 thermalStepDowns = stepDown?.stepDowns ?: 0,
                 thermalHotMs = stepDown?.hotMs(nowNs) ?: 0L,
             )

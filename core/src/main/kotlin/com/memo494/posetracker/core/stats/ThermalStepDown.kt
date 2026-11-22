@@ -12,8 +12,11 @@ import java.util.Locale
  *   is at least [TrackerConfig.thermalHotHeadroom], and it stays so for [TrackerConfig.thermalHotConfirmMs].
  * - HOT to NORMAL: every reading that is known is cool (status at most `LIGHT`, headroom at most
  *   [TrackerConfig.thermalCoolHeadroom]), at least one is known, and it stays so for [TrackerConfig.thermalCoolDownMs].
- * - Any reading that is neither (and an unavailable one) restarts the running timer, so the state never flaps and an
- *   unreadable device keeps the current model (fail closed): unavailable readings never trigger HOT and never end it.
+ * - While NORMAL, a reading that is known but neither hot nor cool (in between) pauses the entry timer (its own interval
+ *   does not count) and a cool or unavailable reading restarts it, so a device that hovers around MODERATE still
+ *   steps down. While HOT, any reading that is not cool (and an unavailable one) restarts the cool-down timer, so the
+ *   state never flaps. An unreadable device keeps the current model (fail closed): unavailable readings never trigger
+ *   HOT and never end it.
  *
  * @param config the thresholds and times.
  */
@@ -32,6 +35,8 @@ class ThermalStepDown(
         private set
 
     private var candidateSinceNs = NONE
+    private var heldNs = 0L
+    private var lastReadingNs = 0L
     private var hotTotalNs = 0L
     private var hotSinceNs = 0L
 
@@ -47,16 +52,17 @@ class ThermalStepDown(
     ): Boolean {
         val statusKnown = statusCode in 0..TrackerConfig.THERMAL_STATUS_MAX
         val headroomKnown = headroom.isFinite() && headroom >= 0f
+        val hot =
+            (statusKnown && statusCode >= TrackerConfig.THERMAL_STATUS_HOT_MIN) ||
+                (headroomKnown && headroom >= config.thermalHotHeadroom)
+        val cool =
+            (statusKnown || headroomKnown) &&
+                (!statusKnown || statusCode <= TrackerConfig.THERMAL_STATUS_COOL_MAX) &&
+                (!headroomKnown || headroom <= config.thermalCoolHeadroom)
         return if (state == State.NORMAL) {
-            val hot =
-                (statusKnown && statusCode >= TrackerConfig.THERMAL_STATUS_HOT_MIN) ||
-                    (headroomKnown && headroom >= config.thermalHotHeadroom)
-            held(hot, nowNs, config.thermalHotConfirmNs) && change(State.HOT, nowNs)
+            val inBetween = !hot && !cool && (statusKnown || headroomKnown)
+            enterTimer(hot, inBetween, nowNs) && change(State.HOT, nowNs)
         } else {
-            val cool =
-                (statusKnown || headroomKnown) &&
-                    (!statusKnown || statusCode <= TrackerConfig.THERMAL_STATUS_COOL_MAX) &&
-                    (!headroomKnown || headroom <= config.thermalCoolHeadroom)
             held(cool, nowNs, config.thermalCoolDownNs) && change(State.NORMAL, nowNs)
         }
     }
@@ -65,6 +71,28 @@ class ThermalStepDown(
     fun hotMs(nowNs: Long): Long {
         val running = if (state == State.HOT) nowNs - hotSinceNs else 0L
         return (hotTotalNs + running) / TrackerConfig.NANOS_PER_MILLI
+    }
+
+    /**
+     * The entry timer of NORMAL: a hot reading adds the time since the previous reading (the first one starts the
+     * timer), an in-between one only moves the reference point (pause), anything else restarts the timer. Returns whether
+     * the hot readings have added up to the confirm time.
+     */
+    private fun enterTimer(
+        hot: Boolean,
+        inBetween: Boolean,
+        nowNs: Long,
+    ): Boolean {
+        if (hot) {
+            heldNs = if (candidateSinceNs == NONE) 0L else heldNs + (nowNs - lastReadingNs)
+            candidateSinceNs = nowNs
+        } else if (!inBetween || candidateSinceNs == NONE) {
+            candidateSinceNs = NONE
+            heldNs = 0L
+            return false
+        }
+        lastReadingNs = nowNs
+        return hot && heldNs >= config.thermalHotConfirmNs
     }
 
     /** Whether [condition] has held for [neededNs] up to [nowNs]; a false condition restarts the timer. */

@@ -118,10 +118,11 @@ class CaptureStatsHolderTest {
         policy.update(2, Float.NaN, 4_000_000_000L)
         val hotMs = 10_000L
 
-        CaptureStatsHolder.publish(OverlayState(), pipelineWithDetector(), null, policy, 14_000_000_000L)
+        CaptureStatsHolder.publish(OverlayState(), pipelineWithDetector(), null, policy, 14_000_000_000L, "blocked")
 
         val stats = CaptureStatsHolder.latest!!
         assertThat(stats.thermalState).isEqualTo("HOT")
+        assertThat(stats.thermalSmallModel).isEqualTo("blocked")
         assertThat(stats.thermalStepDowns).isEqualTo(1)
         assertThat(stats.thermalHotMs).isEqualTo(hotMs)
     }
@@ -132,6 +133,7 @@ class CaptureStatsHolderTest {
 
         val stats = CaptureStatsHolder.latest!!
         assertThat(stats.thermalState).isEqualTo("NORMAL")
+        assertThat(stats.thermalSmallModel).isEqualTo("no")
         assertThat(stats.thermalStepDowns).isEqualTo(0)
         assertThat(stats.thermalHotMs).isEqualTo(0L)
     }

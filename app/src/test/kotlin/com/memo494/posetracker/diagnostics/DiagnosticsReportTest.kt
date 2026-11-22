@@ -462,9 +462,10 @@ class DiagnosticsReportTest {
 
     @Test
     fun summary_thermalStepDownLines_sitBetweenTheModelBlockAndTheTiming() {
-        val lines = summaryLines(timedStats.copy(thermalState = "HOT", thermalStepDowns = 2, thermalHotMs = 123_456L))
+        val lines =
+            summaryLines(timedStats.copy(thermalState = "HOT", thermalSmallModel = "failed", thermalStepDowns = 2, thermalHotMs = 123_456L))
 
-        assertThat(lines).containsAtLeast("thermalState=HOT", "thermalStepDowns=2", "thermalHotMs=123456")
+        assertThat(lines).containsAtLeast("thermalState=HOT", "thermalSmallModel=failed", "thermalStepDowns=2", "thermalHotMs=123456")
         assertThat(lines.indexOf("thermalState=HOT")).isLessThan(lines.indexOf("thermalStepDowns=2"))
         assertThat(lines.indexOf("thermalHotMs=123456")).isLessThan(lines.indexOf("timingSamples=480"))
         assertThat(lines.indexOf("thermalState=HOT")).isGreaterThan(lines.indexOf("modelSource=builtin"))
@@ -474,7 +475,7 @@ class DiagnosticsReportTest {
     fun summary_withoutAStepDown_saysNormalAndZero() {
         val lines = summaryLines(timedStats)
 
-        assertThat(lines).containsAtLeast("thermalState=NORMAL", "thermalStepDowns=0", "thermalHotMs=0")
+        assertThat(lines).containsAtLeast("thermalState=NORMAL", "thermalSmallModel=no", "thermalStepDowns=0", "thermalHotMs=0")
     }
 
     @Test

@@ -139,7 +139,14 @@ internal class CaptureSession(
                         val thermal = thermalSampler
                         val nowNs = clock.nowNs()
                         if (thermal != null && thermal.sample(nowNs)) onThermalSample(thermal, activePipeline, nowNs)
-                        CaptureStatsHolder.publish(overlayWindow.stateHolder.latest(), activePipeline, thermal, thermalStepDown, nowNs)
+                        CaptureStatsHolder.publish(
+                            overlayWindow.stateHolder.latest(),
+                            activePipeline,
+                            thermal,
+                            thermalStepDown,
+                            nowNs,
+                            modelSwitcher?.thermalSmallModel ?: "no",
+                        )
                     }
                 }
             }
@@ -375,6 +382,7 @@ internal class CaptureSession(
         if (!policy.update(sampler.statusCode, sampler.headroom, nowNs)) return
         CaptureLog.log(ThermalStepDown.transitionLine(policy.state, sampler.status, sampler.headroom), null)
         modelSwitcher?.setThermalHot(policy.state == ThermalStepDown.State.HOT)
+        // No capture size yet (before the first geometry): applyGeometry's switchModelFor then picks the model, hot flag included.
         val size = currentSize ?: return
         switchModelFor(size, activePipeline)
     }

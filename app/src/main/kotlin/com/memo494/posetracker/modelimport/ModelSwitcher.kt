@@ -101,10 +101,26 @@ internal class ModelSwitcher(
     /** Whether the thermal step-down asks for the small model, and whether loading it failed since that was asked. */
     private var thermalHot = false
     private var smallLoadFailed = false
+    private var smallBlocked = false
 
     /** Whether the small model of the thermal step-down is the running one. */
     val steppedDown: Boolean
         get() = current?.detector != null && loadedFor == SMALL_KEY
+
+    /**
+     * What the thermal step-down's small model is doing, for `summary.txt` (`thermalSmallModel`): `yes` = it runs; `blocked` =
+     * it is on the crash list so it was not loaded; `failed` = it did not load (since the last transition); `no` = it is
+     * not wanted, or not tried yet.
+     */
+    val thermalSmallModel: String
+        get() =
+            when {
+                steppedDown -> "yes"
+                !thermalHot -> "no"
+                smallBlocked -> "blocked"
+                smallLoadFailed -> "failed"
+                else -> "no"
+            }
 
     /** Changes of the running model since this switcher was made (Start not counted): by orientation or thermal state. */
     var switches: Int = 0
@@ -123,6 +139,7 @@ internal class ModelSwitcher(
         if (hot == thermalHot) return
         thermalHot = hot
         smallLoadFailed = false
+        smallBlocked = false
     }
 
     /**
@@ -226,10 +243,11 @@ internal class ModelSwitcher(
                 setGuard = setGuard,
                 loadImported = loadImported,
                 builtInSha256 = smallBuiltInSha256,
-                isBuiltInBlocked = { sha256 -> blockedOrThrow(library, sha256) },
+                isBuiltInBlocked = { sha256 -> blockedOrThrow(library, sha256).also { smallBlocked = it } },
                 loadBuiltIn = loadSmallBuiltIn,
                 loadFallbackBuiltIn = { error("the small model has no fallback") },
-                log = ::safeLog,
+                // The loader's lines talk about "the built-in model"; they must not read as if the main model failed.
+                log = { message, error -> safeLog("thermal step-down: $message", error) },
                 verifyStored = verifyStored,
             ).load()
         if (loaded.detector == null) return null

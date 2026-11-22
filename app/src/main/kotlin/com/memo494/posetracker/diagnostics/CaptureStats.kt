@@ -61,6 +61,8 @@ import com.memo494.posetracker.overlay.OverlayState
  * @property thermalStatus name of the device's thermal status (`NONE` to `SHUTDOWN`); `n/a` = not known.
  * @property thermalHeadroom the device's thermal headroom, unitless (1.0 = throttling); NaN = not known.
  * @property thermalState the thermal step-down's state, `NORMAL` or `HOT` (the small model is wanted).
+ * @property thermalSmallModel whether the small model of the step-down runs: `yes`, `no`, `blocked` (on the crash list) or
+ *   `failed` (did not load); `thermalState` is only the policy's wish.
  * @property thermalStepDowns how many times the step-down went from `NORMAL` to `HOT` since Start.
  * @property thermalHotMs how long the step-down was `HOT` since Start, in milliseconds.
  */
@@ -112,6 +114,7 @@ internal data class CaptureStats(
     val thermalStatus: String = ThermalStatusText.NOT_AVAILABLE,
     val thermalHeadroom: Float = Float.NaN,
     val thermalState: String = ThermalStepDown.State.NORMAL.name,
+    val thermalSmallModel: String = "no",
     val thermalStepDowns: Int = 0,
     val thermalHotMs: Long = 0L,
 )

@@ -81,6 +81,9 @@ package com.memo494.posetracker.core
  *   [MAX_ASSOC_HEAD_SCALE_RATIO]]; 0.5 means half a person height.
  * @property dedupeIou two detections of one frame whose boxes overlap with at least this IoU (unitless) are
  *   one person: the lower score is dropped before association, in [[MIN_DEDUPE_IOU], [MAX_DEDUPE_IOU]].
+ * @property rawNmsIou class-agnostic non-maximum suppression of a RAW pose output (`[1, 56, N]` or `[1, N, 56]`): of two
+ *   boxes with an IoU above this (unitless), the lower score is dropped, in [[MIN_RAW_NMS_IOU], [MAX_RAW_NMS_IOU]].
+ *   The end-to-end output (`[1, N, 57]`) has its suppression built into the model and does not use it.
  * @property trackHighScore a detection with at least this score (unitless) takes part in the first, strict matching
  *   stage of the tracker, in [[MIN_TRACK_SCORE], [MAX_TRACK_SCORE]]; lower ones only in the second stage.
  * @property trackBirthScore a detection that matches no track starts a new track only with at least this score
@@ -238,6 +241,7 @@ data class TrackerConfig(
     val assocHeadWeight: Float = DEFAULT_ASSOC_WEIGHT,
     val assocHeadScaleRatio: Float = DEFAULT_ASSOC_HEAD_SCALE_RATIO,
     val dedupeIou: Float = DEFAULT_DEDUPE_IOU,
+    val rawNmsIou: Float = DEFAULT_RAW_NMS_IOU,
     val trackHighScore: Float = DEFAULT_TRACK_HIGH_SCORE,
     val trackBirthScore: Float = DEFAULT_TRACK_BIRTH_SCORE,
     val trackConfirmHits: Int = DEFAULT_TRACK_CONFIRM_HITS,
@@ -424,6 +428,9 @@ data class TrackerConfig(
         }
         require(dedupeIou in MIN_DEDUPE_IOU..MAX_DEDUPE_IOU) {
             "dedupeIou $dedupeIou outside [$MIN_DEDUPE_IOU, $MAX_DEDUPE_IOU]"
+        }
+        require(rawNmsIou in MIN_RAW_NMS_IOU..MAX_RAW_NMS_IOU) {
+            "rawNmsIou $rawNmsIou outside [$MIN_RAW_NMS_IOU, $MAX_RAW_NMS_IOU]"
         }
         require(trackHighScore in MIN_TRACK_SCORE..MAX_TRACK_SCORE) {
             "trackHighScore $trackHighScore outside [$MIN_TRACK_SCORE, $MAX_TRACK_SCORE]"
@@ -923,6 +930,15 @@ data class TrackerConfig(
 
         /** Highest accepted [dedupeIou]. */
         const val MAX_DEDUPE_IOU = 0.95f
+
+        /** Default [rawNmsIou]: unitless (the Ultralytics default for pose NMS is 0.7). */
+        const val DEFAULT_RAW_NMS_IOU = 0.7f
+
+        /** Lowest accepted [rawNmsIou]. */
+        const val MIN_RAW_NMS_IOU = 0.3f
+
+        /** Highest accepted [rawNmsIou]. */
+        const val MAX_RAW_NMS_IOU = 0.95f
 
         /** Default [trackHighScore]: unitless confidence. */
         const val DEFAULT_TRACK_HIGH_SCORE = 0.5f
@@ -1442,6 +1458,13 @@ data class TrackerConfig(
          */
         const val IMPORT_MAX_OUTPUT_ROWS = 300
 
+        /**
+         * Most rows (`N`) of an imported model's RAW output (`[1, 56, N]` or `[1, N, 56]`): 33 600 rows are what a
+         * 1280 x 1280 input has (the default [DEFAULT_IMPORT_MAX_INPUT_SIZE]); anything above would also be a
+         * lot of memory per frame. Also the sanity cap of stored metadata.
+         */
+        const val IMPORT_MAX_RAW_OUTPUT_ROWS = 50_000
+
         /** Longest stored display name of an imported model, in characters. */
         const val IMPORT_NAME_MAX_CHARS = 64
 
@@ -1462,6 +1485,19 @@ data class TrackerConfig(
 
         /** Values per keypoint: x, y and confidence. */
         const val POSE_VALUES_PER_KEYPOINT = 3
+
+        /** Channels per output row of a RAW pose model: 4 box (cx, cy, w, h) + 1 person score + 17 * 3 keypoint values = 56. */
+        const val POSE_RAW_CHANNELS = POSE_BOX_VALUES + POSE_SCORE_VALUES + POSE_KEYPOINT_COUNT * POSE_VALUES_PER_KEYPOINT
+
+        /** Most detections the RAW pose decoder returns per frame (the Ultralytics default `max_det`). */
+        const val RAW_MAX_DETECTIONS = 300
+
+        /**
+         * A RAW output row whose box, written as left, top, right, bottom, has no coordinate with an absolute value
+         * above this is read as normalized (0..1, scaled by the model input size); otherwise as model pixels. The same
+         * rule as the vendored end-to-end path, applied per row.
+         */
+        const val RAW_NORMALIZED_MAX_COORDINATE = 2f
 
         /** Columns per output row of an accepted pose model: 4 box + 1 score + 1 class + 17 * 3 keypoint values = 57. */
         const val POSE_OUTPUT_COLUMNS =

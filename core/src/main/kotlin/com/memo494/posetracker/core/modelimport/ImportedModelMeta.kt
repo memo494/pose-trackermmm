@@ -14,7 +14,9 @@ import com.memo494.posetracker.core.TrackerConfig
  * @property bytes size of the copied file, in bytes.
  * @property inputWidth width `W` of the model's input tensor `[1, 3, H, W]`, in pixels (Mdl space).
  * @property inputHeight height `H` of the model's input tensor `[1, 3, H, W]`, in pixels (Mdl space).
- * @property outputRows rows `N` of the model's `[1, N, 57]` output, unitless.
+ * @property outputRows rows `N` of the model's output (`[1, N, 57]`, `[1, 56, N]` or `[1, N, 56]`), unitless.
+ * @property outputLayout how the output is laid out; [PoseOutputLayout.END_TO_END] for every model imported before
+ *   raw outputs were supported.
  */
 data class ImportedModelMeta(
     val displayName: String,
@@ -23,24 +25,37 @@ data class ImportedModelMeta(
     val inputWidth: Int,
     val inputHeight: Int,
     val outputRows: Int,
+    val outputLayout: PoseOutputLayout = PoseOutputLayout.END_TO_END,
 ) {
     /**
      * The versioned text form: [HEADER] then `name=`, `sha256=`, `bytes=`, `inputWidth=`, `inputHeight=`,
-     * `outputRows=`, one per line in that order, joined by `\n` with no trailing newline. Always version 2.
+     * `outputRows=`, one per line in that order, joined by `\n` with no trailing newline. Version 2 for an
+     * [PoseOutputLayout.END_TO_END] model (the text is what it always was); version 3 for a raw one, which adds a
+     * last `outputLayout=` line (`raw_channels_first` or `raw_channels_last`).
      */
-    fun encode(): String =
-        listOf(
-            HEADER,
-            "$KEY_NAME$displayName",
-            "$KEY_SHA256$sha256",
-            "$KEY_BYTES$bytes",
-            "$KEY_INPUT_WIDTH$inputWidth",
-            "$KEY_INPUT_HEIGHT$inputHeight",
-            "$KEY_OUTPUT_ROWS$outputRows",
-        ).joinToString(LINE_SEPARATOR.toString())
+    fun encode(): String {
+        val lines =
+            listOf(
+                if (outputLayout.isRaw) HEADER_V3 else HEADER,
+                "$KEY_NAME$displayName",
+                "$KEY_SHA256$sha256",
+                "$KEY_BYTES$bytes",
+                "$KEY_INPUT_WIDTH$inputWidth",
+                "$KEY_INPUT_HEIGHT$inputHeight",
+                "$KEY_OUTPUT_ROWS$outputRows",
+            )
+        val all = if (outputLayout.isRaw) lines + "$KEY_OUTPUT_LAYOUT${layoutText(outputLayout)}" else lines
+        return all.joinToString(LINE_SEPARATOR.toString())
+    }
 
     companion object {
         private const val HEADER = "posetracker-imported-model v2"
+        private const val HEADER_V3 = "posetracker-imported-model v3"
+        private const val KEY_OUTPUT_LAYOUT = "outputLayout="
+        private const val LAYOUT_RAW_FIRST = "raw_channels_first"
+        private const val LAYOUT_RAW_LAST = "raw_channels_last"
+        private const val EXPECTED_LINES_V3 = 8
+        private const val LINE_OUTPUT_LAYOUT = 7
         private const val HEADER_V1 = "posetracker-imported-model v1"
         private const val KEY_NAME = "name="
         private const val KEY_SHA256 = "sha256="
@@ -70,7 +85,7 @@ data class ImportedModelMeta(
          * a name [sanitiseName] would change, [bytes] outside 1..[TrackerConfig.MAX_IMPORT_BYTES_LIMIT],
          * [inputWidth] or [inputHeight] outside
          * [TrackerConfig.MIN_IMPORT_INPUT_SIZE_LIMIT]..[TrackerConfig.MAX_IMPORT_INPUT_SIZE_LIMIT] or not a multiple
-         * of [TrackerConfig.IMPORT_INPUT_SIZE_STEP], [outputRows] outside 1..[TrackerConfig.IMPORT_MAX_OUTPUT_ROWS],
+         * of [TrackerConfig.IMPORT_INPUT_SIZE_STEP], [outputRows] outside 1..[TrackerConfig.IMPORT_MAX_OUTPUT_ROWS] (1..[TrackerConfig.IMPORT_MAX_RAW_OUTPUT_ROWS] for a version 3 raw layout),
          * or a long side more than [TrackerConfig.importMaxInputAspect] of [config] times the short side, so that
          * a stored text the importer could never have written is refused, for both versions). The size ranges are
          * sanity checks independent of the configured import size limits; the aspect limit is the configured one.
@@ -84,6 +99,7 @@ data class ImportedModelMeta(
         ): ImportedModelMeta? {
             val lines = text.split(LINE_SEPARATOR)
             return when {
+                lines.size == EXPECTED_LINES_V3 && lines[0] == HEADER_V3 -> decodeV3(lines, config)
                 lines.size == EXPECTED_LINES && lines[0] == HEADER -> decodeV2(lines, config)
                 lines.size == EXPECTED_LINES_V1 && lines[0] == HEADER_V1 -> decodeV1(lines, config)
                 else -> null
@@ -97,8 +113,32 @@ data class ImportedModelMeta(
             val width = lines[LINE_INPUT_WIDTH].removeIfStarts(KEY_INPUT_WIDTH)?.let(::parseCanonical) ?: return null
             val height = lines[LINE_INPUT_HEIGHT].removeIfStarts(KEY_INPUT_HEIGHT)?.let(::parseCanonical) ?: return null
             val rows = lines[LINE_OUTPUT_ROWS].removeIfStarts(KEY_OUTPUT_ROWS)?.let(::parseCanonical) ?: return null
-            return build(lines, width, height, rows, config)
+            return build(lines, width, height, rows, PoseOutputLayout.END_TO_END, config)
         }
+
+        /** Version 3: version 2 plus the last `outputLayout=` line, which names a raw layout (never `end_to_end`). */
+        private fun decodeV3(
+            lines: List<String>,
+            config: TrackerConfig,
+        ): ImportedModelMeta? {
+            val width = lines[LINE_INPUT_WIDTH].removeIfStarts(KEY_INPUT_WIDTH)?.let(::parseCanonical) ?: return null
+            val height = lines[LINE_INPUT_HEIGHT].removeIfStarts(KEY_INPUT_HEIGHT)?.let(::parseCanonical) ?: return null
+            val rows = lines[LINE_OUTPUT_ROWS].removeIfStarts(KEY_OUTPUT_ROWS)?.let(::parseCanonical) ?: return null
+            val layout =
+                when (lines[LINE_OUTPUT_LAYOUT].removeIfStarts(KEY_OUTPUT_LAYOUT)) {
+                    LAYOUT_RAW_FIRST -> PoseOutputLayout.RAW_CHANNELS_FIRST
+                    LAYOUT_RAW_LAST -> PoseOutputLayout.RAW_CHANNELS_LAST
+                    else -> return null
+                }
+            return build(lines, width, height, rows, layout, config)
+        }
+
+        private fun layoutText(layout: PoseOutputLayout): String =
+            when (layout) {
+                PoseOutputLayout.RAW_CHANNELS_FIRST -> LAYOUT_RAW_FIRST
+                PoseOutputLayout.RAW_CHANNELS_LAST -> LAYOUT_RAW_LAST
+                PoseOutputLayout.END_TO_END -> error("an end-to-end meta has no outputLayout line")
+            }
 
         private fun decodeV1(
             lines: List<String>,
@@ -106,7 +146,7 @@ data class ImportedModelMeta(
         ): ImportedModelMeta? {
             val size = lines[LINE_INPUT_SIZE_V1].removeIfStarts(KEY_INPUT_SIZE_V1)?.let(::parseCanonical) ?: return null
             val rows = lines[LINE_OUTPUT_ROWS_V1].removeIfStarts(KEY_OUTPUT_ROWS)?.let(::parseCanonical) ?: return null
-            return build(lines, size, size, rows, config)
+            return build(lines, size, size, rows, PoseOutputLayout.END_TO_END, config)
         }
 
         /**
@@ -118,6 +158,7 @@ data class ImportedModelMeta(
             width: Long,
             height: Long,
             outputRows: Long,
+            outputLayout: PoseOutputLayout,
             config: TrackerConfig,
         ): ImportedModelMeta? {
             val name = lines[LINE_NAME].removeIfStarts(KEY_NAME) ?: return null
@@ -131,10 +172,13 @@ data class ImportedModelMeta(
                     isSaneInputSide(width) &&
                     isSaneInputSide(height) &&
                     !ImportedModelRules.tooElongated(height.toInt(), width.toInt(), config) &&
-                    outputRows in 1L..TrackerConfig.IMPORT_MAX_OUTPUT_ROWS.toLong()
+                    outputRows in 1L..maxRows(outputLayout)
             if (!valid) return null
-            return ImportedModelMeta(name, sha256, bytes, width.toInt(), height.toInt(), outputRows.toInt())
+            return ImportedModelMeta(name, sha256, bytes, width.toInt(), height.toInt(), outputRows.toInt(), outputLayout)
         }
+
+        private fun maxRows(layout: PoseOutputLayout): Long =
+            (if (layout.isRaw) TrackerConfig.IMPORT_MAX_RAW_OUTPUT_ROWS else TrackerConfig.IMPORT_MAX_OUTPUT_ROWS).toLong()
 
         private fun isSaneInputSide(side: Long): Boolean =
             side in TrackerConfig.MIN_IMPORT_INPUT_SIZE_LIMIT.toLong()..TrackerConfig.MAX_IMPORT_INPUT_SIZE_LIMIT.toLong() &&

@@ -81,6 +81,7 @@ internal object ControlModelMapper {
         when (reason) {
             ImportRejection.INPUT_COUNT -> ModelRejectionReason.INPUT_COUNT
             ImportRejection.INPUT_TYPE -> ModelRejectionReason.INPUT_TYPE
+            ImportRejection.QUANTIZED_IO -> ModelRejectionReason.QUANTIZED_IO
             ImportRejection.INPUT_NOT_NCHW -> ModelRejectionReason.INPUT_NOT_NCHW
             ImportRejection.INPUT_NHWC -> ModelRejectionReason.INPUT_NHWC
             ImportRejection.INPUT_ASPECT -> ModelRejectionReason.INPUT_ASPECT
@@ -89,6 +90,8 @@ internal object ControlModelMapper {
             ImportRejection.OUTPUT_COUNT -> ModelRejectionReason.OUTPUT_COUNT
             ImportRejection.OUTPUT_TYPE -> ModelRejectionReason.OUTPUT_TYPE
             ImportRejection.OUTPUT_CLASSIC_HEAD -> ModelRejectionReason.OUTPUT_CLASSIC_HEAD
+            ImportRejection.OUTPUT_DETECT_ONLY -> ModelRejectionReason.OUTPUT_DETECT_ONLY
+            ImportRejection.OUTPUT_KEYPOINT_COUNT -> ModelRejectionReason.OUTPUT_KEYPOINT_COUNT
             ImportRejection.OUTPUT_ROWS -> ModelRejectionReason.OUTPUT_ROWS
             ImportRejection.OUTPUT_SHAPE -> ModelRejectionReason.OUTPUT_SHAPE
         }
@@ -208,6 +211,7 @@ internal object ControlModelMapper {
             ModelRejectionReason.UNREADABLE -> R.string.model_reject_unreadable
             ModelRejectionReason.INPUT_COUNT -> R.string.model_reject_input_count
             ModelRejectionReason.INPUT_TYPE -> R.string.model_reject_input_type
+            ModelRejectionReason.QUANTIZED_IO -> R.string.model_reject_quantized_io
             ModelRejectionReason.INPUT_NOT_NCHW -> R.string.model_reject_input_not_nchw
             ModelRejectionReason.INPUT_NHWC -> R.string.model_reject_input_nhwc
             ModelRejectionReason.INPUT_ASPECT -> R.string.model_reject_input_aspect
@@ -216,6 +220,8 @@ internal object ControlModelMapper {
             ModelRejectionReason.OUTPUT_COUNT -> R.string.model_reject_output_count
             ModelRejectionReason.OUTPUT_TYPE -> R.string.model_reject_output_type
             ModelRejectionReason.OUTPUT_CLASSIC_HEAD -> R.string.model_reject_output_classic_head
+            ModelRejectionReason.OUTPUT_DETECT_ONLY -> R.string.model_reject_output_detect_only
+            ModelRejectionReason.OUTPUT_KEYPOINT_COUNT -> R.string.model_reject_output_keypoint_count
             ModelRejectionReason.OUTPUT_ROWS -> R.string.model_reject_output_rows
             ModelRejectionReason.OUTPUT_SHAPE -> R.string.model_reject_output_shape
         }

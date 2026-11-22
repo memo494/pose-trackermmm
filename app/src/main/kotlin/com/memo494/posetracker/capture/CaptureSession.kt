@@ -27,6 +27,7 @@ import com.memo494.posetracker.core.stats.ThermalStepDown
 import com.memo494.posetracker.detector.PoseDetector
 import com.memo494.posetracker.detector.PoseDetectors
 import com.memo494.posetracker.diagnostics.CaptureStatsHolder
+import com.memo494.posetracker.modelimport.ModelFallback
 import com.memo494.posetracker.modelimport.ModelLibraryStore
 import com.memo494.posetracker.modelimport.ModelSelection
 import com.memo494.posetracker.modelimport.ModelSource
@@ -294,6 +295,7 @@ internal class CaptureSession(
                 modelImported = loaded?.source == ModelSource.IMPORTED,
                 importedModelNotUsed = loaded?.importedModelNotUsed == true,
                 builtInModelFailed = loaded?.builtInFailed == true,
+                modelWrongShape = loaded?.fallback == ModelFallback.WRONG_SHAPE,
             )
         thermalSampler =
             ThermalSampler(
@@ -423,6 +425,7 @@ internal class CaptureSession(
             loaded.importedModelNotUsed,
             loaded.builtInFailed,
             thermalStepDown = selection.thermal,
+            wrongShape = loaded.fallback == ModelFallback.WRONG_SHAPE,
         )
     }
 

@@ -814,6 +814,57 @@ class ModelLibraryStoreTest {
         assertThat(library.state().entries).hasSize(1)
     }
 
+    // ---- EXPERIMENT (to be removed): production-like wiring ----
+
+    private val processFlag = AtomicBoolean(false)
+
+    /** Like MainActivity: a new store per call, the production defaults (in-flight check, File::renameTo, process flag). */
+    private fun productionLibrary() =
+        ModelLibraryStore(
+            ImportedModelStore(directory, prefs, processFlag, thread::check),
+            TrackerConfig(),
+            thread::check,
+            File::renameTo,
+        ) { message, _ -> logs.add(message) }
+
+    private fun productionImport(
+        bytes: ByteArray,
+        name: String,
+    ): ImportOutcome = importBytes(importerFor(productionLibrary()), bytes, name)
+
+    private fun tree(): String = directory.walkTopDown().joinToString("\n") { it.relativeTo(tmp.root).path } + "\nlogs=" + logs
+
+    @Test
+    fun experiment_twoImports_productionWiring() {
+        productionLibrary().state()
+        assertThat(productionImport(tfliteBytes(500, 1), "one.tflite")).isInstanceOf(ImportOutcome.Accepted::class.java)
+        productionLibrary().state()
+        assertThat(productionImport(tfliteBytes(600, 2), "two.tflite")).isInstanceOf(ImportOutcome.Accepted::class.java)
+
+        val names = productionLibrary().state().entries.map { it.meta.displayName }
+        com.google.common.truth.Truth.assertWithMessage(tree()).that(names).containsExactly("one.tflite", "two.tflite")
+    }
+
+    @Test
+    fun experiment_legacyThenImport_productionWiring() {
+        storeLegacyModel(metaA, bytesA)
+        productionLibrary().state()
+        assertThat(productionImport(tfliteBytes(600, 2), "two.tflite")).isInstanceOf(ImportOutcome.Accepted::class.java)
+
+        val names = productionLibrary().state().entries.map { it.meta.displayName }
+        com.google.common.truth.Truth.assertWithMessage(tree()).that(names).containsExactly("a.tflite", "two.tflite")
+    }
+
+    @Test
+    fun experiment_legacyImportFirst_productionWiring() {
+        storeLegacyModel(metaA, bytesA)
+        assertThat(productionImport(tfliteBytes(600, 2), "two.tflite")).isInstanceOf(ImportOutcome.Accepted::class.java)
+        assertThat(productionImport(tfliteBytes(700, 3), "three.tflite")).isInstanceOf(ImportOutcome.Accepted::class.java)
+
+        val names = productionLibrary().state().entries.map { it.meta.displayName }
+        com.google.common.truth.Truth.assertWithMessage(tree()).that(names).containsExactly("a.tflite", "two.tflite", "three.tflite")
+    }
+
     // ---- threads ----
 
     @Test

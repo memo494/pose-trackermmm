@@ -5,6 +5,7 @@ import com.memo494.posetracker.core.TrackerConfig
 import com.memo494.posetracker.core.modelimport.ImportCheck
 import com.memo494.posetracker.core.modelimport.ImportRejection
 import com.memo494.posetracker.core.modelimport.ImportedModelRules
+import com.memo494.posetracker.core.modelimport.InputLayout
 import com.memo494.posetracker.core.modelimport.TensorDescription
 import org.junit.Test
 
@@ -84,13 +85,27 @@ class ModelProbeTest {
     }
 
     @Test
-    fun nhwcInputIsRejectedAsNhwc() {
+    fun nhwcInputIsAcceptedAsNhwc() {
         val input = ModelProbe.describe(intArrayOf(1, 640, 640, 3), "FLOAT")
         val output = ModelProbe.describe(intArrayOf(1, 300, 57), "FLOAT")
 
         val check = ImportedModelRules.check(listOf(input), listOf(output), config)
 
-        assertThat((check as ImportCheck.Rejected).reason).isEqualTo(ImportRejection.INPUT_NHWC)
+        assertThat(
+            check,
+        ).isEqualTo(ImportCheck.Accepted(inputWidth = 640, inputHeight = 640, outputRows = 300, inputLayout = InputLayout.NHWC))
+    }
+
+    @Test
+    fun realRectangularNhwcShapesAreAcceptedWithWidthAndHeightApart() {
+        val input = ModelProbe.describe(intArrayOf(1, 384, 832, 3), "FLOAT")
+        val output = ModelProbe.describe(intArrayOf(1, 300, 57), "FLOAT")
+
+        val check = ImportedModelRules.check(listOf(input), listOf(output), config)
+
+        assertThat(
+            check,
+        ).isEqualTo(ImportCheck.Accepted(inputWidth = 832, inputHeight = 384, outputRows = 300, inputLayout = InputLayout.NHWC))
     }
 
     @Test

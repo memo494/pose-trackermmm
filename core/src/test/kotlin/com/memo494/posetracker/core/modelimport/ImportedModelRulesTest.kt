@@ -168,16 +168,93 @@ class ImportedModelRulesTest {
     // ---- input layout ----
 
     @Test
-    fun nhwcInput_isRecognisedByName() {
+    fun nhwcInput_isAcceptedWithLayoutNhwc() {
         val result = check(tensor(1, 640, 640, 3), tensor(1, 56, 8400))
 
-        val rejected = assertRejected(result, ImportRejection.INPUT_NHWC)
-        assertThat(rejected.details).isEqualTo("input [1,640,640,3] float32; output [1,56,8400] float32")
+        assertThat(result)
+            .isEqualTo(
+                ImportCheck.Accepted(
+                    inputWidth = 640,
+                    inputHeight = 640,
+                    outputRows = 8400,
+                    outputLayout = PoseOutputLayout.RAW_CHANNELS_FIRST,
+                    inputLayout = InputLayout.NHWC,
+                ),
+            )
     }
 
     @Test
-    fun nonSquareNhwcInput_isStillRecognisedAsNhwc() {
-        assertRejected(check(tensor(1, 640, 480, 3)), ImportRejection.INPUT_NHWC)
+    fun nchwInput_isAcceptedWithLayoutNchw() {
+        val result = check(tensor(1, 3, 640, 640)) as ImportCheck.Accepted
+
+        assertThat(result.inputLayout).isEqualTo(InputLayout.NCHW)
+    }
+
+    @Test
+    fun nonSquareNhwcInput_isAcceptedWithWidthFromAxis2AndHeightFromAxis1() {
+        // NHWC is [1, H, W, 3]: height is axis 1, width is axis 2.
+        val cases = listOf(832 to 384, 384 to 832, 640 to 288, 480 to 640)
+
+        for ((width, height) in cases) {
+            val result = check(tensor(1, height, width, 3))
+
+            assertThat(result)
+                .isEqualTo(ImportCheck.Accepted(inputWidth = width, inputHeight = height, outputRows = 300, inputLayout = InputLayout.NHWC))
+        }
+    }
+
+    @Test
+    fun nhwcInput_atBothSizeLimits_isAccepted() {
+        for (size in listOf(config.importMinInputSize, 320, config.importMaxInputSize)) {
+            val result = check(tensor(1, size, size, 3)) as ImportCheck.Accepted
+
+            assertThat(result.inputWidth).isEqualTo(size)
+            assertThat(result.inputHeight).isEqualTo(size)
+        }
+    }
+
+    @Test
+    fun nhwcInput_sizeOutOfRange_isRefusedLikeNchw() {
+        for ((h, w) in listOf(config.importMinInputSize - 32 to 640, 640 to config.importMaxInputSize + 32, 0 to 640, -1 to 640)) {
+            assertRejected(check(tensor(1, h, w, 3)), ImportRejection.INPUT_SIZE_OUT_OF_RANGE)
+            assertRejected(check(tensor(1, 3, h, w)), ImportRejection.INPUT_SIZE_OUT_OF_RANGE)
+        }
+    }
+
+    @Test
+    fun nhwcInput_notAMultipleOfTheStep_isRefusedLikeNchw() {
+        for ((h, w) in listOf(641 to 640, 640 to 625, 330 to 330)) {
+            assertRejected(check(tensor(1, h, w, 3)), ImportRejection.INPUT_SIZE_NOT_MULTIPLE)
+            assertRejected(check(tensor(1, 3, h, w)), ImportRejection.INPUT_SIZE_NOT_MULTIPLE)
+        }
+    }
+
+    @Test
+    fun nhwcInput_tooElongated_isRefusedLikeNchw() {
+        val short = config.importMinInputSize
+        val long = (short * config.importMaxInputAspect.toInt() + TrackerConfig.IMPORT_INPUT_SIZE_STEP)
+
+        assertRejected(check(tensor(1, short, long, 3)), ImportRejection.INPUT_ASPECT)
+        assertRejected(check(tensor(1, long, short, 3)), ImportRejection.INPUT_ASPECT)
+        assertRejected(check(tensor(1, 3, short, long)), ImportRejection.INPUT_ASPECT)
+    }
+
+    @Test
+    fun nhwcInput_int8_isQuantizedIo() {
+        assertRejected(check(tensor(1, 640, 640, 3, type = "int8")), ImportRejection.QUANTIZED_IO)
+        assertRejected(check(tensor(1, 640, 640, 3, type = "uint8")), ImportRejection.QUANTIZED_IO)
+    }
+
+    @Test
+    fun nhwcInput_withAnOutputThatDoesNotFit_isRefusedForTheOutput() {
+        val rejected = assertRejected(check(tensor(1, 640, 640, 3), tensor(1, 84, 8400)), ImportRejection.OUTPUT_CLASSIC_HEAD)
+
+        assertThat(rejected.details).isEqualTo("input [1,640,640,3] float32; output [1,84,8400] float32")
+    }
+
+    @Test
+    fun theNhwcRejectionKey_isKept_evenThoughARuleNoLongerReturnsIt() {
+        assertThat(ImportRejection.INPUT_NHWC.key).isEqualTo("input_nhwc")
     }
 
     @Test
@@ -402,9 +479,9 @@ class ImportedModelRulesTest {
 
     @Test
     fun inputRules_comeBeforeOutputRules() {
-        val result = check(tensor(1, 640, 640, 3), tensor(1, 56, 8400, type = "float16"))
+        val result = check(tensor(1, 3, 100, 640), tensor(1, 56, 8400, type = "float16"))
 
-        assertRejected(result, ImportRejection.INPUT_NHWC)
+        assertRejected(result, ImportRejection.INPUT_SIZE_OUT_OF_RANGE)
     }
 
     @Test

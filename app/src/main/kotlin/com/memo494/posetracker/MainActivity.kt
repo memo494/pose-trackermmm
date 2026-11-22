@@ -47,7 +47,6 @@ import com.memo494.posetracker.diagnostics.DiagnosticsShare
 import com.memo494.posetracker.diagnostics.DiagnosticsUiState
 import com.memo494.posetracker.diagnostics.DiagnosticsZip
 import com.memo494.posetracker.modelimport.AcceptedImportLog
-import com.memo494.posetracker.modelimport.ImportOutcome
 import com.memo494.posetracker.modelimport.ModelImporter
 import com.memo494.posetracker.modelimport.ModelLibraryStore
 import com.memo494.posetracker.modelimport.ModelStatus
@@ -325,8 +324,7 @@ class MainActivity : ComponentActivity() {
             val (name, size) = readNameAndSize(uri)
             val importer = ModelImporter(ModelLibraryStore(applicationContext))
             val source = { contentResolver.openInputStream(uri) ?: throw IOException("The picked file cannot be opened") }
-            val outcome = importer.import(source, name, size)
-            if (outcome is ImportOutcome.Accepted) AppLog.log(AcceptedImportLog.line(outcome), null)
+            val outcome = AcceptedImportLog.logIfAccepted(importer.import(source, name, size)) { AppLog.log(it, null) }
             ControlModelMapper.summary(outcome)
         } catch (t: Throwable) {
             AppLog.log("model import failed", t)

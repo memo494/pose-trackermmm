@@ -17,4 +17,16 @@ internal object AcceptedImportLog {
         val slot = accepted.assignedSlot?.logName ?: "none"
         return "model import accepted: ${meta.displayName} sha256=$shortSha input=$input $kind slot=$slot library=${accepted.libraryCount}"
     }
+
+    /**
+     * Writes [line] through [log] once when [outcome] is accepted (new or duplicate) and writes nothing for a
+     * rejection or a failure. Returns [outcome] unchanged, so the caller can call it in the middle of an expression.
+     */
+    fun logIfAccepted(
+        outcome: ImportOutcome,
+        log: (String) -> Unit,
+    ): ImportOutcome {
+        if (outcome is ImportOutcome.Accepted) log(line(outcome))
+        return outcome
+    }
 }

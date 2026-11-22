@@ -41,6 +41,7 @@ class ModelSwitcherTest {
 
     private var slots = OrientationSlots()
     private var blocked = emptySet<String>()
+    private var blockedListUnreadable = false
     private var unreadable = emptySet<ModelOrientation>()
     private var readFailure: Throwable? = null
     private var now = 0L
@@ -68,7 +69,7 @@ class ModelSwitcherTest {
             slots = slots,
             slotsUnreadable = unreadable,
             blocked = blocked,
-            blockedUnreadable = false,
+            blockedUnreadable = blockedListUnreadable,
             guard = ImportGuardState.Idle,
             anyFileStored = true,
         )
@@ -96,14 +97,18 @@ class ModelSwitcherTest {
                 newDetector(meta.displayName, meta.inputWidth, meta.inputHeight)
             },
             builtInSha256 = { bundledSha },
-            loadBuiltIn = { orientation ->
+            loadBuiltIn = { orientation, guarded ->
                 now += loadNs
                 builtInLoads++
                 builtInOrientations.add(orientation)
-                builtInFailure?.let { throw it }
                 val width = BuiltInModels.widthFor(orientation)
                 val height = BuiltInModels.heightFor(orientation)
-                BundledDetector(newDetector("builtin", width, height), "yolo26n-pose_${width}x$height.tflite", bundledSha)
+                val detector =
+                    guarded {
+                        builtInFailure?.let { throw it }
+                        newDetector("builtin", width, height)
+                    }
+                BundledDetector(detector, "yolo26n-pose_${width}x$height.tflite", bundledSha)
             },
             loadFallbackBuiltIn = {
                 now += loadNs
@@ -301,6 +306,30 @@ class ModelSwitcherTest {
 
         assertThat(builtInLoads).isEqualTo(0)
         assertThat(loaded.detector!!.inputWidth).isEqualTo(416)
+        // The message is already the state failure (STATE_UNREADABLE); the skip is logged with its own reason.
+        assertThat(logs).contains("built-in model skipped: crash record unreadable")
+        assertThat(loaded.builtInBlocked).isFalse()
+    }
+
+    @Test
+    fun anUnreadableBlockedList_failsClosedToTheSquareFallback_withoutSayingItCrashed() {
+        blockedListUnreadable = true
+
+        val loaded = switcher.select(ModelOrientation.PORTRAIT)!!.loaded
+
+        assertThat(builtInLoads).isEqualTo(0)
+        assertThat(loaded.detector!!.inputWidth).isEqualTo(416)
+        assertThat(loaded.message).isEqualTo("built-in model skipped: crash record unreadable")
+    }
+
+    @Test
+    fun aBlockedBundledModel_saysItCrashedEarlier() {
+        blocked = setOf(bundledSha)
+
+        val loaded = switcher.select(ModelOrientation.PORTRAIT)!!.loaded
+
+        assertThat(loaded.message).isEqualTo("built-in model skipped: it crashed earlier")
+        assertThat(loaded.builtInBlocked).isTrue()
     }
 
     @Test

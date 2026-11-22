@@ -184,7 +184,11 @@ internal object ControlModelMapper {
         if (guard == ImportGuardState.Tripped(ImportStage.PROBE)) ModelNotice(ModelNoticeKind.PROBE_TRIP_MODEL_KEPT) else null
 
     private fun builtInFailedNotice(status: ModelStatus?): ModelNotice? =
-        if (status?.builtInFailed == true) ModelNotice(ModelNoticeKind.BUILT_IN_FAILED, status.message) else null
+        when {
+            status?.builtInFailed != true -> null
+            status.builtInBlocked -> ModelNotice(ModelNoticeKind.BUILT_IN_BLOCKED, status.message)
+            else -> ModelNotice(ModelNoticeKind.BUILT_IN_FAILED, status.message)
+        }
 
     private fun unreadableNotice(status: ModelStatus?): ModelNotice? =
         if (status?.fallback == ModelFallback.STATE_UNREADABLE) {
@@ -245,6 +249,7 @@ internal object ControlModelMapper {
             ModelNoticeKind.LOAD_FAILED -> R.string.model_notice_load_failed
             ModelNoticeKind.STATE_UNREADABLE -> R.string.model_notice_state_unreadable
             ModelNoticeKind.BUILT_IN_FAILED -> R.string.model_notice_built_in_failed
+            ModelNoticeKind.BUILT_IN_BLOCKED -> R.string.model_notice_built_in_blocked
             ModelNoticeKind.BLOCKED_UNREADABLE -> R.string.model_notice_blocked_unreadable
         }
 }

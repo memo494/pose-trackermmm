@@ -765,7 +765,7 @@ step back up after 60 s below the threshold. Every step is logged and shown in t
     model of that orientation (448x960 portrait, 960x448 landscape; it is reloaded when the orientation changes; if it fails,
     is blocked (its crash marker `pending:load:<sha256>` tripped before) or its marker cannot be stored: the square fallback
     model (`modelInputSize`, 416), logged, `modelFallback=BUILT_IN_FAILED`, HUD note `Built-in model failed: 416`, a control-screen
-    notice; `modelFile` names it) with the existing fallback reasons; the session never stops, and a failed load is tried again when its
+    notice; `modelFile` names it; the marker covers only the model creation, not the file staging; a blocked bundled model is lifted by **Remove all imported models**) with the existing fallback reasons; the session never stops, and a failed load is tried again when its
     orientation returns. The LOAD crash marker now names the model (`pending:load:<sha256>`); a trip moves only that
     model to `blocked.txt` and the marker goes idle, so the other models keep working. If the marker cannot be set back to idle after
     a load (a failed write), the `Pending` stays stored: for the rest of the process loads fall back to the built-in model

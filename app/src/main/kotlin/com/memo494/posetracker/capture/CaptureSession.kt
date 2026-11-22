@@ -20,6 +20,8 @@ import com.memo494.posetracker.core.TrackerConfig
 import com.memo494.posetracker.core.capture.CaptureSize
 import com.memo494.posetracker.core.modelimport.BuiltInModels
 import com.memo494.posetracker.core.modelimport.ModelOrientation
+import com.memo494.posetracker.core.modelpack.ModelEntry
+import com.memo494.posetracker.core.modelpack.ModelInfo
 import com.memo494.posetracker.core.stats.ThermalSampler
 import com.memo494.posetracker.detector.PoseDetector
 import com.memo494.posetracker.detector.PoseDetectors
@@ -303,29 +305,39 @@ internal class CaptureSession(
      */
     private fun createModelSwitcher(): ModelSwitcher {
         val store = ModelLibraryStore(context, config)
+        // model_info.json is read once per session (a failed read is tried again at the next use).
+        val info = lazy { PoseDetectors.bundledInfo(context) }
         return ModelSwitcher(
             readLibrary = store::state,
             setGuard = store::setGuard,
             loadImported = { meta -> PoseDetectors.fromImported(context, store.modelFileFor(meta), meta, config) },
             builtInSha256 = { orientation ->
                 try {
-                    PoseDetectors
-                        .bundledEntry(context, BuiltInModels.widthFor(orientation), BuiltInModels.heightFor(orientation))
-                        .sha256
+                    bundledEntry(info.value, orientation).sha256
                 } catch (e: Exception) {
-                    CaptureLog.log("the built-in model is not listed in model_info.json", e)
+                    CaptureLog.log("the hash of the built-in model is unknown (model_info.json not readable or without it)", e)
                     null
                 }
             },
-            loadBuiltIn = { orientation ->
-                PoseDetectors.fromAssets(context, config, BuiltInModels.widthFor(orientation), BuiltInModels.heightFor(orientation))
+            loadBuiltIn = {
+                orientation,
+                guarded,
+                ->
+                PoseDetectors.fromAssets(context, config, bundledEntry(info.value, orientation), guarded)
             },
-            loadFallbackBuiltIn = { PoseDetectors.fromAssets(context, config, config.modelInputSize, config.modelInputSize) },
+            loadFallbackBuiltIn = {
+                PoseDetectors.fromAssets(context, config, info.value.entryFor(config.modelInputSize))
+            },
             verifyStored = store::storedFileMatches,
             nowNs = clock::nowNs,
             log = CaptureLog::log,
         )
     }
+
+    private fun bundledEntry(
+        info: ModelInfo,
+        orientation: ModelOrientation,
+    ): ModelEntry = info.entryFor(BuiltInModels.widthFor(orientation), BuiltInModels.heightFor(orientation))
 
     /** The orientation of the capture this session is about to start, from the display (the content is not known yet). */
     private fun startOrientation(): ModelOrientation {

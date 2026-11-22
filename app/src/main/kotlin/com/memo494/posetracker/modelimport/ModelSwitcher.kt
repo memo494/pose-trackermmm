@@ -62,7 +62,7 @@ internal class ModelSwitcher(
     private val setGuard: (ImportGuardState) -> Boolean,
     private val loadImported: (ImportedModelMeta) -> PoseDetector,
     private val builtInSha256: (ModelOrientation) -> String?,
-    private val loadBuiltIn: (ModelOrientation) -> BundledDetector,
+    private val loadBuiltIn: (ModelOrientation, CreateGuard) -> BundledDetector,
     private val loadFallbackBuiltIn: () -> BundledDetector,
     private val verifyStored: (ImportedModelMeta) -> Boolean,
     private val nowNs: () -> Long,
@@ -157,8 +157,8 @@ internal class ModelSwitcher(
                 setGuard = setGuard,
                 loadImported = loadImported,
                 builtInSha256 = { builtInSha256(orientation) },
-                isBuiltInBlocked = { sha256 -> library?.isBlocked(sha256) ?: true },
-                loadBuiltIn = { loadBuiltIn(orientation) },
+                isBuiltInBlocked = { sha256 -> blockedOrThrow(library, sha256) },
+                loadBuiltIn = { guard -> loadBuiltIn(orientation, guard) },
                 loadFallbackBuiltIn = loadFallbackBuiltIn,
                 log = ::safeLog,
                 verifyStored = verifyStored,
@@ -215,6 +215,16 @@ internal class ModelSwitcher(
         } catch (t: Throwable) {
             // Nowhere left to report it.
         }
+    }
+
+    /** Whether [sha256] is blocked; throws when that cannot be known (no library, or an unreadable blocked list): fail closed. */
+    private fun blockedOrThrow(
+        library: LibraryState?,
+        sha256: String,
+    ): Boolean {
+        checkNotNull(library) { "the crash record could not be read" }
+        check(!library.blockedUnreadable) { "the blocked list could not be read" }
+        return library.isBlocked(sha256)
     }
 
     /**

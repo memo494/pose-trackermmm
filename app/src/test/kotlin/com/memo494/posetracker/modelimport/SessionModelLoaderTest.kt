@@ -47,6 +47,12 @@ class SessionModelLoaderTest {
     private var builtInSha: String? = null
     private val blockedShas = mutableSetOf<String>()
     private var guardDuringBuiltInLoad: ImportGuardState? = null
+    private var guardWhileStaging: ImportGuardState? = null
+
+    /** Staging the bundled file (copy and hash) fails: it happens before the marker. */
+    private var stagingFailure: Throwable? = null
+    private var blockCheckFailure: Throwable? = null
+    private var shaReads = 0
     private var storedFileMatches = false
     private var verifyFailure: Throwable? = null
     private val logs = mutableListOf<String>()
@@ -76,14 +82,26 @@ class SessionModelLoaderTest {
                 importedFailure?.let { throw it }
                 importedDetector
             },
-            builtInSha256 = { builtInSha },
-            isBuiltInBlocked = { it in blockedShas },
-            loadBuiltIn = {
+            builtInSha256 = {
+                shaReads++
+                builtInSha
+            },
+            isBuiltInBlocked = {
+                blockCheckFailure?.let { throw it }
+                it in blockedShas
+            },
+            loadBuiltIn = { guarded ->
                 builtInLoads++
-                guardDuringBuiltInLoad = storedGuard
-                preferredFailure?.let { throw it }
-                builtInFailure?.let { throw it }
-                BundledDetector(builtInDetector, "yolo26n-pose_448x960.tflite", BUILT_IN_SHA)
+                guardWhileStaging = storedGuard
+                stagingFailure?.let { throw it }
+                val detector =
+                    guarded {
+                        guardDuringBuiltInLoad = storedGuard
+                        preferredFailure?.let { throw it }
+                        builtInFailure?.let { throw it }
+                        builtInDetector
+                    }
+                BundledDetector(detector, "yolo26n-pose_448x960.tflite", BUILT_IN_SHA)
             },
             loadFallbackBuiltIn = {
                 fallbackLoads++
@@ -473,6 +491,85 @@ class SessionModelLoaderTest {
     }
 
     @Test
+    fun bundledModel_theMarkerIsNotPendingWhileTheFileIsStaged_onlyWhileTheModelIsCreated() {
+        state = StoredModelState(null, fileExists = false, guard = ImportGuardState.Idle)
+        builtInSha = BUILT_IN_SHA
+
+        loader().load()
+
+        assertThat(guardWhileStaging).isEqualTo(ImportGuardState.Idle)
+        assertThat(guardDuringBuiltInLoad).isEqualTo(ImportGuardState.Pending(ImportStage.LOAD, BUILT_IN_SHA))
+    }
+
+    @Test
+    fun bundledModelThatFailsToStage_hasNoMarkerAtAll_andTheSquareFallbackRuns() {
+        state = StoredModelState(null, fileExists = false, guard = ImportGuardState.Idle)
+        builtInSha = BUILT_IN_SHA
+        stagingFailure = IOException("disk full")
+
+        val loaded = loader().load()
+
+        assertThat(guardWrites).isEmpty()
+        assertThat(loaded.detector).isSameInstanceAs(squareDetector)
+        assertThat(loaded.fallback).isEqualTo(ModelFallback.BUILT_IN_FAILED)
+    }
+
+    @Test
+    fun bundledModel_theHashIsReadOncePerLoad() {
+        state = StoredModelState(null, fileExists = false, guard = ImportGuardState.Idle)
+        builtInSha = BUILT_IN_SHA
+
+        loader().load()
+
+        assertThat(shaReads).isEqualTo(1)
+    }
+
+    @Test
+    fun importedLoadFailed_thenTheBundledLoad_markersGoPendingImportedIdlePendingBundledIdle() {
+        builtInSha = BUILT_IN_SHA
+        importedFailure = IllegalStateException("bad")
+
+        val loaded = loader().load()
+
+        assertThat(loaded.fallback).isEqualTo(ModelFallback.LOAD_FAILED)
+        assertThat(guardWrites)
+            .containsExactly(
+                ImportGuardState.Pending(ImportStage.LOAD, meta.sha256),
+                ImportGuardState.Idle,
+                ImportGuardState.Pending(ImportStage.LOAD, BUILT_IN_SHA),
+                ImportGuardState.Idle,
+            ).inOrder()
+    }
+
+    @Test
+    fun bundledModelThatCrashedBefore_saysTheNoteAndIsMarkedBlocked() {
+        state = StoredModelState(null, fileExists = false, guard = ImportGuardState.Idle)
+        builtInSha = BUILT_IN_SHA
+        blockedShas.add(BUILT_IN_SHA)
+
+        val loaded = loader().load()
+
+        assertThat(loaded.message).isEqualTo("built-in model skipped: it crashed earlier")
+        assertThat(loaded.builtInBlocked).isTrue()
+        assertThat(loaded.status().builtInBlocked).isTrue()
+    }
+
+    @Test
+    fun crashRecordThatCannotBeChecked_isNotSaidToBeACrash_butStillSkipsTheBundledModel() {
+        state = StoredModelState(null, fileExists = false, guard = ImportGuardState.Idle)
+        builtInSha = BUILT_IN_SHA
+        blockCheckFailure = IllegalStateException("blocked list unreadable")
+
+        val loaded = loader().load()
+
+        assertThat(builtInLoads).isEqualTo(0)
+        assertThat(loaded.detector).isSameInstanceAs(squareDetector)
+        assertThat(loaded.fallback).isEqualTo(ModelFallback.BUILT_IN_FAILED)
+        assertThat(loaded.message).isEqualTo("built-in model skipped: crash record unreadable")
+        assertThat(loaded.builtInBlocked).isFalse()
+    }
+
+    @Test
     fun bundledModelThatCrashedBefore_isSkipped_andTheSquareFallbackRuns() {
         state = StoredModelState(null, fileExists = false, guard = ImportGuardState.Idle)
         builtInSha = BUILT_IN_SHA
@@ -498,7 +595,8 @@ class SessionModelLoaderTest {
 
         val loaded = loader().load()
 
-        assertThat(builtInLoads).isEqualTo(0)
+        // The file may be staged, but the model is never created without its marker.
+        assertThat(guardDuringBuiltInLoad).isNull()
         assertThat(loaded.detector).isSameInstanceAs(squareDetector)
         assertThat(loaded.fallback).isEqualTo(ModelFallback.BUILT_IN_FAILED)
     }

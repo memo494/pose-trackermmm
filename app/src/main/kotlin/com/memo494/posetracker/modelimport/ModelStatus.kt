@@ -59,6 +59,8 @@ enum class ModelFallback {
  * @property builtInFailed `true` when the square fallback model runs because the bundled model of the orientation
  *   could not (see [ModelFallback.BUILT_IN_FAILED]; also `true` when an imported model's fallback is the one in
  *   [fallback]).
+ * @property builtInBlocked `true` when [builtInFailed] is because the bundled model is on the blocked list (the process
+ *   died while loading it before); the control screen then says how to try it again.
  * @property portrait what the portrait slot is set to (M1b-1): [SLOT_BUILT_IN] or the name and short sha256 of the
  *   library model, as `name 0123456789ab`.
  * @property landscape what the landscape slot is set to, like [portrait].
@@ -77,6 +79,7 @@ data class ModelStatus(
     val builtInFile: String? = null,
     val builtInSha256: String? = null,
     val builtInFailed: Boolean = false,
+    val builtInBlocked: Boolean = false,
     val portrait: String = SLOT_BUILT_IN,
     val landscape: String = SLOT_BUILT_IN,
     val switches: Int = 0,

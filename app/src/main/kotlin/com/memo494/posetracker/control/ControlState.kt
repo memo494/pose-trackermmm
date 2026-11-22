@@ -38,6 +38,8 @@ internal data class ControlState(
     val importResult: ImportSummary? = null,
     /** Why the built-in model is used although an imported one may be expected, or `null`. */
     val modelNotice: ModelNotice? = null,
+    /** The other orientation's slot holds a model of the wrong shape ([ModelNoticeKind.OTHER_SLOT_WRONG_SHAPE]), or `null`. */
+    val otherSlotNotice: ModelNotice? = null,
     /**
      * `true` when any imported model file is stored, even one no meta describes (an orphan left by a process
      * death), so **Use built-in model** can remove it.
@@ -80,18 +82,24 @@ internal sealed interface ActiveModel {
  * @property displayName the sanitised file name.
  * @property inputText the input size text (`ModelInputText.text`: `640` or `832x384`).
  * @property blocked `true` when a crash at its load switched it off; it cannot be chosen for a slot.
- * @property onlyFor the one orientation its input shape fits (`fitsSlot`: a wide model is Landscape only, a tall one
- *   Portrait only); `null` = a square model, which fits both.
+ * @property fitsPortrait whether its input shape fits the Portrait slot, as `fitsSlot` says (the mapper asks it; a wide
+ *   model does not).
+ * @property fitsLandscape whether its input shape fits the Landscape slot, as `fitsSlot` says (a tall model does not).
  */
 internal data class LibraryItem(
     val sha256: String,
     val displayName: String,
     val inputText: String,
     val blocked: Boolean = false,
-    val onlyFor: ModelOrientation? = null,
+    val fitsPortrait: Boolean = true,
+    val fitsLandscape: Boolean = true,
 ) {
     /** Whether the model may be chosen for the slot of [orientation]. */
-    fun fits(orientation: ModelOrientation): Boolean = onlyFor == null || onlyFor == orientation
+    fun fits(orientation: ModelOrientation): Boolean =
+        when (orientation) {
+            ModelOrientation.PORTRAIT -> fitsPortrait
+            ModelOrientation.LANDSCAPE -> fitsLandscape
+        }
 }
 
 /** Why a picked file was refused: one value per rule of the importer, so each has its own sentence. */
@@ -201,6 +209,13 @@ internal enum class ModelNoticeKind {
      * Landscape), so the built-in model runs for it ([ModelNotice.message] names the model).
      */
     WRONG_SHAPE,
+
+    /**
+     * The slot of the OTHER orientation holds a model whose input shape does not fit it, so the built-in model will run
+     * there ([ModelNotice.message] names the slot, the model and the shape to pick). Shown next to the notice of this
+     * orientation, so a slot set up the wrong way is seen before the phone is turned.
+     */
+    OTHER_SLOT_WRONG_SHAPE,
 
     /** The bundled model of the orientation failed at the last session, so the square fallback model ran ([ModelNotice.message] says why). */
     BUILT_IN_FAILED,
@@ -329,7 +344,8 @@ internal sealed interface ControlEvent {
 
     /**
      * The model store (and the last session) was read off the main thread: the model of the screen's orientation and
-     * the notice to show, and the library with the two choices.
+     * the notice to show, the library with the two choices, and [otherSlotNotice] when the other orientation's slot
+     * holds a model of the wrong shape.
      */
     data class ModelStateLoaded(
         val active: ActiveModel,
@@ -340,6 +356,7 @@ internal sealed interface ControlEvent {
         val landscapeSha: String? = null,
         val libraryFull: Boolean = false,
         val orientation: ModelOrientation = ModelOrientation.PORTRAIT,
+        val otherSlotNotice: ModelNotice? = null,
     ) : ControlEvent
 }
 
@@ -601,6 +618,7 @@ internal object ControlReducer {
                 activeModel = ActiveModel.BuiltIn,
                 importResult = null,
                 modelNotice = null,
+                otherSlotNotice = null,
                 modelFileStored = false,
                 library = emptyList(),
                 portraitSha = null,
@@ -653,6 +671,7 @@ internal object ControlReducer {
             state.copy(
                 activeModel = event.active,
                 modelNotice = event.notice,
+                otherSlotNotice = event.otherSlotNotice,
                 modelFileStored = event.fileStored,
                 library = event.library,
                 portraitSha = event.portraitSha,

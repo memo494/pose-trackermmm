@@ -176,6 +176,15 @@ private fun ModelBlock(
             )
             DetailsLine(modelNotice.message)
         }
+        val otherSlotNotice = state.otherSlotNotice
+        if (otherSlotNotice != null) {
+            Text(
+                text = stringResource(ControlModelMapper.noticeRes(otherSlotNotice.kind)),
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            DetailsLine(otherSlotNotice.message)
+        }
 
         if (state.importing) {
             Text(stringResource(R.string.model_importing), style = MaterialTheme.typography.bodyMedium)
@@ -231,7 +240,7 @@ private fun slotItemRes(
 ): Int =
     when {
         fits -> R.string.model_library_item
-        item.onlyFor == ModelOrientation.LANDSCAPE -> R.string.model_slot_item_wide_only
+        !item.fitsPortrait -> R.string.model_slot_item_wide_only
         else -> R.string.model_slot_item_tall_only
     }
 

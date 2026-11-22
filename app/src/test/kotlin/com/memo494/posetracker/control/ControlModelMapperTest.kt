@@ -350,4 +350,64 @@ class ControlModelMapperTest {
 
         assertThat(event.notice).isEqualTo(ModelNotice(ModelNoticeKind.BUILT_IN_BLOCKED, "built-in model skipped: it crashed earlier"))
     }
+
+    // A wrong-shape slot (W2): which notice wins.
+
+    private val wide = meta.copy(displayName = "wide.tflite", inputWidth = 832, inputHeight = 384)
+
+    private fun wrongShape(guard: ImportGuardState = ImportGuardState.Idle) =
+        StoredModelState(wide, fileExists = true, guard = guard, anyFileStored = true, wrongShape = true)
+
+    private fun builtInBlocked() =
+        status(
+            ModelFallback.WRONG_SHAPE,
+            wide,
+            "built-in model skipped: it crashed earlier",
+        ).copy(builtInFailed = true, builtInBlocked = true)
+
+    @Test
+    fun wrongShape_alone_showsTheWrongShapeNotice() {
+        val event = ControlModelMapper.stateLoaded(wrongShape(), status(ModelFallback.WRONG_SHAPE, wide))
+
+        assertThat(event.active).isEqualTo(ActiveModel.BuiltIn)
+        assertThat(event.notice).isEqualTo(ModelNotice(ModelNoticeKind.WRONG_SHAPE, "wide.tflite 832x384 (wide)"))
+    }
+
+    @Test
+    fun wrongShape_withALoadTrip_showsTheLoadTrip() {
+        val event = ControlModelMapper.stateLoaded(wrongShape(ImportGuardState.Tripped(ImportStage.LOAD)), null)
+
+        assertThat(event.notice).isEqualTo(ModelNotice(ModelNoticeKind.GUARD_TRIPPED_LOAD))
+    }
+
+    @Test
+    fun wrongShape_withAProbeTrip_showsTheProbeTrip() {
+        val event = ControlModelMapper.stateLoaded(wrongShape(ImportGuardState.Tripped(ImportStage.PROBE)), null) { true }
+
+        assertThat(event.active).isEqualTo(ActiveModel.BuiltIn)
+        assertThat(event.notice).isEqualTo(ModelNotice(ModelNoticeKind.GUARD_TRIPPED_PROBE))
+    }
+
+    @Test
+    fun wrongShape_withABlockedBundledModel_showsTheBlockedNotice() {
+        val event = ControlModelMapper.stateLoaded(wrongShape(), builtInBlocked())
+
+        assertThat(event.notice).isEqualTo(ModelNotice(ModelNoticeKind.BUILT_IN_BLOCKED, "built-in model skipped: it crashed earlier"))
+    }
+
+    @Test
+    fun wrongShape_withALoadTripAndABlockedBundledModel_theBlockedBundledModelWins() {
+        val event = ControlModelMapper.stateLoaded(wrongShape(ImportGuardState.Tripped(ImportStage.LOAD)), builtInBlocked())
+
+        assertThat(event.notice?.kind).isEqualTo(ModelNoticeKind.BUILT_IN_BLOCKED)
+    }
+
+    @Test
+    fun wrongShape_withABundledModelThatFailedButIsNotBlocked_staysTheWrongShapeNotice() {
+        val failed = status(ModelFallback.WRONG_SHAPE, wide, "built-in model failed: x").copy(builtInFailed = true)
+
+        val event = ControlModelMapper.stateLoaded(wrongShape(), failed)
+
+        assertThat(event.notice?.kind).isEqualTo(ModelNoticeKind.WRONG_SHAPE)
+    }
 }

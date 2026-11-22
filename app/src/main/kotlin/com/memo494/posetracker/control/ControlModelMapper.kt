@@ -11,7 +11,7 @@ import com.memo494.posetracker.core.modelimport.ImportedModelMeta
 import com.memo494.posetracker.core.modelimport.ModelOrientation
 import com.memo494.posetracker.core.modelimport.SlotChoice
 import com.memo494.posetracker.core.modelimport.SniffRejection
-import com.memo494.posetracker.core.modelimport.orientationOfShape
+import com.memo494.posetracker.core.modelimport.fitsSlot
 import com.memo494.posetracker.core.modelimport.shapeWord
 import com.memo494.posetracker.modelimport.BuiltInReason
 import com.memo494.posetracker.modelimport.FailureKind
@@ -108,6 +108,10 @@ internal object ControlModelMapper {
      * A guard tripped at the probe of a new file keeps a stored model that still matches its meta ([storedFileMatches],
      * disk work, so call this off the main thread): that model is active and the "model kept" notice is shown,
      * unless the last session's failed load of the same model has something newer to say.
+     *
+     * A model of the wrong shape ([BuiltInReason.WRONG_SHAPE]) shows [ModelNoticeKind.WRONG_SHAPE] only when nothing
+     * more urgent is true: a blocked bundled model ([ModelStatus.builtInBlocked], the owner must act) wins, then a
+     * tripped crash marker of the slot (load or probe), so neither is hidden behind the shape.
      */
     fun stateLoaded(
         stored: StoredModelState,
@@ -134,7 +138,7 @@ internal object ControlModelMapper {
                         BuiltInReason.FILE_MISSING -> ModelNotice(ModelNoticeKind.FILE_MISSING)
                         BuiltInReason.GUARD_TRIPPED_PROBE -> ModelNotice(ModelNoticeKind.GUARD_TRIPPED_PROBE)
                         BuiltInReason.GUARD_TRIPPED_LOAD -> ModelNotice(ModelNoticeKind.GUARD_TRIPPED_LOAD)
-                        BuiltInReason.WRONG_SHAPE -> ModelNotice(ModelNoticeKind.WRONG_SHAPE, choice.refused?.let(::shapeText))
+                        BuiltInReason.WRONG_SHAPE -> wrongShapeNotice(choice.refused, stored.guard, status)
                         null -> unreadableNotice(status) ?: builtInFailedNotice(status)
                     }
                 ControlEvent.ModelStateLoaded(ActiveModel.BuiltIn, notice, stored.anyFileStored)
@@ -146,6 +150,8 @@ internal object ControlModelMapper {
      * two choices, and the model and notice of the slot of [orientation] (the screen's current orientation, which is
      * the one the next start captures), read exactly as [stateLoaded] reads one stored model. A choice that could not
      * be read shows the built-in model and a "could not be read" notice. [maxModels] is `TrackerConfig.modelLibraryMax`.
+     * When the OTHER orientation's slot holds a model that does not fit it (`LibraryState.slotsRefused`), the event also
+     * carries [ModelNoticeKind.OTHER_SLOT_WRONG_SHAPE], so a slot set up the wrong way shows before the phone is turned.
      */
     fun libraryLoaded(
         library: LibraryState,
@@ -168,7 +174,8 @@ internal object ControlModelMapper {
                     it.meta.displayName,
                     inputText(it.meta),
                     library.isBlocked(it.meta.sha256),
-                    orientationOfShape(it.meta),
+                    fitsPortrait = fitsSlot(it.meta, ModelOrientation.PORTRAIT),
+                    fitsLandscape = fitsSlot(it.meta, ModelOrientation.LANDSCAPE),
                 )
             }
         val noticed =
@@ -183,8 +190,54 @@ internal object ControlModelMapper {
             portraitSha = shaOf(library.slots.portrait),
             landscapeSha = shaOf(library.slots.landscape),
             libraryFull = library.entries.size >= maxModels,
+            otherSlotNotice = otherSlotNotice(library, orientation),
         )
     }
+
+    /** [ModelNoticeKind.OTHER_SLOT_WRONG_SHAPE] when the slot of the orientation other than [orientation] is refused. */
+    private fun otherSlotNotice(
+        library: LibraryState,
+        orientation: ModelOrientation,
+    ): ModelNotice? {
+        val other = orientation.other()
+        if (other !in library.slotsRefused()) return null
+        val meta = library.viewFor(other).meta ?: return null
+        return ModelNotice(ModelNoticeKind.OTHER_SLOT_WRONG_SHAPE, otherSlotText(other, meta))
+    }
+
+    /** `Landscape: name (tall) is not used — pick a wide or square model`. */
+    private fun otherSlotText(
+        orientation: ModelOrientation,
+        meta: ImportedModelMeta,
+    ): String {
+        val (slot, fitting) =
+            when (orientation) {
+                ModelOrientation.PORTRAIT -> SLOT_PORTRAIT to SHAPE_FOR_PORTRAIT
+                ModelOrientation.LANDSCAPE -> SLOT_LANDSCAPE to SHAPE_FOR_LANDSCAPE
+            }
+        return "$slot: ${meta.displayName} (${shapeWord(meta)}) is not used \u2014 pick a $fitting or square model"
+    }
+
+    private fun ModelOrientation.other(): ModelOrientation =
+        when (this) {
+            ModelOrientation.PORTRAIT -> ModelOrientation.LANDSCAPE
+            ModelOrientation.LANDSCAPE -> ModelOrientation.PORTRAIT
+        }
+
+    /**
+     * The notice of a slot whose model was refused for its shape ([refused]): a blocked bundled model first (the owner
+     * must act), then a tripped crash marker of the slot ([guard]), and only then the shape.
+     */
+    private fun wrongShapeNotice(
+        refused: ImportedModelMeta?,
+        guard: ImportGuardState,
+        status: ModelStatus?,
+    ): ModelNotice =
+        (if (status?.builtInBlocked == true) builtInFailedNotice(status) else null) ?: when {
+            guard is ImportGuardState.Tripped && guard.stage == ImportStage.LOAD -> ModelNotice(ModelNoticeKind.GUARD_TRIPPED_LOAD)
+            guard is ImportGuardState.Tripped && guard.stage == ImportStage.PROBE -> ModelNotice(ModelNoticeKind.GUARD_TRIPPED_PROBE)
+            else -> ModelNotice(ModelNoticeKind.WRONG_SHAPE, refused?.let(::shapeText))
+        }
 
     /** The input size of the built-in model of [orientation] for the "Built-in (448x960)" line: `448x960` / `960x448`. */
     fun builtInInputText(orientation: ModelOrientation): String = BuiltInModels.inputText(orientation)
@@ -198,6 +251,11 @@ internal object ControlModelMapper {
     /** Only a trip at the probe reaches here with an imported model active (a load trip is always built-in). */
     private fun probeTripNotice(guard: ImportGuardState): ModelNotice? =
         if (guard == ImportGuardState.Tripped(ImportStage.PROBE)) ModelNotice(ModelNoticeKind.PROBE_TRIP_MODEL_KEPT) else null
+
+    private const val SLOT_PORTRAIT = "Portrait"
+    private const val SLOT_LANDSCAPE = "Landscape"
+    private const val SHAPE_FOR_PORTRAIT = "tall"
+    private const val SHAPE_FOR_LANDSCAPE = "wide"
 
     private fun builtInFailedNotice(status: ModelStatus?): ModelNotice? =
         when {
@@ -268,6 +326,7 @@ internal object ControlModelMapper {
             ModelNoticeKind.LOAD_FAILED -> R.string.model_notice_load_failed
             ModelNoticeKind.STATE_UNREADABLE -> R.string.model_notice_state_unreadable
             ModelNoticeKind.WRONG_SHAPE -> R.string.model_notice_wrong_shape
+            ModelNoticeKind.OTHER_SLOT_WRONG_SHAPE -> R.string.model_notice_other_slot_wrong_shape
             ModelNoticeKind.BUILT_IN_FAILED -> R.string.model_notice_built_in_failed
             ModelNoticeKind.BUILT_IN_BLOCKED -> R.string.model_notice_built_in_blocked
             ModelNoticeKind.BLOCKED_UNREADABLE -> R.string.model_notice_blocked_unreadable

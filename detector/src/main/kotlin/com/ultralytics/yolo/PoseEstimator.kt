@@ -80,7 +80,7 @@ class PoseEstimator(
         }
 
         batchSize = outputShape[0]
-        val rawLayout = rawLayoutOf(outputShape)
+        val rawLayout = PoseOutputLayout.rawOf(outputShape) // pose-tracker: same rule as the import check
         val featuresFirstPose = rawLayout == PoseOutputLayout.RAW_CHANNELS_FIRST ||
             (rawLayout == null && isPoseFeatureCount(outputShape[1]) && outputShape[2] > END_TO_END_MAX_ROWS)
         val anchorsFirstPose = rawLayout == PoseOutputLayout.RAW_CHANNELS_LAST ||
@@ -311,17 +311,6 @@ class PoseEstimator(
             )
         }
         return detections
-    }
-
-    /** pose-tracker: the raw layout of [1, 56, N] or [1, N, 56] with N > 56, else null (same rule as the import check). */
-    private fun rawLayoutOf(shape: IntArray): PoseOutputLayout? {
-        if (shape.size != 3) return null
-        val channels = TrackerConfig.POSE_RAW_CHANNELS
-        return when {
-            shape[1] == channels && shape[2] > channels -> PoseOutputLayout.RAW_CHANNELS_FIRST
-            shape[2] == channels && shape[1] > channels -> PoseOutputLayout.RAW_CHANNELS_LAST
-            else -> null
-        }
     }
 
     private fun postProcessEndToEndPose(

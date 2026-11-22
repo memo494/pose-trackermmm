@@ -111,6 +111,7 @@ internal enum class ModelRejectionReason {
     OUTPUT_TYPE,
     OUTPUT_CLASSIC_HEAD,
     OUTPUT_DETECT_ONLY,
+    OUTPUT_KEYPOINT_COUNT,
     OUTPUT_ROWS,
     OUTPUT_SHAPE,
 }

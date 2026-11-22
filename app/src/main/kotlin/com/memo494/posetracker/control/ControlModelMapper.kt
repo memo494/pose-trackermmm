@@ -90,6 +90,7 @@ internal object ControlModelMapper {
             ImportRejection.OUTPUT_TYPE -> ModelRejectionReason.OUTPUT_TYPE
             ImportRejection.OUTPUT_CLASSIC_HEAD -> ModelRejectionReason.OUTPUT_CLASSIC_HEAD
             ImportRejection.OUTPUT_DETECT_ONLY -> ModelRejectionReason.OUTPUT_DETECT_ONLY
+            ImportRejection.OUTPUT_KEYPOINT_COUNT -> ModelRejectionReason.OUTPUT_KEYPOINT_COUNT
             ImportRejection.OUTPUT_ROWS -> ModelRejectionReason.OUTPUT_ROWS
             ImportRejection.OUTPUT_SHAPE -> ModelRejectionReason.OUTPUT_SHAPE
         }
@@ -208,6 +209,7 @@ internal object ControlModelMapper {
             ModelRejectionReason.OUTPUT_TYPE -> R.string.model_reject_output_type
             ModelRejectionReason.OUTPUT_CLASSIC_HEAD -> R.string.model_reject_output_classic_head
             ModelRejectionReason.OUTPUT_DETECT_ONLY -> R.string.model_reject_output_detect_only
+            ModelRejectionReason.OUTPUT_KEYPOINT_COUNT -> R.string.model_reject_output_keypoint_count
             ModelRejectionReason.OUTPUT_ROWS -> R.string.model_reject_output_rows
             ModelRejectionReason.OUTPUT_SHAPE -> R.string.model_reject_output_shape
         }

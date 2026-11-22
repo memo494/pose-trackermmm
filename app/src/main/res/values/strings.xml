@@ -69,7 +69,8 @@
     <string name="model_reject_output_type">The model output must be float32. Export with FP32 precision.</string>
     <string name="model_reject_output_classic_head">The model output is a channels-first format [1, channels, N] that is not a pose output with 17 keypoints [1, 56, N]. Export a pose model (for example yolo26n-pose).</string>
     <string name="model_reject_output_detect_only">This is a detection model without body keypoints. Export a pose model (for example yolo26n-pose).</string>
-    <string name="model_reject_output_rows">The model output has too many rows. Export it with at most 300 detections for [1, N, 57], or at most 50000 rows for [1, 56, N].</string>
+    <string name="model_reject_output_keypoint_count">Pose models with 17 body keypoints only.</string>
+    <string name="model_reject_output_rows">The model output has too many rows. Export it with at most %1$d detections for [1, N, 57], or at most %2$d rows for [1, 56, N].</string>
     <string name="model_reject_output_shape">The model output is not a pose output ([1, N, 57] end-to-end, or [1, 56, N] / [1, N, 56] raw, with 17 keypoints). Other keypoint counts are not supported.</string>
     <string name="model_notice_file_missing">The imported model file is missing, so the built-in model is used.</string>
     <string name="model_notice_guard_probe">The app stopped while checking a new model file, so that file was not imported. The built-in model is used. Import again, or press Remove all imported models to remove this notice.</string>

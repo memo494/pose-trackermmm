@@ -32,9 +32,9 @@ private const val TRACK_HEIGHT = 240
 private const val FRAME_STEP_MS = 50L
 private const val LEAD_FRAMES = 30
 private const val FAST_STEP_IMG = 20f
-private const val LEAD_EXPECTED_IMG = 17f
+private const val LEAD_EXPECTED_IMG = 15f
 private const val LEAD_TOLERANCE_IMG = 6f
-private const val LEAD_EXPECTED_MS = 42f
+private const val LEAD_EXPECTED_MS = 37f
 private const val LEAD_MS_TOLERANCE = 4f
 private const val SLOW_DETECT_MS = 300L
 private const val NEW_PERSON_SHIFT_X_IMG = 150f
@@ -1110,7 +1110,7 @@ class FramePipelineTest {
         val plainPipeline = trackingPipeline(TrackerConfig(displayLeadEnabled = false))
         val plain = movingFrames(plainPipeline, LEAD_FRAMES, FAST_STEP_IMG)
 
-        // The result age is 2 ms here: L = 2 + 15 + 25 = 42 ms at 400 px/s is about 17 px.
+        // The result age is 2 ms here: L = 2 + 10 + 25 = 37 ms at 400 px/s is about 15 px.
         assertThat(led.tracks.headXImg(0) - plain.tracks.headXImg(0)).isWithin(LEAD_TOLERANCE_IMG).of(LEAD_EXPECTED_IMG)
         assertThat(led.tracks.leadMs(0)).isGreaterThan(0f)
         val lead = ledPipeline.timingSummary().lead

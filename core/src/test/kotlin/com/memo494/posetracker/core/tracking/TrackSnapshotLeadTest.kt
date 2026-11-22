@@ -32,10 +32,10 @@ class TrackSnapshotLeadTest {
         val led = warmUp(HeadSmoother(TrackerConfig()), ::walker)
         val plain = withoutLead(::walker)
 
-        // L = 60 + 15 + 25 = 100 ms at 400 px/s = 40 px, under the 0.25 h = 50 px cap.
-        assertThat(led.headXImg(0) - plain.headXImg(0)).isWithin(TOLERANCE_IMG).of(40f)
+        // L = 60 + 10 + 25 = 95 ms at 400 px/s = 38 px, under the 0.25 h = 50 px cap.
+        assertThat(led.headXImg(0) - plain.headXImg(0)).isWithin(TOLERANCE_IMG).of(38f)
         assertThat(led.headYImg(0)).isEqualTo(plain.headYImg(0))
-        assertThat(led.leadMs(0)).isWithin(TOLERANCE_MS).of(100f)
+        assertThat(led.leadMs(0)).isWithin(TOLERANCE_MS).of(95f)
         assertThat(led.speedHps(0)).isGreaterThan(1f)
     }
 

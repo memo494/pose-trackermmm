@@ -754,7 +754,7 @@ class TrackerConfigTest {
 
         assertThat(config.displayLeadEnabled).isTrue()
         assertThat(config.displayLeadMaxMs).isEqualTo(130f)
-        assertThat(config.displayLeadExtraMs).isEqualTo(15f)
+        assertThat(config.displayLeadExtraMs).isEqualTo(10f)
         assertThat(config.displayLeadSpeedLowHps).isEqualTo(0.5f)
         assertThat(config.displayLeadSpeedHighHps).isEqualTo(1.0f)
         assertThat(config.displayLeadMaxRatio).isEqualTo(0.25f)

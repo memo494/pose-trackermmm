@@ -1227,7 +1227,7 @@ data class TrackerConfig(
         const val MAX_DISPLAY_LEAD_MAX_MS = 400f
 
         /** Default [displayLeadExtraMs], in milliseconds. */
-        const val DEFAULT_DISPLAY_LEAD_EXTRA_MS = 15f
+        const val DEFAULT_DISPLAY_LEAD_EXTRA_MS = 10f
 
         /** Lowest accepted [displayLeadExtraMs], in milliseconds. */
         const val MIN_DISPLAY_LEAD_EXTRA_MS = 0f

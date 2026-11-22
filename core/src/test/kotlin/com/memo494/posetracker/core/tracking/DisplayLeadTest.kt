@@ -57,8 +57,8 @@ class DisplayLeadTest {
 
     @Test
     fun leadTimeMs_isTheResultAgePlusTheExtraPlusHalfTheInterval() {
-        // 60 + 15 + 25 = 100 ms, below the 130 ms limit.
-        assertThat(DisplayLead.leadTimeMs(60f, 50f, config)).isWithin(EPS).of(100f)
+        // 60 + 10 + 25 = 95 ms, below the 130 ms limit.
+        assertThat(DisplayLead.leadTimeMs(60f, 50f, config)).isWithin(EPS).of(95f)
     }
 
     @Test

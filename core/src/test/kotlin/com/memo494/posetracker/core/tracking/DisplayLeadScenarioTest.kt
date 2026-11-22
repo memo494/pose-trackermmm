@@ -8,7 +8,7 @@ import kotlin.math.roundToInt
 
 /**
  * The display lead (F4, docs/plans/M_final.md) judged on the display model (`DisplayModel`): the point of frame k
- * is on screen 75 ms after its capture until the next frame's point replaces it. Every scenario runs at 12 fps, 20 fps
+ * is on screen 75 ms after its capture until the next frame's point replaces it. Every scenario runs at 12 fps (also +-30 %), 20 fps
  * and 20 fps +-30 % with seeds 1 to 6, once with the lead (the defaults) and once without it
  * (`displayLeadEnabled = false`); a failure message names the scenario, rate, seed and quantity. The numbers are in
  * `MetricsThresholds` (the `F4_` constants).
@@ -281,7 +281,7 @@ class DisplayLeadScenarioTest {
     ) = PathPoint(timeS, xImg, yImg, HEIGHT)
 
     private companion object {
-        val RATES = listOf(Rate(12.0, 0.0), Rate(20.0, 0.0), Rate(20.0, 0.3))
+        val RATES = listOf(Rate(12.0, 0.0), Rate(12.0, 0.3), Rate(20.0, 0.0), Rate(20.0, 0.3))
         val SEEDS = (1L..6L).toList()
         const val PERCENT = 100.0
         const val MS_PER_S = 1000.0

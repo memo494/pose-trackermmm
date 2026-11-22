@@ -55,7 +55,10 @@ internal fun runDisplayed(
  * and the samples it covers are not counted.
  */
 internal object DisplayModel {
-    /** Capture to screen: 60 ms until the snapshot is made plus 15 ms of draw and screen (`displayLeadExtraMs`). */
+    /**
+     * Capture to screen: 60 ms until the snapshot is made plus 15 ms of draw and screen. The lead adds only 10 ms of it
+     * (`displayLeadExtraMs`), which keeps the overshoot after a stop down.
+     */
     const val DISPLAY_LATENCY_S = MetricsThresholds.F4_DISPLAY_LATENCY_MS / 1000.0
 
     /** The result age the pipeline would pass for [DISPLAY_LATENCY_S]: the latency minus the extra the lead adds itself. */

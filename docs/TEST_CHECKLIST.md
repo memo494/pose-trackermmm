@@ -583,12 +583,12 @@ in the zip), the size does not change, or the app closes: Share diagnostics.
    or "Added to the library. Pick it under …") and it is not a refusal.
 2. Pick it for Portrait or Landscape, press **Start**: rings on heads like the built-in model. Import the same file
    again: "Already in the library. …".
-3. Import the old detect-only file (`[1,6,2100]`). Expected: refused with "This is a detection model without body
-   keypoints. Export a pose model (for example yolo26n-pose)."
+3. Import the old detect-only file (`[1,6,2100]` at 320x320). Since M-legacy it is accepted (see the M-legacy section).
+   A YOLOv5 head with objectness (`[1,6300,9]`) is still refused, with the list of accepted shapes.
 4. Optional: save diagnostics after one minute with people and compare `frameMsP95` with the built-in model; the raw
    model reads a bigger output, so a little slower is normal.
 
-**Pass:** the raw model is accepted and tracks; the detect-only file is refused with that message.
+**Pass:** the raw model is accepted and tracks; the detect-only file is accepted as a box-only model.
 **If it fails:** the raw model is refused, or accepted but no marks: Share diagnostics and say which file.
 
 ### 4. Walk, lock, leave, return (tracker and lock)
@@ -682,6 +682,13 @@ Look at the boxes and at `summary.txt`: `modelKind=box`, `detectPersonClass=0`.
 **If it fails:** the boxes land on something else (or on nothing while people are visible): your model's person class is
 probably 1. Share diagnostics and say so; `detectPersonClass` must then be set to 1 (it is a `TrackerConfig` value, there
 is no slider for it yet).
+
+### 5. Rotate between a box-only slot and a pose slot
+Assign the detect-only model to one orientation and a pose model (or the built-in one) to the other. Tap to lock a person,
+then rotate the phone to the other orientation.
+**Pass:** the lock is lost on purpose (a changed model kind ends the lock, fail closed); the ring is gone and the log line
+`lock: cleared (model kind changed)` is in the diagnostics. Tap to lock again works.
+**If it fails:** the ring stays on a person after the model kind changed: Share diagnostics.
 
 ---
 

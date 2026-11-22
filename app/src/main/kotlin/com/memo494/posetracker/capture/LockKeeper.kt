@@ -210,6 +210,14 @@ internal class LockKeeper(
         if (heldId != OverlayState.NO_LOCK) end(REASON_RESET)
     }
 
+    /**
+     * The model changed between a pose model and a box-only one (fail closed: the head point and its noise differ, so
+     * the lock does not carry over): ends the lock, whatever its step, with the line `lock: cleared (model kind changed)`.
+     */
+    fun onModelKindChanged() {
+        if (heldId != OverlayState.NO_LOCK) end(REASON_MODEL_KIND)
+    }
+
     /** The session ends: ends the lock and drops the signature. */
     fun onStop() {
         if (heldId != OverlayState.NO_LOCK) end(REASON_STOP)
@@ -596,6 +604,7 @@ internal class LockKeeper(
     private companion object {
         const val REASON_HANDLE = "handle"
         const val REASON_RESET = "reset"
+        const val REASON_MODEL_KIND = "model kind changed"
         const val REASON_STOP = "stop"
         const val REASON_NO_SIGNATURE = "no signature"
         const val REASON_REPLACED = "replaced"

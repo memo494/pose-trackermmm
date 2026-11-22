@@ -364,6 +364,7 @@ internal class FramePipeline(
     ) {
         try {
             detector = newDetector
+            if (this.boxOnly != boxOnly) lockKeeper.onModelKindChanged()
             this.boxOnly = boxOnly
             tracker.boxOnly = boxOnly
             lockKeeper.boxOnly = boxOnly

@@ -2063,6 +2063,38 @@ class FramePipelineTest {
     }
 
     @Test
+    fun relock_switchingFromAPoseToABoxOnlyModelEndsTheLockWithItsOwnLogLine() {
+        val pipeline = trackingPipeline()
+        lockedPersonWhoLeaves(pipeline, RED_SHIRT)
+
+        pipeline.onModelChanged(detector, imported = true, notUsed = false, boxOnly = true)
+
+        assertThat(pipeline.hasLock).isFalse()
+        assertThat(lockLogs().last()).isEqualTo("lock: cleared (model kind changed)")
+        assertThat(lockLogs().count { it.startsWith("lock: cleared") }).isEqualTo(1)
+    }
+
+    @Test
+    fun relock_switchingFromABoxOnlyToAPoseModelEndsTheLockWithItsOwnLogLine() {
+        val pipeline = trackingPipeline(boxOnly = true)
+        lockedPersonWhoLeaves(pipeline, RED_SHIRT)
+
+        pipeline.onModelChanged(detector, imported = false, notUsed = false, boxOnly = false)
+
+        assertThat(lockLogs().last()).isEqualTo("lock: cleared (model kind changed)")
+    }
+
+    @Test
+    fun relock_aModelOfTheSameKindKeepsTheOrdinaryResetLine() {
+        val pipeline = trackingPipeline()
+        lockedPersonWhoLeaves(pipeline, RED_SHIRT)
+
+        pipeline.onModelChanged(detector, imported = true, notUsed = false, boxOnly = false)
+
+        assertThat(lockLogs().last()).isEqualTo("lock: cleared (reset)")
+    }
+
+    @Test
     fun relock_afterAReset_aPersonInTheOldColoursIsNotRelocked() {
         val pipeline = trackingPipeline()
         val leftAtMs = lockedPersonWhoLeaves(pipeline, RED_SHIRT)

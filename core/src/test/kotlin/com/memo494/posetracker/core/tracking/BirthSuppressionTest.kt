@@ -72,6 +72,37 @@ class BirthSuppressionTest {
         assertThat(tracker.assocBirthSuppressed).isEqualTo(0)
     }
 
+    @Test
+    fun aBoxThatOverlapsButHasItsHeadFarAway_isAnotherPersonAndIsBorn() {
+        for (k in 0 until HITS) feed(k, person(X_IMG))
+
+        val list = feed(HITS, person(X_IMG), smallerPersonInsideTheBox())
+
+        assertThat(list.size).isEqualTo(2)
+        assertThat(tracker.birthCount).isEqualTo(2)
+        assertThat(tracker.assocBirthSuppressed).isEqualTo(0)
+    }
+
+    @Test
+    fun aSuppressedBox_isNotCountedWhenNoTrackCouldHaveBeenGiven() {
+        val full = Tracker(TrackerConfig(maxTracks = 1))
+        for (k in 0 until HITS) full.update(frameOf(k, person(X_IMG)))
+
+        full.update(frameOf(HITS, person(X_IMG), person(X_IMG + DUPLICATE_SHIFT_IMG, LOW_SCORE)))
+
+        assertThat(full.birthCount).isEqualTo(1)
+        assertThat(full.assocBirthSuppressed).isEqualTo(0)
+    }
+
+    /** A person 150 high whose box (60 x 150, IoU 0.5625 with the first person's) lies inside that box; head 0.23 h away. */
+    private fun smallerPersonInsideTheBox(): PoseDetection =
+        HeadTestDetections.person(X_IMG + INSIDE_SHIFT_X_IMG, INSIDE_HEAD_Y_IMG, INSIDE_HEIGHT_IMG)
+
+    private fun frameOf(
+        index: Int,
+        vararg detections: PoseDetection,
+    ) = DetectionFrame(START_NS + index * STEP_NS, TimestampSource.IMAGE, IMAGE_WIDTH, IMAGE_HEIGHT, detections.toList())
+
     private fun feed(
         index: Int,
         vararg detections: PoseDetection,
@@ -113,6 +144,10 @@ class BirthSuppressionTest {
 
         /** A shift of 40 gives IoU 40 / 120 = 0.33, below the suppression IoU 0.5. */
         const val WEAK_OVERLAP_SHIFT_IMG = 40f
+
+        const val INSIDE_SHIFT_X_IMG = 10f
+        const val INSIDE_HEAD_Y_IMG = 195f
+        const val INSIDE_HEIGHT_IMG = 150f
 
         /** A shift of 200 leaves the boxes apart, IoU 0. */
         const val NEIGHBOUR_SHIFT_IMG = 200f

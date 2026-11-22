@@ -16,18 +16,20 @@ import kotlin.math.sqrt
  * 2. every track is predicted (head x and y, and the box height, as constant-velocity Kalman filters);
  * 3. detections: at most [TrackerConfig.MAX_DETECTIONS_PER_FRAME], duplicates dropped, scores below
  *    `scoreThreshold` and unusable boxes ignored; "high" means a score of at least `trackHighScore`;
- * 4. stage 1 assigns the confirmed and lost tracks to the high detections, stage 2 the unmatched ones to the low
- *    ones; then the tentative tracks get the same two stages on the detections that are left over, each stage
- *    with a cost limit (`AssociationCost`, `HungarianAssigner`);
+ * 4. stage 1 assigns the tracks to the high detections, stage 2 the unmatched ones to the low ones, each stage
+ *    with a cost limit; first all tracks except the shadow tentative ones (a tentative track whose predicted box and
+ *    head are those of a confirmed or lost one, see `markShadows`), then the shadows on the detections left over
+ *    (`AssociationCost`, `HungarianAssigner`);
  * 5. a matched track is updated and counted a hit (a tentative one is confirmed after `trackConfirmHits`);
  * 6. an unmatched tentative track coasts (its velocity decays, it stays tentative and hidden, `lostMs` stays 0)
  *    until its consecutive misses exceed `trackTentativeMaxMisses`, then it is removed (a hit resets the count);
  *    an unmatched confirmed one is LOST (its velocity decays) and is removed after `trackMaxLostMs` or when
  *    its head point is more than `trackExitMarginRatio` heights outside the image;
  * 7. an unmatched detection with a score of at least `trackBirthScore` starts a tentative track while fewer
- *    than `maxTracks` tracks exist (confirmed at once when `trackConfirmHits` is 1); not when its box overlaps with
- *    `trackBirthSuppressIou` or more a detection that a confirmed or lost track took in this frame (a near duplicate
- *    of that person, counted in [assocBirthSuppressed]);
+ *    than `maxTracks` tracks exist (confirmed at once when `trackConfirmHits` is 1); not when its box overlaps
+ *    with `trackBirthSuppressIou` or more a detection that a confirmed or lost track took in this frame AND its
+ *    head is within `trackBirthSuppressHeadRatio` heights of that detection's head (a near duplicate of that person,
+ *    counted in [assocBirthSuppressed]);
  * 8. [onIdle] promotes the tentative tracks after `trackIdlePromoteMs` without a frame and removes a LOST track
  *    whose lost time plus the idle time exceeds `trackMaxLostMs` (so a still screen does not keep a ring for ever).
  *
@@ -106,6 +108,7 @@ class Tracker(
     private val low = IntArray(TrackerConfig.MAX_DETECTIONS_PER_FRAME)
     private val freeHigh = IntArray(TrackerConfig.MAX_DETECTIONS_PER_FRAME)
     private val freeLow = IntArray(TrackerConfig.MAX_DETECTIONS_PER_FRAME)
+    private val shadowed = BooleanArray(maxTracks)
     private val detUsed = BooleanArray(TrackerConfig.MAX_DETECTIONS_PER_FRAME)
     private val heads = Array(TrackerConfig.MAX_DETECTIONS_PER_FRAME) { HeadPoint() }
     private val point = HeadPoint()
@@ -183,7 +186,10 @@ class Tracker(
     var assocBirthAfterRemoval: Int = 0
         private set
 
-    /** Unmatched detections not given a track because they overlap what a confirmed or lost track took; kept by `reset()`. */
+    /**
+     * Unmatched detections not given a track because they are near duplicates of what a confirmed or lost track took;
+     * counted only when a track could have been given (room in the pool), kept by `reset()`.
+     */
     var assocBirthSuppressed: Int = 0
         private set
 
@@ -314,23 +320,64 @@ class Tracker(
     }
 
     /**
-     * ByteTrack order (F3/A2): confirmed and lost tracks are matched first (high detections, then low), tentative
-     * tracks only against the detections that are left over, so a newborn cannot take the person of an older track.
+     * Association order (F3/A2): a tentative track that shadows an older one (see [markShadows]) only gets the
+     * detections the older tracks leave over, so a near-duplicate newborn cannot take that person's detection. All
+     * other tracks (confirmed, lost, and tentative tracks that are another person) are matched together as before.
      */
     private fun matchTracks(detections: List<PoseDetection>) {
         trackDet.fill(-1, 0, activeCount)
-        matchGroup(detections, tentative = false)
-        matchGroup(detections, tentative = true)
+        markShadows()
+        matchGroup(detections, shadows = false)
+        matchGroup(detections, shadows = true)
     }
 
-    /** Two stages (high, then low detections not yet used) for the tracks whose tentative state equals [tentative]. */
+    /**
+     * Sets `shadowed[pos]` for every tentative track whose predicted box overlaps, with `trackBirthSuppressIou` or
+     * more, the predicted box of a confirmed or lost track and whose head is within `trackBirthSuppressHeadRatio`
+     * heights (of that track) of its head. A tentative track next to another person fails the head test.
+     */
+    private fun markShadows() {
+        for (pos in 0 until activeCount) {
+            shadowed[pos] = false
+            val tentative = tracks[order[pos]]
+            if (tentative.state != TrackState.TENTATIVE) continue
+            for (other in 0 until activeCount) {
+                val older = tracks[order[other]]
+                if (older.state == TrackState.TENTATIVE) continue
+                val reachImg = config.trackBirthSuppressHeadRatio * older.height.position
+                val dxImg = tentative.x.position - older.x.position
+                val dyImg = tentative.y.position - older.y.position
+                if (dxImg * dxImg + dyImg * dyImg > reachImg * reachImg) continue
+                val iou =
+                    BoxOverlap.iou(
+                        tentative.boxLeftImg(),
+                        tentative.boxTopImg(),
+                        tentative.boxRightImg(),
+                        tentative.boxBottomImg(),
+                        older.boxLeftImg(),
+                        older.boxTopImg(),
+                        older.boxRightImg(),
+                        older.boxBottomImg(),
+                    )
+                if (iou >= config.trackBirthSuppressIou) {
+                    shadowed[pos] = true
+                    break
+                }
+            }
+        }
+    }
+
+    /**
+     * Two stages (high, then low detections not yet used) for the shadow tentative tracks when [shadows], else for
+     * every other track.
+     */
     private fun matchGroup(
         detections: List<PoseDetection>,
-        tentative: Boolean,
+        shadows: Boolean,
     ) {
         var count = 0
         for (pos in 0 until activeCount) {
-            if ((tracks[order[pos]].state == TrackState.TENTATIVE) == tentative) stageTracks[count++] = pos
+            if (shadowed[pos] == shadows) stageTracks[count++] = pos
         }
         if (count == 0) return
         val freeHighCount = collectUnused(high, highCount, freeHigh)
@@ -520,13 +567,13 @@ class Tracker(
                 if (nearestSlot(heads[index], trackCountBeforeBirths, true) >= 0) assocMissLowBirth++
                 continue
             }
-            if (overlapsTakenDetection(detections, detection, trackCountBeforeBirths)) {
-                assocBirthSuppressed++
-                continue
-            }
             if (activeCount >= maxTracks) return
             val slot = freeSlot()
             if (slot < 0) return
+            if (isNearDuplicate(detections, index, trackCountBeforeBirths)) {
+                assocBirthSuppressed++
+                continue
+            }
             if (start(tracks[slot], detection)) {
                 tracks[slot].matchedDet = index
                 inUse[slot] = true
@@ -538,19 +585,29 @@ class Tracker(
     }
 
     /**
-     * True when [detection] overlaps, with `trackBirthSuppressIou` or more, the detection that one of the first
-     * [trackCount] tracks that is not tentative took in this frame: a near duplicate of a person already followed.
+     * True when the detection [index] is a near duplicate of the person that one of the first [trackCount] tracks
+     * that is not tentative followed in this frame: its box overlaps the box of the detection that track took with
+     * `trackBirthSuppressIou` or more AND its head is within `trackBirthSuppressHeadRatio` heights of the track
+     * (its box height) of that detection's head. A box with the same overlap but a head farther away may be another
+     * person and is not suppressed.
      */
-    private fun overlapsTakenDetection(
+    private fun isNearDuplicate(
         detections: List<PoseDetection>,
-        detection: PoseDetection,
+        index: Int,
         trackCount: Int,
     ): Boolean {
+        val detection = detections[index]
+        val head = heads[index]
         for (pos in 0 until trackCount) {
             val track = tracks[order[pos]]
             if (track.state == TrackState.TENTATIVE) continue
             val matched = track.matchedDet
             if (matched < 0 || matched >= detections.size) continue
+            val takenHead = heads[matched]
+            val reachImg = config.trackBirthSuppressHeadRatio * track.height.position
+            val dxImg = head.headXImg - takenHead.headXImg
+            val dyImg = head.headYImg - takenHead.headYImg
+            if (dxImg * dxImg + dyImg * dyImg > reachImg * reachImg) continue
             val other = detections[matched]
             val iou =
                 BoxOverlap.iou(

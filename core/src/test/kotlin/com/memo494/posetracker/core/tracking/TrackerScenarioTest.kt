@@ -11,10 +11,12 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 
 /**
- * The acceptance scenarios S1 to S16 of docs/plans/M3.md (T5). The Python functions in
- * `docs/plans/M3_sim/scenarios.py` define each scenario; every asserted number is in [MetricsThresholds].
- * Each scenario runs at 20, 30 and 60 fps and at 30 fps +-30 %, with seeds 1, 2 and 3; a failure message names
- * the scenario, the rate, the seed and the quantity.
+ * The acceptance scenarios S1 to S15 of docs/plans/M3.md (T5) and S16 (F3, a person with a recurring loose
+ * duplicate box). The Python functions in `docs/plans/M3_sim/scenarios.py` define S1 to S15; every number they
+ * assert is in [MetricsThresholds]. S16 keeps its two numbers local (one id, coverage 0.95): they are the strict
+ * values (not weaker than the S12 ones), and the protected thresholds file stays untouched.
+ * Each scenario runs at 12 fps (also +-30 %), 20, 30 and 60 fps and at 30 fps +-30 %, with seeds 1, 2 and 3; S3
+ * skips the 12 fps rates until F4. A failure message names the scenario, the rate, the seed and the quantity.
  */
 class TrackerScenarioTest {
     private class Rate(
@@ -484,7 +486,7 @@ class TrackerScenarioTest {
 
         // 12 fps: measured 0.698 vs 0.60 on unchanged code (main 6b4b105); smoothing at low fps is fixed in F4,
         // which re-enables S3 at 12 fps with the existing 0.60 limit.
-        private val RATES_WITHOUT_12_FPS = RATES.filter { it.fps > LOW_FPS - 1.0 }
+        private val RATES_WITHOUT_12_FPS = RATES.filter { it.fps >= LOW_FPS }
         private val SEEDS = listOf(1L, 2L, 3L)
         private val IDLE_MS_AFTER_LAST_FRAME = listOf(500L, 1000L, 4000L)
 

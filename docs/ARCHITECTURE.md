@@ -356,11 +356,15 @@ tracks, index loops); deterministic.
   `trackMaxDtMs` once, to the Kalman step and to the lifecycle clocks); nothing ages during the gap itself.
 - **Detections:** at most `MAX_DETECTIONS_PER_FRAME` (30); dedupe first (IoU ≥ `dedupeIou` 0.7 drops the lower
   score); scores below `scoreThreshold` and unusable boxes are ignored.
-- **Association** (ByteTrack two-stage): stage 1 = CONFIRMED and LOST tracks × detections with score ≥
-  `trackHighScore` (0.5); stage 2 = the still unmatched ones × the low ones (down to `scoreThreshold`). **Then (F3/A2)
-  the TENTATIVE tracks get the same two stages on the detections left over**, so a newborn track next to an older one
-  can no longer take that person's detection (before, all tracks were in one Hungarian and the newborn, whose box
-  equals the latest detection, won after 3 hits and the old, often locked, track went LOST and was removed). Cost
+- **Association** (ByteTrack two-stage): stage 1 = tracks × detections with score ≥ `trackHighScore` (0.5);
+  stage 2 = the still unmatched tracks × the low ones (down to `scoreThreshold`). **Who goes first (F3/A2):** a
+  tentative track is a *shadow* when, against some CONFIRMED or LOST track's predicted state, its predicted box has
+  IoU ≥ `trackBirthSuppressIou` (0.5) AND its head is within `trackBirthSuppressHeadRatio` (0.15) × that track's
+  height. Shadows are matched last, on the detections the other tracks leave over; every other track (confirmed,
+  LOST, and tentative tracks that are another person) is matched together in one Hungarian as before. Why: a
+  near-duplicate newborn, whose box equals the latest detection, won the person's detection after 3 hits and the old,
+  often locked, track went LOST and was removed. A tentative track that is a second person (head farther away) is not
+  affected, so an occluded locked track cannot take the detection of a new neighbour. Cost
   `assocIouWeight·(1 − IoU) + assocHeadWeight·min(1, d_head / (assocHeadScaleRatio·h))` (0.5, 0.5, 0.5);
   Mahalanobis gate `trackGateChi2` (9.21) on the head innovation, where (M4f) each axis variance is `max(P + R,
   (trackGateMinSigmaRatio × h)²)` with `trackGateMinSigmaRatio` 0.2 (0..1, 0 = off, the M3 gate): the filter's
@@ -372,10 +376,13 @@ tracks, index loops); deterministic.
   the number of pairs (a missing person must not shift the ids of the others).
 - **Lifecycle** (time in `dtEff`, measured over frames that exist):
   - an unmatched detection with score ≥ `trackBirthScore` (0.25) starts a TENTATIVE track (while fewer than
-    `maxTracks` = 32 exist), **unless** its box overlaps with IoU ≥ `trackBirthSuppressIou` (0.5) a detection that a
-    CONFIRMED or LOST track took in this frame (F3/A1: a near duplicate of a followed person, IoU 0.3–0.69, below
-    `dedupeIou`, used to be born next to the live track and then won the person's detection from it; counted in
-    `assocBirthSuppressed`). A neighbour with no overlap is still born; neighbours are not affected as no cost or gate changed;
+    `maxTracks` = 32 exist), **unless** its box overlaps, with IoU ≥ `trackBirthSuppressIou` (0.5), a detection that a
+    CONFIRMED or LOST track took in this frame AND its head is within `trackBirthSuppressHeadRatio` (0.15) × that
+    track's height of that detection's head (F3/A1: a near duplicate of a followed person, IoU 0.5–0.69, below
+    `dedupeIou`, used to be born next to the live track; counted in `assocBirthSuppressed` only when a track could
+    have been given). Owner's log: 14 of 19 such births had a head distance ≤ 0.12 h; the other 5 (0.29–0.54 h) may be
+    another person and are born. A neighbour with a smaller overlap or a farther head is still born; no cost or gate
+    changed;
   - CONFIRMED, and shown, from the `trackConfirmHits`-th (3rd) consecutive hit; a tentative track survives
     `trackTentativeMaxMisses` (1, bounds 0..5) consecutive missed frames and is removed on the next one. While it
     survives it coasts like a lost track (velocity decay as for a miss, no `lostMs`), is not shown and not LOST;

@@ -57,7 +57,8 @@ data class FalsePositive(
  * @property keypointDropouts intervals in which chosen head keypoints get a low confidence.
  * @property duplicates intervals in which the same person is emitted twice (second box slightly shifted, lower score).
  * @property nearDuplicates intervals in which the detector also emits a looser box of the same person (IoU 0.54 to
- *   0.67 with the original, below the dedupe IoU; score 0.25 to 0.45), its shift and score cycling with the frame.
+ *   0.67 with the original, below the dedupe IoU; score 0.30 to 0.55, the last
+ *   above the high-score limit), its shift and score cycling with the frame.
  */
 class ScenePerson(
     val id: Int,
@@ -340,11 +341,11 @@ class SyntheticScene(
         /** Score a duplicate loses against its original. */
         const val DUPLICATE_SCORE_DROP = 0.05f
 
-        /** Horizontal shifts of a near duplicate in units of the height: box IoU (0.4 - r) / (0.4 + r) = 0.67, 0.54, 0.60. */
-        private val NEAR_DUPLICATE_SHIFT_RATIOS = doubleArrayOf(0.08, 0.12, 0.10)
+        /** Horizontal shifts of a near duplicate in units of the height: box IoU (0.4 - r) / (0.4 + r) = 0.67, 0.54, 0.60, 0.63. */
+        private val NEAR_DUPLICATE_SHIFT_RATIOS = doubleArrayOf(0.08, 0.12, 0.10, 0.09)
 
         /** Scores of a near duplicate, one per shift. */
-        private val NEAR_DUPLICATE_SCORES = floatArrayOf(0.30f, 0.40f, 0.45f)
+        private val NEAR_DUPLICATE_SCORES = floatArrayOf(0.30f, 0.40f, 0.45f, 0.55f)
 
         private const val NS_PER_S = 1e9
         private const val MAX_JITTER_FRACTION = 0.95

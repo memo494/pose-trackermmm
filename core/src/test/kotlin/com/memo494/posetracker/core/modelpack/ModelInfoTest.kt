@@ -78,7 +78,19 @@ class ModelInfoTest {
 
     @Test
     fun parse_keysThatAreNotAPositiveIntegerOrCanonicalWidthXHeight_areRejected() {
-        for (key in listOf("416x416", "448X960", "448x", "x960", "0x960", "448x0", "-448x960", "0448x960", "448x960x1", "448 x960", "448xabc")) {
+        for (key in listOf(
+            "416x416",
+            "448X960",
+            "448x",
+            "x960",
+            "0x960",
+            "448x0",
+            "-448x960",
+            "0448x960",
+            "448x960x1",
+            "448 x960",
+            "448xabc",
+        )) {
             assertRejected(document(key = key, input = inputOf("[1,3,960,448]")))
         }
     }

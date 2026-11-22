@@ -43,9 +43,13 @@ enum class ModelFallback {
  *   report (an imported model in use, or nothing imported).
  * @property message the one-line failure text for [ModelFallback.LOAD_FAILED] and
  *   [ModelFallback.STATE_UNREADABLE] (class name and message, at most `ModelProbe.MAX_MESSAGE_CHARS`
- *   characters); `null` otherwise.
+ *   characters), or "built-in model failed: ..." when the 416 model runs because the model of the orientation
+ *   failed to load; `null` otherwise.
  * @property inputWidth width of the running model's input, in model pixels (Mdl); 0 = no model is running.
  * @property inputHeight height of the running model's input, in model pixels (Mdl); 0 = no model is running.
+ * @property builtInFile bare file name of the bundled model that runs ([ModelSource.BUILT_IN] with a detector), e.g.
+ *   `yolo26n-pose_448x960.tflite`; `null` otherwise.
+ * @property builtInSha256 SHA-256 of [builtInFile], 64 lowercase hex characters; `null` when [builtInFile] is.
  * @property portrait what the portrait slot is set to (M1b-1): [SLOT_BUILT_IN] or the name and short sha256 of the
  *   library model, as `name 0123456789ab`.
  * @property landscape what the landscape slot is set to, like [portrait].
@@ -61,6 +65,8 @@ data class ModelStatus(
     val message: String?,
     val inputWidth: Int,
     val inputHeight: Int,
+    val builtInFile: String? = null,
+    val builtInSha256: String? = null,
     val portrait: String = SLOT_BUILT_IN,
     val landscape: String = SLOT_BUILT_IN,
     val switches: Int = 0,

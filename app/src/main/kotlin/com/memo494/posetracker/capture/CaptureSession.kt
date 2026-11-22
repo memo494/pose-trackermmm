@@ -18,6 +18,7 @@ import android.view.Display
 import android.view.WindowManager
 import com.memo494.posetracker.core.TrackerConfig
 import com.memo494.posetracker.core.capture.CaptureSize
+import com.memo494.posetracker.core.modelimport.BuiltInModels
 import com.memo494.posetracker.core.modelimport.ModelOrientation
 import com.memo494.posetracker.core.stats.ThermalSampler
 import com.memo494.posetracker.detector.PoseDetector
@@ -305,7 +306,10 @@ internal class CaptureSession(
             readLibrary = store::state,
             setGuard = store::setGuard,
             loadImported = { meta -> PoseDetectors.fromImported(context, store.modelFileFor(meta), meta, config) },
-            loadBuiltIn = { PoseDetectors.fromAssets(context, config) },
+            loadBuiltIn = { orientation ->
+                PoseDetectors.fromAssets(context, config, BuiltInModels.widthFor(orientation), BuiltInModels.heightFor(orientation))
+            },
+            loadFallbackBuiltIn = { PoseDetectors.fromAssets(context, config, config.modelInputSize, config.modelInputSize) },
             verifyStored = store::storedFileMatches,
             nowNs = clock::nowNs,
             log = CaptureLog::log,

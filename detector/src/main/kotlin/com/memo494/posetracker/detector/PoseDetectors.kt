@@ -16,9 +16,10 @@ object PoseDetectors {
     private const val MODELS_DIRECTORY = "models"
 
     /**
-     * Creates the detector for the model size in [config]: reads `model_info.json` from the assets, stages the
-     * matching `.tflite` file into `noBackupFilesDir/models` (its SHA-256 is checked before LiteRT opens it by
-     * path), loads it GPU-first with a CPU fallback and checks that the model reports the configured square input size.
+     * Creates the detector for the bundled model of [inputWidth] x [inputHeight] model pixels (the built-in model of
+     * an orientation, or the square one of `config.modelInputSize`): reads `model_info.json` from the assets, stages
+     * the matching `.tflite` file into `noBackupFilesDir/models` (its SHA-256 is checked before LiteRT opens it by
+     * path), loads it GPU-first with a CPU fallback and checks that the model reports that input size.
      *
      * Call on the thread that will own the detector (the capture thread) and use and close it there. Never call
      * it on the main thread: it reads and hashes several megabytes and compiles the model.
@@ -27,16 +28,18 @@ object PoseDetectors {
      *   `ModelIntegrityException` when the file does not match its SHA-256.
      * @throws IllegalArgumentException when `model_info.json` is invalid or has no entry for the size.
      * @throws IllegalStateException when the model is unusable (input layout not NCHW, unknown accelerator,
-     *   input size different from the configured square one).
+     *   input size different from the requested one).
      * @throws Exception LiteRT exceptions when the CPU attempt cannot load the model either.
      */
     fun fromAssets(
         context: Context,
         config: TrackerConfig,
-    ): PoseDetector {
+        inputWidth: Int,
+        inputHeight: Int,
+    ): BundledDetector {
         val appContext = context.applicationContext
         val infoText = appContext.assets.open(ModelInfo.ASSET_NAME).use { it.readBytes().decodeToString() }
-        val entry = ModelInfo.parse(infoText).entryFor(config.modelInputSize)
+        val entry = ModelInfo.parse(infoText).entryFor(inputWidth, inputHeight)
         val stager = ModelStager(File(appContext.noBackupFilesDir, MODELS_DIRECTORY))
         val modelFile = stager.stage(entry.fileName, entry.sha256) { appContext.assets.open(entry.fileName) }
         val factory =
@@ -44,7 +47,8 @@ object PoseDetectors {
                 val useGpu = accelerator == Accelerator.GPU
                 UltralyticsPoseEngine.create(appContext, modelFile, useGpu, config.scoreThreshold)
             }
-        return LiteRtPoseDetector.create(factory, config.scoreThreshold, config.modelInputSize, config.modelInputSize)
+        val detector = LiteRtPoseDetector.create(factory, config.scoreThreshold, inputWidth, inputHeight)
+        return BundledDetector(detector, entry.fileName, entry.sha256)
     }
 
     /**

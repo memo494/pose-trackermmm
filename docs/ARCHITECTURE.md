@@ -100,7 +100,7 @@ Single-app capture mode (`MediaProjectionConfig` for a single window), gallery-v
 | Capture | `MediaProjection` → `VirtualDisplay` → `ImageReader` (RGBA_8888, `maxImages = 2`, size = display × `TrackerConfig` capture scale, exactly one `VirtualDisplay` per session) in a foreground service of type `mediaProjection`. Details in §5 / §6.8 |
 | Camera | **Dropped.** CameraX is no longer used in code. Its entries stay in `gradle/libs.versions.toml` (protected file) until a later, deliberate catalog PR removes them |
 | Inference | **LiteRT 2.3.x `CompiledModel` API, bundled runtime**: `com.google.ai.edge.litert:litert` + `litert-gpu` (same version). `Accelerator.GPU`, CPU fallback. Not the old `Interpreter` API (CPU-only in 2.x) and not the Play-services runtime (deliberate: same runtime version on every device → reproducible benchmarks) |
-| Model | `yolo26n-pose`, exported `format="litert", nms=False`, FP32 (GPU computes in FP16), **two sizes: 320 and 416** |
+| Model | `yolo26n-pose`, exported `format="litert", nms=False`, FP32 (GPU computes in FP16), **bundled: 448x960 (portrait built-in), 960x448 (landscape built-in), 416 (safety fallback), 320 (thermal fallback)** |
 | DI | Manual `AppGraph` |
 | Settings | DataStore Preferences, single `TrackerConfig` |
 | Tests | JUnit5 + Truth in `core` (JVM); JUnit4 in Android modules |
@@ -151,7 +151,7 @@ pose-tracker-android/
 │               benchmark, debug sheet, DataStore, diagnostics, AppGraph
 ├─ third_party/ ULTRALYTICS.md (pinned commit, kept/dropped files, modification log)
 ├─ LICENSE      AGPL-3.0 (inherited from the vendored Ultralytics code and the model)
-├─ model/       yolo26n-pose_320.tflite, yolo26n-pose_416.tflite, model_info.json, golden fixtures (committed)
+├─ model/       yolo26n-pose_{320,416,448x960,960x448}.tflite, model_info.json, golden fixtures (committed)
 ├─ signing/     debug.keystore (debug-only key, committed on purpose — see §10)
 ├─ tools/       export_model.py + requirements.lock (fully pinned)
 ├─ scripts/     verify.sh, ci-status.sh, cloud-setup.sh (see docs/AI_TEAM.md §6)
@@ -182,7 +182,7 @@ Dependencies: `app → detector → core`, `app → core`. Nothing else.
 ### 4.2 Named spaces; suffixes mandatory in code
 | Space | Suffix | Definition |
 |---|---|---|
-| model | `Mdl` | letterboxed model input, `width x height` (320×320 or 416×416 for the built-in models; any `WxH` for an imported one) |
+| model | `Mdl` | letterboxed model input, `width x height` (448×960 portrait / 960×448 landscape for the built-in models, 416×416 / 320×320 fallbacks; any `WxH` for an imported one) |
 | image | `Img` | the **capture content rect**: the pixels of the captured frame (display × capture scale, e.g. 610×1356) that show the screen content. No rotation, no mirror. Tracking lives here |
 | view | `View` | overlay pixels (the overlay window; origin from `getLocationOnScreen`, size from `onSizeChanged`) |
 
@@ -593,12 +593,12 @@ uses no accessibility service.
   **Save diagnostics** writes the same zip to a place the owner picks (system "save as" dialog, no storage
   permission; `DiagnosticsSave`), so it can be kept and sent later.
 - **Model in the HUD (M0c):** the detections line ends with the model's input size and, for an imported model,
-  the mark `imp`: `det 2/3 trk 2 max 0.89 in 416` (built-in) or `det 2/3 trk 2 max 0.89 in 640 imp`; with no
+  the mark `imp`: `det 2/3 trk 2 max 0.89 in 448x960` (built-in, portrait) or `det 2/3 trk 2 max 0.89 in 640 imp`; with no
   model loaded the ` in …` part is left out (`HudFormatter.formatDetections`). When an imported model was expected
   but the built-in one runs (`OverlayWarning.IMPORTED_MODEL_NOT_USED`), the warning line says
   `Imported model not used: built-in model`; it has the lowest priority and does not hide the dots.
 - **Model in `summary.txt` (M0c, `DiagnosticsReport`):** `modelSource` (`builtin` / `imported`; `unknown` before any
-  session), `modelFile` (`builtin` for the built-in model), `modelSha256` (first `SHA256_SHORT_CHARS` = 12 hex
+  session), `modelFile` (the bundled file name, e.g. `yolo26n-pose_448x960.tflite`; `builtin` if no bundled model runs), `modelSha256` (first `SHA256_SHORT_CHARS` = 12 hex
   characters), `modelInputSize`, `modelOutputRows`, `modelFallback` (a `ModelFallback` name or `none`),
   `modelFallbackMessage`, and `modelFallbackFile` (name and short sha256 of an imported model that was refused;
   only then).
@@ -676,7 +676,7 @@ uses no accessibility service.
 ### 7.1 Config
 `TrackerConfig` (in `core`): every tunable number with unit, default, min, max, KDoc. No magic numbers
 elsewhere. Debug sheet exposes the important ones as sliders + "reset to defaults", plus: model size
-(`modelInputSize`, 320 or 416, default 416), capture scale, analysis fps cap (60/30), accelerator override (auto/CPU).
+(`modelInputSize`, the square fallback model, 320 or 416, default 416), capture scale, analysis fps cap (60/30), accelerator override (auto/CPU).
 Capture-related entries (M0b): score threshold 0.15, capture scale ½, HUD rate 2 Hz, timestamp guard 100 ms,
 overlay alpha cap fallback 0.8, dot/box stroke widths, lock arm timeout.
 Tracker entries (M3a), all in `TrackerConfig` with unit and bounds: head point (keypoint enter/leave scores, offset
@@ -709,6 +709,8 @@ step back up after 60 s below the threshold. Every step is logged and shown in t
   `tools/requirements.lock` (pinned ultralytics ≥ 8.4.83 + deps), runs
   `export(format="litert", nms=False, imgsz=S)` for S = 320 and 416 (the bundled models; downloads: see below), runs
   Python `predict()` on the fixture image to produce golden outputs, writes `model_info.json` (I/O shapes, versions, sha256), opens a PR.
+- `448x960` and `960x448` (the built-in models, F1) come from the release `models` (verified sha256, output `[1,300,57]`), are listed
+  in `model_info.json` under the keys `448x960` / `960x448` (input `[1,3,H,W]`) and have no golden file.
 - Normal builds never run Python. Build fails with a clear message if a model or its sha256 mismatches: the check
   is the `stage<Variant>ModelAssets` Gradle task of `app`, which verifies every file listed in `model_info.json`
   and copies only the `.tflite` files and `model_info.json` into the APK assets.
@@ -760,7 +762,8 @@ step back up after 60 s below the threshold. Every step is logged and shown in t
     than the loaded one, closes the old detector and loads the new one through `SessionModelLoader`; the pipeline then
     drops the old detections and resets the tracker, the smoother and the lock (`FramePipeline.onModelChanged`). A
     model that is blocked, missing or fails to load (an `Error` such as `OutOfMemoryError` included) gives the built-in
-    model with the existing fallback reasons; the session never stops, and a failed load is tried again when its
+    model of that orientation (448x960 portrait, 960x448 landscape; it is reloaded when the orientation changes; if it fails
+    too, the square 416 model, logged, `modelFile` names it) with the existing fallback reasons; the session never stops, and a failed load is tried again when its
     orientation returns. The LOAD crash marker now names the model (`pending:load:<sha256>`); a trip moves only that
     model to `blocked.txt` and the marker goes idle, so the other models keep working. If the marker cannot be set back to idle after
     a load (a failed write), the `Pending` stays stored: for the rest of the process loads fall back to the built-in model

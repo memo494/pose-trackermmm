@@ -5,6 +5,7 @@ import com.memo494.posetracker.core.modelimport.ImportGuardState
 import com.memo494.posetracker.core.modelimport.ImportedModelMeta
 import com.memo494.posetracker.core.modelimport.ModelOrientation
 import com.memo494.posetracker.core.modelimport.SlotChoice
+import com.memo494.posetracker.detector.BundledDetector
 import com.memo494.posetracker.detector.ModelProbe
 import com.memo494.posetracker.detector.PoseDetector
 
@@ -49,7 +50,8 @@ internal class ModelSelection(
  * @param readLibrary what is stored now (`ModelLibraryStore.state`); a failure means "built-in, unreadable".
  * @param setGuard stores the crash marker (`ModelLibraryStore.setGuard`).
  * @param loadImported builds the detector of a library model (`PoseDetectors.fromImported`).
- * @param loadBuiltIn builds the built-in detector (`PoseDetectors.fromAssets`).
+ * @param loadBuiltIn builds the detector of the built-in model of an orientation (`PoseDetectors.fromAssets`).
+ * @param loadFallbackBuiltIn builds the detector of the square 416 model, used when [loadBuiltIn] fails.
  * @param verifyStored whether a stored file still has its length and sha256 (`ModelLibraryStore.storedFileMatches`).
  * @param nowNs a monotonic clock in nanoseconds.
  * @param log receives a message and the failure, if any; it must not throw.
@@ -58,14 +60,15 @@ internal class ModelSwitcher(
     private val readLibrary: () -> LibraryState,
     private val setGuard: (ImportGuardState) -> Boolean,
     private val loadImported: (ImportedModelMeta) -> PoseDetector,
-    private val loadBuiltIn: () -> PoseDetector,
+    private val loadBuiltIn: (ModelOrientation) -> BundledDetector,
+    private val loadFallbackBuiltIn: () -> BundledDetector,
     private val verifyStored: (ImportedModelMeta) -> Boolean,
     private val nowNs: () -> Long,
     private val log: (String, Throwable?) -> Unit,
 ) {
     private var current: LoadedModel? = null
 
-    /** The sha256 the slot asked for when [current] was loaded; `null` = the built-in model. */
+    /** What the slot asked for when [current] was loaded: the sha256, or [builtInKey]; `null` = nothing loaded yet. */
     private var loadedFor: String? = null
     private var lastLibrary: LibraryState? = null
 
@@ -135,7 +138,7 @@ internal class ModelSwitcher(
     private fun choose(orientation: ModelOrientation): ModelSelection? {
         val library = readOrNull()
         if (library != null) lastLibrary = library
-        val wanted = library?.let { shaOf(it.slots.choiceFor(orientation)) }
+        val wanted = library?.let { shaOf(it.slots.choiceFor(orientation)) } ?: builtInKey(orientation)
         val running = current
         if (running != null && running.detector != null && wanted == loadedFor) return null
         val startNs = nowNs()
@@ -147,7 +150,8 @@ internal class ModelSwitcher(
                 readState = { stateOf(library, orientation) },
                 setGuard = setGuard,
                 loadImported = loadImported,
-                loadBuiltIn = loadBuiltIn,
+                loadBuiltIn = { loadBuiltIn(orientation) },
+                loadFallbackBuiltIn = loadFallbackBuiltIn,
                 log = ::safeLog,
                 verifyStored = verifyStored,
             ).load()
@@ -204,6 +208,9 @@ internal class ModelSwitcher(
         }
     }
 
+    /** The built-in model differs per orientation, so a change of orientation reloads it; a sha256 never looks like this. */
+    private fun builtInKey(orientation: ModelOrientation): String = "$BUILT_IN_KEY_PREFIX${orientation.logName}"
+
     private fun shaOf(choice: SlotChoice): String? = if (choice is SlotChoice.Library) choice.sha256 else null
 
     private fun slotText(orientation: ModelOrientation): String {
@@ -212,5 +219,9 @@ internal class ModelSwitcher(
         if (choice !is SlotChoice.Library) return ModelStatus.SLOT_BUILT_IN
         val meta = library.library.find(choice.sha256) ?: return ModelStatus.SLOT_BUILT_IN
         return "${meta.displayName} ${meta.sha256.take(TrackerConfig.SHA256_SHORT_CHARS)}"
+    }
+
+    private companion object {
+        const val BUILT_IN_KEY_PREFIX = "builtin:"
     }
 }

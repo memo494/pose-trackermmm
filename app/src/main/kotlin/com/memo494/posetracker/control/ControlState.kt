@@ -41,8 +41,8 @@ internal data class ControlState(
      * death), so **Use built-in model** can remove it.
      */
     val modelFileStored: Boolean = false,
-    /** Side of the built-in model's square input, in model pixels (Mdl), for the "Built-in (416)" line. */
-    val builtInInputSize: Int = TrackerConfig.DEFAULT_MODEL_INPUT_SIZE,
+    /** The orientation the control screen is shown in (the one `activeModel` was read for); the built-in model differs per orientation. */
+    val activeOrientation: ModelOrientation = ModelOrientation.PORTRAIT,
     /**
      * The "Debug marks (box and body points)" switch: `true` draws the full box and the keypoint dots as well.
      * It is read by the next Start only; changing it while running changes nothing in the session.
@@ -54,7 +54,7 @@ internal data class ControlState(
 
 /** The model the next capture start will use. Pure data: no files, no Android types. */
 internal sealed interface ActiveModel {
-    /** The model bundled with the app (its input size is `TrackerConfig.modelInputSize`). */
+    /** The model bundled with the app for the orientation (`BuiltInModels`: 448x960 portrait, 960x448 landscape). */
     data object BuiltIn : ActiveModel
 
     /**
@@ -295,6 +295,7 @@ internal sealed interface ControlEvent {
         val portraitSha: String? = null,
         val landscapeSha: String? = null,
         val libraryFull: Boolean = false,
+        val orientation: ModelOrientation = ModelOrientation.PORTRAIT,
     ) : ControlEvent
 }
 
@@ -584,6 +585,7 @@ internal object ControlReducer {
                 portraitSha = event.portraitSha,
                 landscapeSha = event.landscapeSha,
                 libraryFull = event.libraryFull,
+                activeOrientation = event.orientation,
             ),
             null,
         )

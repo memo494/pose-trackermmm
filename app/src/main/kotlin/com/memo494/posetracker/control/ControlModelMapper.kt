@@ -3,6 +3,7 @@ package com.memo494.posetracker.control
 import androidx.annotation.StringRes
 import com.memo494.posetracker.R
 import com.memo494.posetracker.core.model.ModelInputText
+import com.memo494.posetracker.core.modelimport.BuiltInModels
 import com.memo494.posetracker.core.modelimport.ImportGuardState
 import com.memo494.posetracker.core.modelimport.ImportRejection
 import com.memo494.posetracker.core.modelimport.ImportStage
@@ -165,12 +166,16 @@ internal object ControlModelMapper {
                 slot
             }
         return noticed.copy(
+            orientation = orientation,
             library = items,
             portraitSha = shaOf(library.slots.portrait),
             landscapeSha = shaOf(library.slots.landscape),
             libraryFull = library.entries.size >= maxModels,
         )
     }
+
+    /** The input size of the built-in model of [orientation] for the "Built-in (448x960)" line: `448x960` / `960x448`. */
+    fun builtInInputText(orientation: ModelOrientation): String = BuiltInModels.inputText(orientation)
 
     private fun shaOf(choice: SlotChoice): String? = if (choice is SlotChoice.Library) choice.sha256 else null
 

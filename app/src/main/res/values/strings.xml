@@ -28,7 +28,7 @@
     <!-- Model block of the control screen (ControlScreen, ControlModelMapper). -->
     <string name="model_title">Model</string>
     <string name="model_now">In this orientation: %1$s</string>
-    <string name="model_active_built_in">Built-in (%1$d)</string>
+    <string name="model_active_built_in">Built-in (%1$s)</string>
     <string name="model_active_imported">%1$s (%2$s, imported)</string>
     <string name="model_import">Import model</string>
     <string name="model_use_built_in">Remove all imported models</string>

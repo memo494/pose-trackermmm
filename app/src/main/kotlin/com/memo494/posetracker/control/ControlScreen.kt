@@ -153,8 +153,12 @@ private fun ModelBlock(
         Text(stringResource(R.string.model_title), style = MaterialTheme.typography.titleMedium)
         Text(stringResource(R.string.model_now, activeModelLine(state)), style = MaterialTheme.typography.bodyLarge)
 
-        SlotPicker(R.string.model_slot_portrait, state.portraitSha, state, idle) { onSlotPick(ModelOrientation.PORTRAIT, it) }
-        SlotPicker(R.string.model_slot_landscape, state.landscapeSha, state, idle) { onSlotPick(ModelOrientation.LANDSCAPE, it) }
+        SlotPicker(R.string.model_slot_portrait, ModelOrientation.PORTRAIT, state.portraitSha, state, idle) {
+            onSlotPick(ModelOrientation.PORTRAIT, it)
+        }
+        SlotPicker(R.string.model_slot_landscape, ModelOrientation.LANDSCAPE, state.landscapeSha, state, idle) {
+            onSlotPick(ModelOrientation.LANDSCAPE, it)
+        }
         LibraryList(state, idle, onDeleteModelClick)
 
         val modelNotice = state.modelNotice
@@ -192,6 +196,7 @@ private fun ModelBlock(
 @Composable
 private fun SlotPicker(
     @StringRes labelRes: Int,
+    orientation: ModelOrientation,
     selectedSha: String?,
     state: ControlState,
     enabled: Boolean,
@@ -199,7 +204,8 @@ private fun SlotPicker(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(SWITCH_NOTE_SPACING)) {
         Text(stringResource(labelRes), style = MaterialTheme.typography.titleSmall)
-        PickRow(stringResource(R.string.model_active_built_in, state.builtInInputSize), selectedSha == null, enabled) { onPick(null) }
+        val builtInText = stringResource(R.string.model_active_built_in, ControlModelMapper.builtInInputText(orientation))
+        PickRow(builtInText, selectedSha == null, enabled) { onPick(null) }
         for (item in state.library) {
             val text = stringResource(R.string.model_library_item, item.displayName, item.inputText)
             PickRow(text, selectedSha == item.sha256, enabled && !item.blocked) { onPick(item.sha256) }
@@ -258,8 +264,13 @@ private fun LibraryList(
 @Composable
 private fun activeModelLine(state: ControlState): String =
     when (val model = state.activeModel) {
-        ActiveModel.BuiltIn -> stringResource(R.string.model_active_built_in, state.builtInInputSize)
-        is ActiveModel.Imported -> stringResource(R.string.model_active_imported, model.displayName, model.inputText)
+        ActiveModel.BuiltIn -> {
+            stringResource(R.string.model_active_built_in, ControlModelMapper.builtInInputText(state.activeOrientation))
+        }
+
+        is ActiveModel.Imported -> {
+            stringResource(R.string.model_active_imported, model.displayName, model.inputText)
+        }
     }
 
 @Composable

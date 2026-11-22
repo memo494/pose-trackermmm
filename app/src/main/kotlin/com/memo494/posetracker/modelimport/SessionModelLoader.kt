@@ -5,6 +5,7 @@ import com.memo494.posetracker.core.modelimport.ImportGuard
 import com.memo494.posetracker.core.modelimport.ImportGuardState
 import com.memo494.posetracker.core.modelimport.ImportStage
 import com.memo494.posetracker.core.modelimport.ImportedModelMeta
+import com.memo494.posetracker.detector.BundledDetector
 import com.memo494.posetracker.detector.ModelProbe
 import com.memo494.posetracker.detector.PoseDetector
 
@@ -17,6 +18,8 @@ import com.memo494.posetracker.detector.PoseDetector
  * @property meta see [ModelStatus.meta].
  * @property fallback see [ModelStatus.fallback].
  * @property message see [ModelStatus.message].
+ * @property builtInFile see [ModelStatus.builtInFile].
+ * @property builtInSha256 see [ModelStatus.builtInSha256].
  */
 data class LoadedModel(
     val detector: PoseDetector?,
@@ -24,13 +27,25 @@ data class LoadedModel(
     val meta: ImportedModelMeta?,
     val fallback: ModelFallback?,
     val message: String? = null,
+    val builtInFile: String? = null,
+    val builtInSha256: String? = null,
 ) {
     /** Whether the HUD shows the "imported model not used" note: some fallback happened. */
     val importedModelNotUsed: Boolean
         get() = fallback != null
 
     /** The status for [ModelStatusHolder]; the input width and height are the running detector's, 0 without one. */
-    fun status(): ModelStatus = ModelStatus(source, meta, fallback, message, detector?.inputWidth ?: 0, detector?.inputHeight ?: 0)
+    fun status(): ModelStatus =
+        ModelStatus(
+            source,
+            meta,
+            fallback,
+            message,
+            detector?.inputWidth ?: 0,
+            detector?.inputHeight ?: 0,
+            builtInFile = builtInFile,
+            builtInSha256 = builtInSha256,
+        )
 
     /** The one log line of the model choice; the input text is [ModelInputText.text] (`0` without a detector). */
     fun logLine(): String {
@@ -49,7 +64,9 @@ data class LoadedModel(
  *   (`ImportedModelStore.setGuard`).
  * @param loadImported builds the detector for the imported model (`PoseDetectors.fromImported`); any `Throwable`
  *   means "use the built-in model".
- * @param loadBuiltIn builds the built-in detector (`PoseDetectors.fromAssets`).
+ * @param loadBuiltIn builds the detector of the built-in model of the orientation being loaded
+ *   (`PoseDetectors.fromAssets`: 448x960 portrait, 960x448 landscape).
+ * @param loadFallbackBuiltIn builds the detector of the square 416 model, the last resort when [loadBuiltIn] throws.
  * @param log receives a message and the failure, if any; it must not throw.
  * @param verifyStored whether the stored model file still has the length and sha256 of its meta
  *   (`ImportedModelStore.storedFileMatches`); asked only after a probe trip, which keeps such a model. The default
@@ -59,7 +76,8 @@ class SessionModelLoader(
     private val readState: () -> StoredModelState,
     private val setGuard: (ImportGuardState) -> Boolean,
     private val loadImported: (ImportedModelMeta) -> PoseDetector,
-    private val loadBuiltIn: () -> PoseDetector,
+    private val loadBuiltIn: () -> BundledDetector,
+    private val loadFallbackBuiltIn: () -> BundledDetector,
     private val log: (String, Throwable?) -> Unit,
     private val verifyStored: (ImportedModelMeta) -> Boolean = { false },
 ) {
@@ -78,7 +96,9 @@ class SessionModelLoader(
      *   stored, and the model that ran has just loaded without killing the process).
      * - Otherwise the built-in model; the fallback mirrors the reason of `ModelChoice.BuiltIn`, and is `null` when
      *   nothing is imported.
-     * - The built-in model failing too gives `detector == null` (logged), keeping the other fields.
+     * - The built-in model of the orientation failing (any `Throwable`) loads the square 416 model instead (logged; the
+     *   status then names the 416 file and `message` the failure). That failing too gives `detector == null` (logged),
+     *   keeping the other fields.
      */
     fun load(): LoadedModel {
         val choice =
@@ -122,15 +142,26 @@ class SessionModelLoader(
         fallback: ModelFallback?,
         message: String?,
     ): LoadedModel {
-        val detector =
+        var note = message
+        var bundled =
             try {
                 loadBuiltIn()
             } catch (t: Throwable) {
-                // No detector is not fatal: the HUD shows DETECTOR_UNAVAILABLE and frames are still drained.
-                log("detector unavailable", t)
+                log("built-in model failed to load, using the 416 model", t)
+                note = note ?: "built-in model failed: ${ModelProbe.failureMessage(t)}"
                 null
             }
-        return LoadedModel(detector, ModelSource.BUILT_IN, attempted, fallback, message)
+        if (bundled == null) {
+            bundled =
+                try {
+                    loadFallbackBuiltIn()
+                } catch (t: Throwable) {
+                    // No detector is not fatal: the HUD shows DETECTOR_UNAVAILABLE and frames are still drained.
+                    log("detector unavailable", t)
+                    null
+                }
+        }
+        return LoadedModel(bundled?.detector, ModelSource.BUILT_IN, attempted, fallback, note, bundled?.fileName, bundled?.sha256)
     }
 
     /** [setGuard] that cannot throw: a failure to store counts as "not stored". */

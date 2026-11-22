@@ -381,11 +381,12 @@ class HeadSmootherTest {
         assertThat(smoother.activeCount).isEqualTo(0)
     }
 
-    /** Smooths one frame of id 1 and gives it a lead of [leadXImg]; returns the smoother. */
+    /** Smooths two frames of id 1 and gives the second a lead of [leadXImg]; the second frame is still open (no `end`). */
     private fun smootherWithLead(leadXImg: Float): HeadSmoother {
         val smoother = HeadSmoother(TrackerConfig())
         frame(smoother, 0L, 1, BASE_X_IMG)
-        frame(smoother, STEP_20_FPS_NS, 1, BASE_X_IMG)
+        smoother.begin(STEP_20_FPS_NS)
+        smoother.smooth(1, BASE_X_IMG, BASE_Y_IMG, HEIGHT_IMG)
         smoother.settleLead(leadXImg, 0f, HEIGHT_IMG, fade = true)
         return smoother
     }

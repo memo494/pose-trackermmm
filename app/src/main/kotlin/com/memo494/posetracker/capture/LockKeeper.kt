@@ -92,6 +92,7 @@ internal class LockKeeper(
     private val sampleStatus = IntArray(config.maxTracks)
     private val sampleDistance = FloatArray(config.maxTracks)
     private val sampleSource = IntArray(config.maxTracks)
+    private val sampleBucket = IntArray(config.maxTracks)
 
     /**
      * The candidates seen while pending, in slots `0 until candidateCount`: id, readable frames judged
@@ -467,8 +468,10 @@ internal class LockKeeper(
             if (!read) {
                 sampleStatus[i] = STATUS_UNSAMPLED
             } else if (signature.hasDataFor(sampleSignature.lastBucket)) {
-                sampleStatus[i] = STATUS_OK
-                sampleDistance[i] = sampleSignature.distanceTo(signature, sampleSignature.lastBucket)
+                val distance = sampleSignature.distanceTo(signature, sampleSignature.lastBucket)
+                sampleBucket[i] = sampleSignature.lastBucket
+                sampleDistance[i] = distance
+                sampleStatus[i] = if (distance.isNaN()) STATUS_UNCOMPARABLE else STATUS_OK
             } else {
                 sampleStatus[i] = STATUS_UNCOMPARABLE
             }
@@ -490,7 +493,7 @@ internal class LockKeeper(
 
     /**
      * The smallest distance among the sampled tracks other than [skip]; [Float.POSITIVE_INFINITY] when there is none,
-     * [Float.NaN] (judged ambiguous) when another shown, matched track could not be sampled.
+     * [Float.NaN] (judged ambiguous) when another shown, matched track could not be sampled, compared, or is of another bucket than [skip].
      */
     private fun nearestOther(
         list: TrackList,
@@ -500,6 +503,8 @@ internal class LockKeeper(
         for (j in 0 until list.size) {
             if (j == skip || sampleStatus[j] == STATUS_NONE) continue
             if (sampleStatus[j] == STATUS_UNSAMPLED || sampleStatus[j] == STATUS_UNCOMPARABLE) return Float.NaN
+            // Distances to different histograms are on different scales: a bystander of another bucket gives no margin.
+            if (sampleBucket[j] != sampleBucket[skip]) return Float.NaN
             nearest = min(nearest, sampleDistance[j])
         }
         return nearest

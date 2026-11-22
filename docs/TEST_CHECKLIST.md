@@ -575,7 +575,9 @@ These checks need a cable and `adb`, or the benchmark screen of M1b, and are not
   (a pending lock moved to a returning person), `lockRelockRejects` (candidates whose 10-frame judge window ended
   without acceptance), `lockExpired` (memory ran out), cumulative since Start. The log lines are `lock: set id=N`,
   `pending id=N frames=K` (K = frames that filled the signature), `relocked id=N -> M d=… next=… min=… src=… sig=…`, `candidate id=M d=… min=… rejected (too far | ambiguous, next=… | no
-  torso | no comparable torso) src=… sig=…`, `expired` and `cleared (handle | reset | stop | replaced | no signature)`. Read `d` (distance of the
+  torso | no comparable torso) src=… sig=…` (a candidate that had readable frames and later becomes not comparable ends
+  with its last too-far / ambiguous reason when the cap `relockJudgeMaxFrames` is reached; a bystander of another
+  torso kind than the candidate, whole torso against upper body, makes the candidate ambiguous, `next=unsampled`), `expired` and `cleared (handle | reset | stop | replaced | no signature)`. Read `d` (distance of the
   returning person to the remembered colours; smaller is closer, accepted up to `relockMaxDistance` 0.40) and `next`
   (distance of the nearest other person; `none` = nobody else, `unsampled` = somebody could not be sampled) to tune
   `relockMaxDistance` and `relockMinMargin`.

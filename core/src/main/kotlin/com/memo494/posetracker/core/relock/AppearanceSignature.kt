@@ -16,7 +16,7 @@ import kotlin.math.sqrt
  * [blend] mixes the new histogram into the stored one of the same torso source (a running mean at first, then an
  * exponential average of weight `relockSignatureAlpha`), so one bad frame does not replace it; histograms of
  * different sources are kept apart and never compared. [distanceTo] is the Bhattacharyya distance between two signatures: 0 for the
- * same colours, 1 for nothing in common, and 1 (fail closed) when either one has no data.
+ * same colours, 1 for nothing in common, and NaN (not comparable) when either one has no data.
  *
  * Allocation-free after construction (a few float arrays). One instance belongs to one thread.
  *
@@ -115,16 +115,17 @@ class AppearanceSignature(
 
     /**
      * Bhattacharyya distance between this signature's histogram of [bucket] and the one of [other] for the same bucket,
-     * `sqrt(1 - sum(sqrt(p * q)))`, in 0..1; 1 when either has no data for that bucket or the two have different bin
-     * counts. Histograms of different buckets are never compared. Callers that must not treat "not comparable" as
-     * "far" check [hasDataFor] on the reference first.
+     * `sqrt(1 - sum(sqrt(p * q)))`, in 0..1; [Float.NaN] (not comparable, never "far") when either has no sample of that
+     * bucket or the two have different bin counts. Histograms of different buckets are never compared. Callers
+     * treat NaN as not comparable (fail closed) and still check [hasDataFor] on the reference, which also asks
+     * for `relockMinSourceSamples` frames.
      */
     fun distanceTo(
         other: AppearanceSignature,
         bucket: Int = lastBucket,
     ): Float {
         if (bucket !in samples.indices || samples[bucket] == 0 || other.samples[bucket] == 0 || binCount != other.binCount) {
-            return MAX_DISTANCE
+            return Float.NaN
         }
         val mine = bins[bucket]
         val theirs = other.bins[bucket]
@@ -227,9 +228,6 @@ class AppearanceSignature(
     }
 
     private companion object {
-        /** Distance of two signatures with nothing in common (and of an unknown one). */
-        const val MAX_DISTANCE = 1f
-
         /** Mask that turns a signed byte into 0..255. */
         const val BYTE_MASK = 0xFF
 

@@ -232,7 +232,7 @@ class AppearanceSignatureTest {
 
         assertThat(held.hasDataFor(TorsoRect.BUCKET_WHOLE)).isTrue()
         assertThat(held.hasDataFor(TorsoRect.BUCKET_UPPER)).isFalse()
-        assertThat(sample.distanceTo(held, sample.lastBucket)).isEqualTo(1f)
+        assertThat(sample.distanceTo(held, sample.lastBucket).isNaN()).isTrue()
         assertThat(signatureOf(solid(RED), area = keypoints).distanceTo(held, TorsoRect.BUCKET_WHOLE))
             .isWithin(DISTANCE_TOLERANCE)
             .of(0f)
@@ -298,14 +298,14 @@ class AppearanceSignatureTest {
     }
 
     @Test
-    fun aSignatureWithoutData_isAtTheLargestDistanceFromEverything() {
+    fun aSignatureWithoutData_isNotComparableToAnything_theDistanceIsNotANumber() {
         val empty = AppearanceSignature(config)
         val red = signatureOf(solid(RED))
 
         assertThat(empty.hasData).isFalse()
-        assertThat(empty.distanceTo(red)).isEqualTo(1f)
-        assertThat(red.distanceTo(empty)).isEqualTo(1f)
-        assertThat(empty.distanceTo(empty)).isEqualTo(1f)
+        assertThat(empty.distanceTo(red).isNaN()).isTrue()
+        assertThat(red.distanceTo(empty).isNaN()).isTrue()
+        assertThat(empty.distanceTo(empty).isNaN()).isTrue()
     }
 
     @Test
@@ -315,7 +315,7 @@ class AppearanceSignatureTest {
         signature.clear()
 
         assertThat(signature.hasData).isFalse()
-        assertThat(signature.distanceTo(signatureOf(solid(RED)))).isEqualTo(1f)
+        assertThat(signature.distanceTo(signatureOf(solid(RED))).isNaN()).isTrue()
     }
 
     @Test
@@ -351,11 +351,11 @@ class AppearanceSignatureTest {
     }
 
     @Test
-    fun signaturesWithDifferentBinCounts_areAtTheLargestDistance() {
+    fun signaturesWithDifferentBinCounts_areNotComparable() {
         val a = signatureOf(solid(RED))
         val b = signatureOf(solid(RED), useConfig = TrackerConfig(relockHueBins = 8))
 
-        assertThat(a.distanceTo(b)).isEqualTo(1f)
+        assertThat(a.distanceTo(b).isNaN()).isTrue()
     }
 
     /** The smallest sample limit; the least sample count has to come down with it. */

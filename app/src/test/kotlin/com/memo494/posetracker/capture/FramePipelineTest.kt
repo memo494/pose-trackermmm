@@ -2507,6 +2507,36 @@ class FramePipelineTest {
     }
 
     @Test
+    fun relock_aBystanderInAnotherBucketThanTheCandidate_makesTheCandidateAmbiguousEvenWhenItIsFarAway() {
+        val pipeline = trackingPipeline()
+        // Both buckets are built: the person stands (box torso), then sits (upper-body torso), all in red.
+        val standing = Look(walker(), RED_SHIRT)
+        lookFramesFrom(pipeline, 0, 3, standing)
+        pipeline.requestLock(1)
+        var atMs = lookFramesFrom(pipeline, 3 * FRAME_STEP_MS, 4, standing)
+        atMs = lookFramesFrom(pipeline, atMs + FRAME_STEP_MS, 5, Look(deskPerson(), RED_SHIRT))
+        for (i in 0 until 4) {
+            atMs += DEPARTURE_STEP_MS
+            lookFrameAt(pipeline, atMs)
+        }
+        assertThat(lockLogs().last()).isEqualTo("lock: pending id=1 frames=9")
+
+        // The red walker is the candidate (whole-torso d about 0); the blue seated bystander is far from the red
+        // upper-body histogram, a distance on another scale that must not give the candidate a margin.
+        lookFramesFrom(
+            pipeline,
+            atMs + FRAME_STEP_MS,
+            WINDOW_END_FRAMES,
+            Look(walker(shiftXImg = NEW_PERSON_SHIFT_X_IMG), RED_SHIRT),
+            Look(deskPerson(), BLUE_SHIRT),
+        )
+
+        assertThat(pipeline.lockRelockCount).isEqualTo(0)
+        assertThat(states.last().lockedId).isEqualTo(OverlayState.NO_LOCK)
+        assertThat(lockLogs().any { it.contains("d=0.00 min=0.00 rejected (ambiguous, next=unsampled)") }).isTrue()
+    }
+
+    @Test
     fun relock_aSignatureOfASingleFrame_isNotUsedAsTheOnlyReferenceAndAcceptsNoStranger() {
         val pipeline = trackingPipeline()
         val first = Look(walker(), BLUE_SHIRT)

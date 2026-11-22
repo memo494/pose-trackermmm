@@ -592,7 +592,7 @@ uses no accessibility service.
   is not used up before their shirt shows (then one reject "no torso"). The signature keeps one histogram per bucket:
   whole torso (keypoint rectangle and box part together) and upper body; a sample is compared only with its own bucket, never
   across buckets, and a bucket with fewer than `relockMinSourceSamples` (3) frames is "not comparable" (fail closed, never a
-  match, never "far"; reject "no comparable torso", and as a bystander it makes the candidate ambiguous). The first samples
+  match, never "far"; reject "no comparable torso", and as a bystander, or as a bystander of the other bucket than the candidate, it makes the candidate ambiguous). The first samples
   are a running mean (`alpha = max(1/n, relockSignatureAlpha)`), and a frame is not blended when another detected person's
   box covers more than `relockOccluderMaxOverlap` (0.25) of the held torso. Log: reject lines carry `d=` (newest readable
   frame) and `min=` (smallest of the window), accept lines `min=`; both carry `src=` (keypoints | box | upper) and `sig=`

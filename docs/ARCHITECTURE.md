@@ -586,12 +586,19 @@ uses no accessibility service.
   matched again first, judging stops and the candidates are forgotten (the lock stays). What was judged before the
   removal carries over into pending. Limit: a person who comes back far from where they were lost is only found after
   the removal, as before.
+  *F5 (relock reliability; accept rule and the hard rule unchanged):* only frames with a readable torso count toward
+  `relockJudgeFrames`; every matched frame counts toward the cap `relockJudgeMaxFrames` (30), so a person who enters clipped
+  is not used up before their shirt shows (then one reject "no torso"). The signature keeps one histogram per torso source
+  (keypoints / box / upper body); a sample is compared only with its own source and, when the signature has none, it is
+  "unsampled" (fail closed, never a match). The first samples are a running mean (`alpha = max(1/n, relockSignatureAlpha)`),
+  and a frame is not blended when another detected person's box covers more than `relockOccluderMaxOverlap` (0.25) of the
+  held torso. Log: reject/accept lines carry the smallest `d` of the window, `src=` and `sig=` (frames in the signature).
   *Ends:* reset, Stop, a handle tap (also one that replaces a pending lock with a new one) or the memory running
   out. The signature is a colour histogram in memory on the capture thread only (no face, no image), dropped at each
   of these.
   *Limits (by design, numbers are guesses until phone data exists):* two people in similar clothes may never be
-  told apart, and then the ring does not come back; a returning person is judged only on their first 10 matched
-  frames (a long entry half out of the picture can use them up); the colour of the light and of the video's
+  told apart, and then the ring does not come back; a returning person is judged on their first 10 readable
+  frames (F5; an entry half out of the picture is given up after 30 matched frames); the colour of the light and of the video's
   compression change the histogram; the distance and margin numbers are tuned from the `lock:` log lines (§6.7).
 - **Handle while pending:** the handle behaves as locked (a tap ends the wait, the next tap arms), though the ring
   is not drawn.

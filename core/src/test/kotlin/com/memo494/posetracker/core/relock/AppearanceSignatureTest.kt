@@ -160,9 +160,19 @@ class AppearanceSignatureTest {
         assertThat(signature.distanceTo(signatureOf(solid(RED)))).isWithin(DISTANCE_TOLERANCE).of(0f)
     }
 
+    /** A signature of [rgba] that has seen enough samples for the exponential average (weight alpha) to apply. */
+    private fun matured(
+        rgba: ByteArray,
+        area: TorsoRect = rect,
+    ): AppearanceSignature {
+        val signature = AppearanceSignature(config)
+        repeat(MATURE_BLENDS) { assertThat(signature.blend(rgba, SIDE, SIDE, area)).isTrue() }
+        return signature
+    }
+
     @Test
     fun blend_mixesTheNewSampleInWithTheAlphaWeight() {
-        val signature = signatureOf(solid(RED))
+        val signature = matured(solid(RED))
         assertThat(signature.blend(solid(BLUE), SIDE, SIDE, rect)).isTrue()
 
         // Bins are now 0.9 red and 0.1 blue: the distance to pure red is sqrt(1 - sqrt(0.9)), to pure blue sqrt(1 - sqrt(0.1)).
@@ -174,7 +184,7 @@ class AppearanceSignatureTest {
 
     @Test
     fun blend_oneBadFrame_doesNotReplaceTheSignature() {
-        val signature = signatureOf(halves(ORANGE, TEAL))
+        val signature = matured(halves(ORANGE, TEAL))
 
         signature.blend(solid(RED), SIDE, SIDE, rect)
 
@@ -188,6 +198,62 @@ class AppearanceSignatureTest {
         repeat(MANY_BLENDS) { signature.blend(solid(BLUE), SIDE, SIDE, rect) }
 
         assertThat(signature.distanceTo(signatureOf(solid(BLUE)))).isAtMost(MAX_RELOCK_DISTANCE)
+    }
+
+    @Test
+    fun blend_earlyOn_isARunningMeanSoTheFirstFramesAreNotOutweighedByTheFirstOne() {
+        val signature = AppearanceSignature(config)
+        signature.blend(solid(RED), SIDE, SIDE, rect)
+        signature.blend(solid(BLUE), SIDE, SIDE, rect)
+
+        // Two samples are weighted 1/2 each (the exponential weight 0.1 would give 0.9 / 0.1).
+        val toRed = signature.distanceTo(signatureOf(solid(RED)))
+        assertThat(toRed).isWithin(MIX_TOLERANCE).of(sqrt(1f - sqrt(0.5f)))
+    }
+
+    @Test
+    fun blend_afterManySamples_theWeightOfANewOneIsAlpha() {
+        val signature = matured(solid(RED))
+        signature.blend(solid(BLUE), SIDE, SIDE, rect)
+
+        val toBlue = signature.distanceTo(signatureOf(solid(BLUE)))
+        assertThat(toBlue).isWithin(MIX_TOLERANCE).of(sqrt(1f - sqrt(config.relockSignatureAlpha)))
+    }
+
+    @Test
+    fun signaturesOfDifferentTorsoSources_areKeptApart_andOnlyTheSameSourceIsCompared() {
+        val keypoints = TorsoRect().apply { set(0, 0, SIDE, SIDE, source = TorsoRect.SOURCE_KEYPOINTS) }
+        val upper = TorsoRect().apply { set(0, 0, SIDE, SIDE, source = TorsoRect.SOURCE_UPPER_BODY) }
+        val held = AppearanceSignature(config)
+        held.blend(solid(RED), SIDE, SIDE, keypoints)
+
+        val sample = signatureOf(solid(RED), area = upper)
+
+        assertThat(held.hasDataFor(TorsoRect.SOURCE_KEYPOINTS)).isTrue()
+        assertThat(held.hasDataFor(TorsoRect.SOURCE_UPPER_BODY)).isFalse()
+        assertThat(sample.distanceTo(held)).isEqualTo(1f)
+        assertThat(signatureOf(solid(RED), area = keypoints).distanceTo(held)).isWithin(DISTANCE_TOLERANCE).of(0f)
+    }
+
+    @Test
+    fun blend_aNewSource_doesNotChangeTheHistogramOfTheOtherOne() {
+        val keypoints = TorsoRect().apply { set(0, 0, SIDE, SIDE, source = TorsoRect.SOURCE_KEYPOINTS) }
+        val upper = TorsoRect().apply { set(0, 0, SIDE, SIDE, source = TorsoRect.SOURCE_UPPER_BODY) }
+        val held = matured(solid(RED), keypoints)
+
+        held.blend(solid(BLUE), SIDE, SIDE, upper)
+
+        assertThat(signatureOf(solid(RED), area = keypoints).distanceTo(held)).isWithin(DISTANCE_TOLERANCE).of(0f)
+        assertThat(signatureOf(solid(BLUE), area = upper).distanceTo(held)).isWithin(DISTANCE_TOLERANCE).of(0f)
+    }
+
+    @Test
+    fun aRectangleWithAnUnknownSource_changesNothing() {
+        val bad = TorsoRect().apply { set(0, 0, SIDE, SIDE, source = TorsoRect.SOURCE_COUNT) }
+        val signature = AppearanceSignature(config)
+
+        assertThat(signature.blend(solid(RED), SIDE, SIDE, bad)).isFalse()
+        assertThat(signature.hasData).isFalse()
     }
 
     @Test
@@ -327,6 +393,7 @@ class AppearanceSignatureTest {
         const val MIX_TOLERANCE = 0.02f
         const val FAR_DISTANCE = 0.9f
         const val MAX_RELOCK_DISTANCE = 0.3f
+        const val MATURE_BLENDS = 20
         const val SMALL_PIXELS = 225
         const val MANY_BLENDS = 60
     }

@@ -86,13 +86,20 @@ internal class LockKeeper(
     /** Per list index of the newest frame: how [sampleAll] found the track (see the `STATUS_` constants) and its distance. */
     private val sampleStatus = IntArray(config.maxTracks)
     private val sampleDistance = FloatArray(config.maxTracks)
+    private val sampleSource = IntArray(config.maxTracks)
 
-    /** The candidates seen while pending, in slots `0 until candidateCount`: id, matched frames judged, and the newest verdict. */
+    /**
+     * The candidates seen while pending, in slots `0 until candidateCount`: id, readable frames judged
+     * ([candidateFrames], at most `relockJudgeFrames`), all matched frames seen ([candidateAttempts], at most
+     * `relockJudgeMaxFrames`), the smallest distance and the `next` of that frame, the newest verdict and the torso source.
+     */
     private val candidateId = IntArray(config.maxTracks)
     private val candidateFrames = IntArray(config.maxTracks)
+    private val candidateAttempts = IntArray(config.maxTracks)
     private val candidateDistance = FloatArray(config.maxTracks)
     private val candidateNext = FloatArray(config.maxTracks)
     private val candidateReason = IntArray(config.maxTracks)
+    private val candidateSource = IntArray(config.maxTracks)
     private var candidateCount = 0
 
     /** Locks set (a tap on a person that found its track) since this keeper began. Capture thread. */
@@ -239,7 +246,27 @@ internal class LockKeeper(
         candidateCount = 0
         maxIdAtLastMatch = highestId(list)
         if (!torsoOf(list, index, detections, frame) || torso.clipped) return
+        if (isOccluded(list, index, detections)) return
         if (signature.blend(frame.rgba, frame.widthImg, frame.heightImg, torso)) signatureFrames++
+    }
+
+    /**
+     * True when the box of any other detected person (tracked or not) covers more than `relockOccluderMaxOverlap` of
+     * the held torso in [torso] (their clothes would be read as the held person's), or when that cannot be told (fail closed).
+     */
+    private fun isOccluded(
+        list: TrackList,
+        heldIndex: Int,
+        detections: List<PoseDetection>,
+    ): Boolean {
+        val heldDetection = list.matchedDetectionIndex(heldIndex)
+        for (d in detections.indices) {
+            if (d == heldDetection) continue
+            val other = detections[d]
+            val share = torso.coveredShareBy(other.boxLeftImg, other.boxTopImg, other.boxRightImg, other.boxBottomImg)
+            if (!(share <= config.relockOccluderMaxOverlap)) return true
+        }
+        return false
     }
 
     /**
@@ -259,7 +286,9 @@ internal class LockKeeper(
             if (!list.isShown(i) || list.matchedDetectionIndex(i) < 0 || list.id(i) <= maxIdAtLastMatch) continue
             if (early && !hasSpatialEvidence(list, heldIndex, i)) continue
             val slot = slotOf(list.id(i))
-            if (slot < 0 || candidateFrames[slot] >= config.relockJudgeFrames) continue
+            if (slot < 0 || candidateFrames[slot] >= config.relockJudgeFrames || candidateAttempts[slot] >= config.relockJudgeMaxFrames) {
+                continue
+            }
             if (!sampled) {
                 sampleAll(list, detections, frame)
                 sampled = true
@@ -300,22 +329,26 @@ internal class LockKeeper(
         return dx * dx + dy * dy
     }
 
-    /** Judges the candidate at list index [index] (slot [slot]) in this frame; false when the lock moved or was ended. */
+    /**
+     * Judges the candidate at list index [index] (slot [slot]) in this frame; false when the lock moved or was ended.
+     * Only frames with a readable torso count toward `relockJudgeFrames`; every matched frame counts toward the cap
+     * `relockJudgeMaxFrames`, so a person who enters clipped is not used up before their shirt is seen.
+     */
     private fun judge(
         list: TrackList,
         index: Int,
         slot: Int,
         early: Boolean,
     ): Boolean {
-        candidateFrames[slot]++
-        if (sampleStatus[index] != STATUS_OK) {
-            noteVerdict(slot, Float.NaN, Float.NaN, REASON_NO_TORSO)
-        } else {
+        candidateAttempts[slot]++
+        if (sampleSource[index] != TorsoRect.SOURCE_NONE) candidateSource[slot] = sampleSource[index]
+        if (sampleStatus[index] == STATUS_OK) {
+            candidateFrames[slot]++
             val distance = sampleDistance[index]
             val next = nearestOther(list, index)
             when (matcher.judge(distance, next)) {
                 RelockMatcher.Verdict.ACCEPT -> {
-                    moveTo(list.id(index), distance, next, early)
+                    moveTo(list.id(index), distance, next, early, min(distance, candidateDistance[slot]), candidateSource[slot])
                     return false
                 }
 
@@ -328,18 +361,23 @@ internal class LockKeeper(
                 }
             }
         }
-        if (candidateFrames[slot] >= config.relockJudgeFrames) finishWindow(slot, list.id(index))
+        if (candidateFrames[slot] >= config.relockJudgeFrames || candidateAttempts[slot] >= config.relockJudgeMaxFrames) {
+            finishWindow(slot, list.id(index))
+        }
         return true
     }
 
+    /** Notes the newest verdict; the distance (and the `next` of that frame) kept is the smallest of the window. */
     private fun noteVerdict(
         slot: Int,
         distance: Float,
         next: Float,
         reason: Int,
     ) {
-        candidateDistance[slot] = distance
-        candidateNext[slot] = next
+        if (distance < candidateDistance[slot]) {
+            candidateDistance[slot] = distance
+            candidateNext[slot] = next
+        }
         candidateReason[slot] = reason
     }
 
@@ -350,10 +388,13 @@ internal class LockKeeper(
     ) {
         relockRejectCount++
         val distance = format(candidateDistance[slot])
+        val tail = " src=${sourceName(candidateSource[slot])} sig=$signatureFrames"
         when (candidateReason[slot]) {
-            REASON_TOO_FAR -> log("lock: candidate id=$id d=$distance rejected (too far)")
-            REASON_AMBIGUOUS -> log("lock: candidate id=$id d=$distance rejected (ambiguous, next=${format(candidateNext[slot])})")
-            else -> log("lock: candidate id=$id rejected (no torso)")
+            REASON_TOO_FAR -> log("lock: candidate id=$id d=$distance rejected (too far)$tail")
+            REASON_AMBIGUOUS -> {
+                log("lock: candidate id=$id d=$distance rejected (ambiguous, next=${format(candidateNext[slot])})$tail")
+            }
+            else -> log("lock: candidate id=$id rejected (no torso)$tail")
         }
     }
 
@@ -366,6 +407,10 @@ internal class LockKeeper(
         val slot = candidateCount++
         candidateId[slot] = id
         candidateFrames[slot] = 0
+        candidateAttempts[slot] = 0
+        candidateDistance[slot] = Float.POSITIVE_INFINITY
+        candidateNext[slot] = Float.POSITIVE_INFINITY
+        candidateSource[slot] = TorsoRect.SOURCE_NONE
         candidateReason[slot] = REASON_NO_TORSO
         return slot
     }
@@ -378,6 +423,8 @@ internal class LockKeeper(
             if (kept != slot) {
                 candidateId[kept] = candidateId[slot]
                 candidateFrames[kept] = candidateFrames[slot]
+                candidateAttempts[kept] = candidateAttempts[slot]
+                candidateSource[kept] = candidateSource[slot]
                 candidateDistance[kept] = candidateDistance[slot]
                 candidateNext[kept] = candidateNext[slot]
                 candidateReason[kept] = candidateReason[slot]
@@ -398,9 +445,15 @@ internal class LockKeeper(
         frame: CaptureFrame,
     ) {
         for (i in 0 until list.size) {
+            sampleSource[i] = TorsoRect.SOURCE_NONE
             if (!list.isShown(i) || list.matchedDetectionIndex(i) < 0) {
                 sampleStatus[i] = STATUS_NONE
-            } else if (sampleOne(list, i, detections, frame)) {
+                continue
+            }
+            val read = sampleOne(list, i, detections, frame)
+            sampleSource[i] = torso.source
+            // A torso of a kind the signature never saw (a desk person against a standing one) cannot be compared: unsampled.
+            if (read && signature.hasDataFor(sampleSignature.lastSource)) {
                 sampleStatus[i] = STATUS_OK
                 sampleDistance[i] = sampleSignature.distanceTo(signature)
             } else {
@@ -409,7 +462,10 @@ internal class LockKeeper(
         }
     }
 
-    /** Reads the whole (not clipped) torso of track [index] into [sampleSignature]; false when that is not possible. */
+    /**
+     * Reads the whole (not clipped) torso of track [index] into [sampleSignature]; false when that is not possible.
+     * Leaves the source of the torso in [sampleSignature] (`lastSource`).
+     */
     private fun sampleOne(
         list: TrackList,
         index: Int,
@@ -442,6 +498,8 @@ internal class LockKeeper(
         distance: Float,
         nextDistance: Float,
         early: Boolean,
+        minDistance: Float,
+        source: Int,
     ): Boolean {
         val oldId = heldId
         if (!requestedId.compareAndSet(oldId, newId)) return false
@@ -451,7 +509,10 @@ internal class LockKeeper(
         maxIdAtLastMatch = maxOf(maxIdAtLastMatch, newId)
         relockCount++
         val suffix = if (early) " early" else ""
-        log("lock: relocked id=$oldId -> $newId d=${format(distance)} next=${format(nextDistance)}$suffix")
+        log(
+            "lock: relocked id=$oldId -> $newId d=${format(distance)} next=${format(nextDistance)}$suffix " +
+                "min=${format(minDistance)} src=${sourceName(source)} sig=$signatureFrames",
+        )
         return true
     }
 
@@ -463,7 +524,10 @@ internal class LockKeeper(
         frame: CaptureFrame,
     ): Boolean {
         val detectionIndex = list.matchedDetectionIndex(index)
-        if (detectionIndex < 0 || detectionIndex >= detections.size) return false
+        if (detectionIndex < 0 || detectionIndex >= detections.size) {
+            torso.clear()
+            return false
+        }
         return torsoRegion.of(detections[detectionIndex], frame.widthImg, frame.heightImg, torso)
     }
 
@@ -482,6 +546,14 @@ internal class LockKeeper(
         for (i in 0 until list.size) highest = maxOf(highest, list.id(i))
         return highest
     }
+
+    private fun sourceName(source: Int): String =
+        when (source) {
+            TorsoRect.SOURCE_KEYPOINTS -> "keypoints"
+            TorsoRect.SOURCE_BOX -> "box"
+            TorsoRect.SOURCE_UPPER_BODY -> "upper"
+            else -> "none"
+        }
 
     private fun format(distance: Float): String =
         when {

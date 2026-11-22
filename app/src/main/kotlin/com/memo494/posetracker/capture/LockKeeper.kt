@@ -390,11 +390,17 @@ internal class LockKeeper(
         val distance = format(candidateDistance[slot])
         val tail = " src=${sourceName(candidateSource[slot])} sig=$signatureFrames"
         when (candidateReason[slot]) {
-            REASON_TOO_FAR -> log("lock: candidate id=$id d=$distance rejected (too far)$tail")
+            REASON_TOO_FAR -> {
+                log("lock: candidate id=$id d=$distance rejected (too far)$tail")
+            }
+
             REASON_AMBIGUOUS -> {
                 log("lock: candidate id=$id d=$distance rejected (ambiguous, next=${format(candidateNext[slot])})$tail")
             }
-            else -> log("lock: candidate id=$id rejected (no torso)$tail")
+
+            else -> {
+                log("lock: candidate id=$id rejected (no torso)$tail")
+            }
         }
     }
 

@@ -1826,8 +1826,11 @@ class FramePipelineTest {
         lookFramesFrom(pipeline, leftAtMs + FRAME_STEP_MS, 3, Look(walker(shiftXImg = NEW_PERSON_SHIFT_X_IMG), RED_SHIRT))
 
         assertThat(lockLogs())
-            .containsExactly("lock: set id=1", "lock: pending id=1 frames=3", "lock: relocked id=1 -> 2 d=0.00 next=none min=0.00 src=box sig=3")
-            .inOrder()
+            .containsExactly(
+                "lock: set id=1",
+                "lock: pending id=1 frames=3",
+                "lock: relocked id=1 -> 2 d=0.00 next=none min=0.00 src=box sig=3",
+            ).inOrder()
     }
 
     @Test
@@ -2104,7 +2107,9 @@ class FramePipelineTest {
         assertThat(pipeline.lockRelockCount).isEqualTo(1)
         assertThat(pipeline.lockRelockRejectCount).isEqualTo(0)
         assertThat(pipeline.lockCount).isEqualTo(1)
-        assertThat(lockLogs()).containsExactly("lock: set id=1", "lock: relocked id=1 -> 2 d=0.00 next=none early min=0.00 src=box sig=3").inOrder()
+        assertThat(
+            lockLogs(),
+        ).containsExactly("lock: set id=1", "lock: relocked id=1 -> 2 d=0.00 next=none early min=0.00 src=box sig=3").inOrder()
     }
 
     @Test
@@ -2235,8 +2240,11 @@ class FramePipelineTest {
         assertThat(pipeline.lockRelockCount).isEqualTo(0)
         assertThat(pipeline.lockRelockRejectCount).isEqualTo(1)
         assertThat(lockLogs())
-            .containsExactly("lock: set id=1", "lock: pending id=1 frames=3", "lock: candidate id=3 d=0.00 rejected (ambiguous, next=0.00) src=box sig=3")
-            .inOrder()
+            .containsExactly(
+                "lock: set id=1",
+                "lock: pending id=1 frames=3",
+                "lock: candidate id=3 d=0.00 rejected (ambiguous, next=0.00) src=box sig=3",
+            ).inOrder()
     }
 
     @Test
@@ -2315,8 +2323,11 @@ class FramePipelineTest {
         assertThat(pipeline.lockRelockCount).isEqualTo(1)
         assertThat(pipeline.lockRelockRejectCount).isEqualTo(0)
         assertThat(lockLogs())
-            .containsExactly("lock: set id=1", "lock: pending id=1 frames=3", "lock: relocked id=1 -> 2 d=0.00 next=none min=0.00 src=box sig=3")
-            .inOrder()
+            .containsExactly(
+                "lock: set id=1",
+                "lock: pending id=1 frames=3",
+                "lock: relocked id=1 -> 2 d=0.00 next=none min=0.00 src=box sig=3",
+            ).inOrder()
     }
 
     @Test

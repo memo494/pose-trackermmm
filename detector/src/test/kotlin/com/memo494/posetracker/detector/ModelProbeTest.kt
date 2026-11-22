@@ -96,7 +96,7 @@ class ModelProbeTest {
     @Test
     fun classicHeadOutputIsRejectedAsClassicHead() {
         val input = ModelProbe.describe(intArrayOf(1, 3, 640, 640), "FLOAT")
-        val output = ModelProbe.describe(intArrayOf(1, 56, 8400), "FLOAT")
+        val output = ModelProbe.describe(intArrayOf(1, 84, 8400), "FLOAT")
 
         val check = ImportedModelRules.check(listOf(input), listOf(output), config)
 

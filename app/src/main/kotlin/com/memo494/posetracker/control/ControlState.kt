@@ -101,6 +101,7 @@ internal enum class ModelRejectionReason {
 
     INPUT_COUNT,
     INPUT_TYPE,
+    QUANTIZED_IO,
     INPUT_NOT_NCHW,
     INPUT_NHWC,
     INPUT_ASPECT,
@@ -109,6 +110,7 @@ internal enum class ModelRejectionReason {
     OUTPUT_COUNT,
     OUTPUT_TYPE,
     OUTPUT_CLASSIC_HEAD,
+    OUTPUT_DETECT_ONLY,
     OUTPUT_ROWS,
     OUTPUT_SHAPE,
 }

@@ -221,6 +221,7 @@ class ModelImporter(
                         inputWidth = check.inputWidth,
                         inputHeight = check.inputHeight,
                         outputRows = check.outputRows,
+                        outputLayout = check.outputLayout,
                     )
                 accept(temp, meta)
             }

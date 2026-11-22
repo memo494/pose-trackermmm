@@ -8,6 +8,7 @@ import com.memo494.posetracker.core.modelimport.ImportRejection
 import com.memo494.posetracker.core.modelimport.ImportStage
 import com.memo494.posetracker.core.modelimport.ImportedModelMeta
 import com.memo494.posetracker.core.modelimport.ImportedModelRules
+import com.memo494.posetracker.core.modelimport.PoseOutputLayout
 import com.memo494.posetracker.core.modelimport.SniffRejection
 import com.memo494.posetracker.core.modelimport.TensorDescription
 import com.memo494.posetracker.core.modelpack.Sha256
@@ -291,7 +292,8 @@ class ModelImporterTest {
         val cases =
             mapOf(
                 ImportRejection.INPUT_COUNT to (listOf(goodIn, goodIn) to listOf(goodOut)),
-                ImportRejection.INPUT_TYPE to (listOf(tensor(1, 3, 640, 640, type = "uint8")) to listOf(goodOut)),
+                ImportRejection.INPUT_TYPE to (listOf(tensor(1, 3, 640, 640, type = "float16")) to listOf(goodOut)),
+                ImportRejection.QUANTIZED_IO to (listOf(tensor(1, 3, 640, 640, type = "uint8")) to listOf(goodOut)),
                 ImportRejection.INPUT_NOT_NCHW to (listOf(tensor(1, 640, 640)) to listOf(goodOut)),
                 ImportRejection.INPUT_NHWC to (listOf(tensor(1, 640, 640, 3)) to listOf(goodOut)),
                 ImportRejection.INPUT_ASPECT to (listOf(tensor(1, 3, 1280, 160)) to listOf(goodOut)),
@@ -299,9 +301,10 @@ class ModelImporterTest {
                 ImportRejection.INPUT_SIZE_OUT_OF_RANGE to (listOf(tensor(1, 3, 32, 32)) to listOf(goodOut)),
                 ImportRejection.OUTPUT_COUNT to (listOf(goodIn) to listOf(goodOut, goodOut)),
                 ImportRejection.OUTPUT_TYPE to (listOf(goodIn) to listOf(tensor(1, 300, 57, type = "float16"))),
-                ImportRejection.OUTPUT_CLASSIC_HEAD to (listOf(goodIn) to listOf(tensor(1, 56, 8400))),
+                ImportRejection.OUTPUT_CLASSIC_HEAD to (listOf(goodIn) to listOf(tensor(1, 84, 8400))),
+                ImportRejection.OUTPUT_DETECT_ONLY to (listOf(goodIn) to listOf(tensor(1, 6, 2100))),
                 ImportRejection.OUTPUT_ROWS to (listOf(goodIn) to listOf(tensor(1, 301, 57))),
-                ImportRejection.OUTPUT_SHAPE to (listOf(goodIn) to listOf(tensor(1, 300, 51))),
+                ImportRejection.OUTPUT_SHAPE to (listOf(goodIn) to listOf(tensor(1, 300, 58))),
             )
         assertThat(cases.keys).containsExactlyElementsIn(ImportRejection.entries)
         val previous = importPreviousModel()
@@ -423,6 +426,68 @@ class ModelImporterTest {
         val outcome = runImport(tfliteBytes(1_000))
 
         assertThat((outcome as ImportOutcome.Accepted).meta.outputRows).isEqualTo(TrackerConfig.IMPORT_MAX_OUTPUT_ROWS)
+    }
+
+    // ---- raw pose output (M_final F2) ----
+
+    @Test
+    fun rawChannelsFirstModel_isAccepted_withItsLayoutAndRowsStored() {
+        probeResult = ProbeResult.Tensors(listOf(tensor(1, 3, 640, 640)), listOf(tensor(1, 56, 8400)))
+
+        val outcome = runImport(tfliteBytes(1_000))
+
+        val meta = (outcome as ImportOutcome.Accepted).meta
+        assertThat(meta.outputLayout).isEqualTo(PoseOutputLayout.RAW_CHANNELS_FIRST)
+        assertThat(meta.outputRows).isEqualTo(8400)
+        assertThat(store.state().meta).isEqualTo(meta)
+    }
+
+    @Test
+    fun rawChannelsLastModel_isAccepted_withItsLayoutAndRowsStored() {
+        probeResult = ProbeResult.Tensors(listOf(tensor(1, 3, 640, 640)), listOf(tensor(1, 8400, 56)))
+
+        val outcome = runImport(tfliteBytes(1_000))
+
+        val meta = (outcome as ImportOutcome.Accepted).meta
+        assertThat(meta.outputLayout).isEqualTo(PoseOutputLayout.RAW_CHANNELS_LAST)
+        assertThat(store.state().meta).isEqualTo(meta)
+    }
+
+    @Test
+    fun endToEndModel_isStillStoredAsEndToEnd() {
+        val outcome = runImport(tfliteBytes(1_000))
+
+        assertThat((outcome as ImportOutcome.Accepted).meta.outputLayout).isEqualTo(PoseOutputLayout.END_TO_END)
+    }
+
+    @Test
+    fun detectOnlyModel_isRejected_andThePreviousModelStays() {
+        val previous = importPreviousModel()
+        probeResult = ProbeResult.Tensors(listOf(tensor(1, 3, 640, 640)), listOf(tensor(1, 6, 2100)))
+
+        val outcome = runImport(tfliteBytes(1_000))
+
+        assertRejected(outcome, RejectionKind.Layout(ImportRejection.OUTPUT_DETECT_ONLY))
+        assertPreviousSurvives(previous)
+    }
+
+    @Test
+    fun int8ModelInputOrOutput_isRejectedAsQuantized_andThePreviousModelStays() {
+        val previous = importPreviousModel()
+        val cases =
+            listOf(
+                listOf(tensor(1, 3, 640, 640, type = "int8")) to listOf(tensor(1, 56, 8400)),
+                listOf(tensor(1, 3, 640, 640)) to listOf(tensor(1, 56, 8400, type = "uint8")),
+            )
+
+        for ((inputs, outputs) in cases) {
+            probeResult = ProbeResult.Tensors(inputs, outputs)
+
+            val outcome = runImport(tfliteBytes(1_000))
+
+            assertRejected(outcome, RejectionKind.Layout(ImportRejection.QUANTIZED_IO))
+            assertPreviousSurvives(previous)
+        }
     }
 
     // ---- temp file name, single flight ----
@@ -574,7 +639,7 @@ class ModelImporterTest {
         assertRejected(refused, RejectionKind.Unreadable)
         assertThat(store.state().guard).isEqualTo(ImportGuardState.Tripped(ImportStage.LOAD))
 
-        probeResult = ProbeResult.Tensors(listOf(tensor(1, 3, 640, 640)), listOf(tensor(1, 56, 8400)))
+        probeResult = ProbeResult.Tensors(listOf(tensor(1, 3, 640, 640)), listOf(tensor(1, 84, 8400)))
         val refusedByRules = runImport(tfliteBytes(1_000))
 
         assertThat(refusedByRules).isInstanceOf(ImportOutcome.Rejected::class.java)

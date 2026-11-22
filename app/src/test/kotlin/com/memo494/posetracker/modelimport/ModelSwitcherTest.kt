@@ -838,4 +838,52 @@ class ModelSwitcherTest {
         switcher.select(ModelOrientation.PORTRAIT)
         assertThat(switcher.thermalSmallModel).isEqualTo("blocked")
     }
+
+    @Test
+    fun wideModelInPortrait_asAnOldVersionWrote_runsTheBuiltInPortraitModel_withWrongShape() {
+        // metaB is wide (832x384); the old migration pointed both slots at it.
+        choose(portrait = library(metaB), landscape = library(metaB))
+
+        val selection = switcher.select(ModelOrientation.PORTRAIT)!!
+
+        assertThat(loadsImported).isEmpty()
+        assertThat(builtInOrientations).containsExactly(ModelOrientation.PORTRAIT)
+        assertThat(selection.loaded.source).isEqualTo(ModelSource.BUILT_IN)
+        assertThat(selection.loaded.fallback).isEqualTo(ModelFallback.WRONG_SHAPE)
+        assertThat(selection.loaded.meta).isEqualTo(metaB)
+        assertThat(selection.loaded.importedModelNotUsed).isTrue()
+        assertThat(selection.loaded.detector!!.inputHeight).isEqualTo(960)
+        assertThat(logs).contains("model: portrait slot holds b.tflite 832x384 (wide), not used; built-in runs")
+        assertThat(switcher.status()!!.slotsRefused).containsExactly(ModelOrientation.PORTRAIT)
+    }
+
+    @Test
+    fun wideModelInBothSlots_loadsInLandscape_andRotationBackRunsTheBuiltInPortraitModelAgain() {
+        choose(portrait = library(metaB), landscape = library(metaB))
+        switcher.select(ModelOrientation.PORTRAIT)
+
+        val landscape = switcher.select(ModelOrientation.LANDSCAPE)!!
+
+        assertThat(landscape.loaded.source).isEqualTo(ModelSource.IMPORTED)
+        assertThat(landscape.loaded.meta).isEqualTo(metaB)
+        assertThat(loadsImported).containsExactly("b.tflite")
+
+        val portrait = switcher.select(ModelOrientation.PORTRAIT)!!
+
+        assertThat(portrait.loaded.source).isEqualTo(ModelSource.BUILT_IN)
+        assertThat(portrait.loaded.fallback).isEqualTo(ModelFallback.WRONG_SHAPE)
+        assertThat(loadsImported).containsExactly("b.tflite")
+        assertThat(builtInOrientations).containsExactly(ModelOrientation.PORTRAIT, ModelOrientation.PORTRAIT).inOrder()
+    }
+
+    @Test
+    fun wideModelInLandscapeOnly_loadsAtStartInLandscape() {
+        choose(landscape = library(metaB))
+
+        val selection = switcher.select(ModelOrientation.LANDSCAPE)!!
+
+        assertThat(selection.loaded.source).isEqualTo(ModelSource.IMPORTED)
+        assertThat(loadsImported).containsExactly("b.tflite")
+        assertThat(switcher.status()!!.slotsRefused).isEmpty()
+    }
 }

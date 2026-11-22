@@ -11,6 +11,8 @@ import com.memo494.posetracker.core.modelimport.ImportedModelMeta
 import com.memo494.posetracker.core.modelimport.ModelOrientation
 import com.memo494.posetracker.core.modelimport.SlotChoice
 import com.memo494.posetracker.core.modelimport.SniffRejection
+import com.memo494.posetracker.core.modelimport.orientationOfShape
+import com.memo494.posetracker.core.modelimport.shapeWord
 import com.memo494.posetracker.modelimport.BuiltInReason
 import com.memo494.posetracker.modelimport.FailureKind
 import com.memo494.posetracker.modelimport.ImportOutcome
@@ -132,6 +134,7 @@ internal object ControlModelMapper {
                         BuiltInReason.FILE_MISSING -> ModelNotice(ModelNoticeKind.FILE_MISSING)
                         BuiltInReason.GUARD_TRIPPED_PROBE -> ModelNotice(ModelNoticeKind.GUARD_TRIPPED_PROBE)
                         BuiltInReason.GUARD_TRIPPED_LOAD -> ModelNotice(ModelNoticeKind.GUARD_TRIPPED_LOAD)
+                        BuiltInReason.WRONG_SHAPE -> ModelNotice(ModelNoticeKind.WRONG_SHAPE, choice.refused?.let(::shapeText))
                         null -> unreadableNotice(status) ?: builtInFailedNotice(status)
                     }
                 ControlEvent.ModelStateLoaded(ActiveModel.BuiltIn, notice, stored.anyFileStored)
@@ -160,7 +163,13 @@ internal object ControlModelMapper {
             }
         val items =
             library.entries.map {
-                LibraryItem(it.meta.sha256, it.meta.displayName, inputText(it.meta), library.isBlocked(it.meta.sha256))
+                LibraryItem(
+                    it.meta.sha256,
+                    it.meta.displayName,
+                    inputText(it.meta),
+                    library.isBlocked(it.meta.sha256),
+                    orientationOfShape(it.meta),
+                )
             }
         val noticed =
             if (library.blockedUnreadable && slot.notice == null) {
@@ -179,6 +188,10 @@ internal object ControlModelMapper {
 
     /** The input size of the built-in model of [orientation] for the "Built-in (448x960)" line: `448x960` / `960x448`. */
     fun builtInInputText(orientation: ModelOrientation): String = BuiltInModels.inputText(orientation)
+
+    /** `name 832x384 (wide)`: the detail line of [ModelNoticeKind.WRONG_SHAPE]. */
+    private fun shapeText(meta: ImportedModelMeta): String =
+        "${meta.displayName} ${meta.inputWidth}x${meta.inputHeight} (${shapeWord(meta)})"
 
     private fun shaOf(choice: SlotChoice): String? = if (choice is SlotChoice.Library) choice.sha256 else null
 
@@ -254,6 +267,7 @@ internal object ControlModelMapper {
             ModelNoticeKind.GUARD_NOT_STORED -> R.string.model_notice_guard_not_stored
             ModelNoticeKind.LOAD_FAILED -> R.string.model_notice_load_failed
             ModelNoticeKind.STATE_UNREADABLE -> R.string.model_notice_state_unreadable
+            ModelNoticeKind.WRONG_SHAPE -> R.string.model_notice_wrong_shape
             ModelNoticeKind.BUILT_IN_FAILED -> R.string.model_notice_built_in_failed
             ModelNoticeKind.BUILT_IN_BLOCKED -> R.string.model_notice_built_in_blocked
             ModelNoticeKind.BLOCKED_UNREADABLE -> R.string.model_notice_blocked_unreadable

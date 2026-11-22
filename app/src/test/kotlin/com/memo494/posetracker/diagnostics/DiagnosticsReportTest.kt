@@ -2,6 +2,7 @@ package com.memo494.posetracker.diagnostics
 
 import com.google.common.truth.Truth.assertThat
 import com.memo494.posetracker.core.modelimport.ImportedModelMeta
+import com.memo494.posetracker.core.modelimport.ModelOrientation
 import com.memo494.posetracker.core.stats.LeadSummary
 import com.memo494.posetracker.core.stats.Percentiles
 import com.memo494.posetracker.core.stats.TimingSummary
@@ -759,5 +760,19 @@ class DiagnosticsReportTest {
         val lines = modelLines(builtInStatus(416, 416))
 
         assertThat(lines).containsAtLeast("modelPortrait=builtin", "modelLandscape=builtin", "modelSwitches=0", "modelSwitchMsMax=0")
+    }
+
+    @Test
+    fun summary_modelSlotsRefused_isNoneByDefault() {
+        assertThat(modelLines(builtInStatus(416, 416))).contains("modelSlotsRefused=none")
+    }
+
+    @Test
+    fun summary_modelSlotsRefused_namesEachRefusedSlotInOrder() {
+        val portrait = builtInStatus(448, 960).copy(slotsRefused = setOf(ModelOrientation.PORTRAIT))
+        val both = builtInStatus(448, 960).copy(slotsRefused = setOf(ModelOrientation.LANDSCAPE, ModelOrientation.PORTRAIT))
+
+        assertThat(modelLines(portrait)).contains("modelSlotsRefused=portrait")
+        assertThat(modelLines(both)).contains("modelSlotsRefused=portrait,landscape")
     }
 }

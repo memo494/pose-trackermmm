@@ -37,6 +37,7 @@ import com.memo494.posetracker.control.ImportResults
 import com.memo494.posetracker.control.ImportSummary
 import com.memo494.posetracker.core.TrackerConfig
 import com.memo494.posetracker.core.modelimport.ModelOrientation
+import com.memo494.posetracker.core.modelimport.SlotLog
 import com.memo494.posetracker.core.tuning.TuningOverrides
 import com.memo494.posetracker.diagnostics.AppLog
 import com.memo494.posetracker.diagnostics.CrashNotice
@@ -401,7 +402,10 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** Stores the choice of [orientation] (`null` sha256 = built-in) off the main thread, then reads the model state again. */
+    /**
+     * Stores the choice of [orientation] (`null` sha256 = built-in) off the main thread, logs one line about it
+     * ([SlotLog.afterSetSlot]: the choice, a refusal for the model's shape, or a failure), then reads the model state again.
+     */
     private fun setSlot(
         orientation: ModelOrientation?,
         sha256: String?,
@@ -410,8 +414,10 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             withContext(Dispatchers.IO) {
                 try {
-                    val stored = ModelLibraryStore(applicationContext).setSlot(orientation, sha256)
-                    if (!stored) AppLog.log("storing the model choice failed", null)
+                    val store = ModelLibraryStore(applicationContext)
+                    val meta = sha256?.let { store.state().library.find(it) }
+                    val stored = store.setSlot(orientation, sha256)
+                    AppLog.log(SlotLog.afterSetSlot(orientation, sha256, meta, stored), null)
                 } catch (t: Throwable) {
                     AppLog.log("storing the model choice failed", t)
                 }

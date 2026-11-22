@@ -80,13 +80,19 @@ internal sealed interface ActiveModel {
  * @property displayName the sanitised file name.
  * @property inputText the input size text (`ModelInputText.text`: `640` or `832x384`).
  * @property blocked `true` when a crash at its load switched it off; it cannot be chosen for a slot.
+ * @property onlyFor the one orientation its input shape fits (`fitsSlot`: a wide model is Landscape only, a tall one
+ *   Portrait only); `null` = a square model, which fits both.
  */
 internal data class LibraryItem(
     val sha256: String,
     val displayName: String,
     val inputText: String,
     val blocked: Boolean = false,
-)
+    val onlyFor: ModelOrientation? = null,
+) {
+    /** Whether the model may be chosen for the slot of [orientation]. */
+    fun fits(orientation: ModelOrientation): Boolean = onlyFor == null || onlyFor == orientation
+}
 
 /** Why a picked file was refused: one value per rule of the importer, so each has its own sentence. */
 internal enum class ModelRejectionReason {
@@ -189,6 +195,12 @@ internal enum class ModelNoticeKind {
 
     /** The last session could not load the imported model ([ModelNotice.message] says why). */
     LOAD_FAILED,
+
+    /**
+     * The slot holds a model whose input shape does not fit the orientation (a wide model in Portrait, a tall one in
+     * Landscape), so the built-in model runs for it ([ModelNotice.message] names the model).
+     */
+    WRONG_SHAPE,
 
     /** The bundled model of the orientation failed at the last session, so the square fallback model ran ([ModelNotice.message] says why). */
     BUILT_IN_FAILED,
@@ -615,13 +627,13 @@ internal object ControlReducer {
         return ControlStep(next, ControlEffect.DELETE_MODEL, modelSha = sha256)
     }
 
-    /** The choice shows at once; a model that is not listed (or is blocked) cannot be chosen. */
+    /** The choice shows at once; a model that is not listed, is blocked or does not fit [orientation] cannot be chosen. */
     private fun onSlotPicked(
         state: ControlState,
         orientation: ModelOrientation,
         sha256: String?,
     ): ControlStep {
-        val pickable = sha256 == null || state.library.any { it.sha256 == sha256 && !it.blocked }
+        val pickable = sha256 == null || state.library.any { it.sha256 == sha256 && !it.blocked && it.fits(orientation) }
         if (modelBusy(state) || !pickable) return ControlStep(state, null)
         val next =
             when (orientation) {

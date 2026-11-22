@@ -17,6 +17,12 @@ enum class BuiltInReason {
 
     /** The crash marker found at app start says LiteRT died while loading the imported model for a session. */
     GUARD_TRIPPED_LOAD,
+
+    /**
+     * The slot holds a model whose input shape does not fit the slot's orientation (`fitsSlot`: a wide model in
+     * Portrait, a tall one in Landscape). It is never loaded, the stored choice is left as it is.
+     */
+    WRONG_SHAPE,
 }
 
 /** Which model a capture session starts with (M0c D4). */
@@ -30,14 +36,20 @@ sealed interface ModelChoice {
         val meta: ImportedModelMeta,
     ) : ModelChoice
 
-    /** The model bundled with the app; [reason] is `null` when nothing was imported. */
+    /**
+     * The model bundled with the app; [reason] is `null` when nothing was imported. [refused] is the slot's model that
+     * was not used because of its shape ([BuiltInReason.WRONG_SHAPE]); `null` otherwise.
+     */
     data class BuiltIn(
         val reason: BuiltInReason?,
+        val refused: ImportedModelMeta? = null,
     ) : ModelChoice
 
     companion object {
         /**
-         * Pure apart from [storedFileMatches]. A [ImportGuardState.Tripped] guard wins over everything else (even
+         * Pure apart from [storedFileMatches]. A model of the wrong shape ([StoredModelState.wrongShape]) wins over
+         * everything: it is `BuiltIn(WRONG_SHAPE, refused = meta)` before any guard or file check (nothing is hashed).
+         * Otherwise a [ImportGuardState.Tripped] guard wins over everything else (even
          * when nothing is stored: a probe of a new file may have crashed LiteRT, and the owner is told), with one
          * exception: a trip at [ImportStage.PROBE] suspects only the new file that was being probed (it was never
          * stored), so a stored model with a meta, an existing file and a positive [storedFileMatches] stays
@@ -54,6 +66,8 @@ sealed interface ModelChoice {
             state: StoredModelState,
             storedFileMatches: (ImportedModelMeta) -> Boolean = { false },
         ): ModelChoice {
+            val stored = state.meta
+            if (state.wrongShape && stored != null) return BuiltIn(BuiltInReason.WRONG_SHAPE, refused = stored)
             val guard = state.guard
             if (guard is ImportGuardState.Tripped) {
                 val meta = state.meta

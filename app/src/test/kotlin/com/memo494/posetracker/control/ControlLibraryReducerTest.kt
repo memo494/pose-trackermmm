@@ -106,6 +106,40 @@ class ControlLibraryReducerTest {
         assertThat(blocked.state).isEqualTo(withBlocked)
     }
 
+    @Test
+    fun slotPicked_aWideModelForPortrait_isRefusedWithoutAnEffect() {
+        val wide = itemB.copy(onlyFor = ModelOrientation.LANDSCAPE)
+        val state = loaded.copy(library = listOf(itemA, wide), landscapeSha = null)
+
+        val step = reduce(state, ControlEvent.SlotPicked(ModelOrientation.PORTRAIT, shaB))
+
+        assertThat(step.effect).isNull()
+        assertThat(step.state).isEqualTo(state)
+    }
+
+    @Test
+    fun slotPicked_aWideModelForLandscape_isStored() {
+        val wide = itemB.copy(onlyFor = ModelOrientation.LANDSCAPE)
+        val state = loaded.copy(library = listOf(itemA, wide), landscapeSha = null)
+
+        val step = reduce(state, ControlEvent.SlotPicked(ModelOrientation.LANDSCAPE, shaB))
+
+        assertThat(step.effect).isEqualTo(ControlEffect.SET_SLOT)
+        assertThat(step.state.landscapeSha).isEqualTo(shaB)
+        assertThat(step.slotOrientation).isEqualTo(ModelOrientation.LANDSCAPE)
+    }
+
+    @Test
+    fun slotPicked_aTallModelForLandscape_isRefused() {
+        val tall = itemA.copy(inputText = "448x960", onlyFor = ModelOrientation.PORTRAIT)
+        val state = loaded.copy(library = listOf(tall, itemB))
+
+        val step = reduce(state, ControlEvent.SlotPicked(ModelOrientation.LANDSCAPE, shaA))
+
+        assertThat(step.effect).isNull()
+        assertThat(step.state).isEqualTo(state)
+    }
+
     // ---- import into a full library ----
 
     @Test

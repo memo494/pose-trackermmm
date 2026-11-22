@@ -13,6 +13,7 @@ import com.memo494.posetracker.core.modelimport.ModelOrientation
 import com.memo494.posetracker.core.modelimport.OrientationSlots
 import com.memo494.posetracker.core.modelimport.SlotChoice
 import com.memo494.posetracker.core.modelimport.autoSlotFor
+import com.memo494.posetracker.core.modelimport.fitsSlot
 import com.memo494.posetracker.diagnostics.AppLog
 import java.io.File
 import java.io.FileOutputStream
@@ -55,13 +56,24 @@ data class LibraryState(
     /**
      * What the slot of [orientation] stores, in the form [ModelChoice.resolve] reads: the model of the slot with the
      * crash marker as it applies to that model (a model on the blocked list, or a marker that names no model, is a
-     * tripped load; a marker that names another model is not). A built-in slot has no model.
+     * tripped load; a marker that names another model is not). A built-in slot has no model. A model that does not fit
+     * the orientation ([fitsSlot]) is marked [StoredModelState.wrongShape], so it is never loaded there.
      */
     fun viewFor(orientation: ModelOrientation): StoredModelState {
+        val entry = slotEntry(orientation) ?: return StoredModelState(null, false, ImportGuardState.Idle, anyFileStored)
+        val wrongShape = !fitsSlot(entry.meta, orientation)
+        return StoredModelState(entry.meta, entry.fileExists, guardFor(entry.meta.sha256), anyFileStored, wrongShape)
+    }
+
+    /** The orientations whose slot holds a library model that does not fit it ([fitsSlot]), in enum order. */
+    fun slotsRefused(): Set<ModelOrientation> =
+        ModelOrientation.entries.filterTo(LinkedHashSet()) { orientation ->
+            slotEntry(orientation)?.let { !fitsSlot(it.meta, orientation) } ?: false
+        }
+
+    private fun slotEntry(orientation: ModelOrientation): LibraryEntry? {
         val choice = slots.choiceFor(orientation)
-        val entry = if (choice is SlotChoice.Library) entries.firstOrNull { it.meta.sha256 == choice.sha256 } else null
-        if (entry == null) return StoredModelState(null, false, ImportGuardState.Idle, anyFileStored)
-        return StoredModelState(entry.meta, entry.fileExists, guardFor(entry.meta.sha256), anyFileStored)
+        return if (choice is SlotChoice.Library) entries.firstOrNull { it.meta.sha256 == choice.sha256 } else null
     }
 
     /** Whether the model with [sha256] is switched off by a crash at its load. */
@@ -94,7 +106,8 @@ data class LibraryState(
  * - `import.tflite` the temporary file of the import in progress.
  *
  * Migration: the single model of the version before the library lived in the root directory itself (`meta.txt` and
- * `model-*.tflite`). The first read moves it into its own directory, points both slots at it and removes the old
+ * `model-*.tflite`). The first read moves it into its own directory, points the slots it fits at it (`fitsSlot`: square both,
+ * wide Landscape only, tall Portrait only; the other slot is built-in) and removes the old
  * record; every step can be repeated, so a process death in between is finished by the next read. A load crash
  * recorded without a model by that version blocks the migrated model.
  *
@@ -235,7 +248,8 @@ class ModelLibraryStore internal constructor(
 
     /**
      * Sets the model of [orientation] to the library model [sha256], or to the built-in model when [sha256] is `null`.
-     * `false` (nothing changed) when the model is not in the library or the record could not be written.
+     * `false` (nothing changed) when the model is not in the library, does not fit [orientation] ([fitsSlot]: a wide
+     * model is for Landscape only, a tall one for Portrait only) or the record could not be written.
      */
     fun setSlot(
         orientation: ModelOrientation,
@@ -244,7 +258,10 @@ class ModelLibraryStore internal constructor(
         threadCheck()
         synchronized(LOCK) {
             val current = readState()
-            if (sha256 != null && !current.library.contains(sha256)) return false
+            if (sha256 != null) {
+                val meta = current.library.find(sha256) ?: return false
+                if (!fitsSlot(meta, orientation)) return false
+            }
             val choice = if (sha256 == null) SlotChoice.BuiltIn else SlotChoice.Library(sha256)
             return writeAtomically(slotsFile(), current.slots.with(orientation, choice).encode())
         }
@@ -359,7 +376,7 @@ class ModelLibraryStore internal constructor(
                 }
             if ((source != null || !hasMeta) && !copyIntoEntry(entryStore, meta, source)) return
         }
-        if (!slotsFile().exists() && !writeAtomically(slotsFile(), pointingBoth(meta.sha256))) return
+        if (!slotsFile().exists() && !writeAtomically(slotsFile(), slotsFitting(meta))) return
         if (!root.clear()) log("the old single-model record could not be removed yet", null)
     }
 
@@ -408,7 +425,12 @@ class ModelLibraryStore internal constructor(
         return !blocked.unreadable && writeBlocked(blocked.shas + sha256)
     }
 
-    private fun pointingBoth(sha256: String): String = OrientationSlots(SlotChoice.Library(sha256), SlotChoice.Library(sha256)).encode()
+    /** The slots of the migrated single model [meta]: it goes only into the slots it fits ([fitsSlot]), the other is built-in. */
+    private fun slotsFitting(meta: ImportedModelMeta): String {
+        fun choice(orientation: ModelOrientation): SlotChoice =
+            if (fitsSlot(meta, orientation)) SlotChoice.Library(meta.sha256) else SlotChoice.BuiltIn
+        return OrientationSlots(choice(ModelOrientation.PORTRAIT), choice(ModelOrientation.LANDSCAPE)).encode()
+    }
 
     /**
      * Takes [sha256] off the blocked list (and lifts the marker if it names it); `false` when that could not be stored.

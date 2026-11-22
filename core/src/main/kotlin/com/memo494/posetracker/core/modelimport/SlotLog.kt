@@ -33,8 +33,7 @@ object SlotLog {
     fun notUsed(
         orientation: ModelOrientation,
         meta: ImportedModelMeta,
-    ): String =
-        "model: ${orientation.logName} slot holds ${meta.displayName} ${size(meta)} (${shapeWord(meta)}), not used; $BUILT_IN runs"
+    ): String = "model: ${orientation.logName} slot holds ${meta.displayName} ${size(meta)} (${shapeWord(meta)}), not used; $BUILT_IN runs"
 
     private fun describe(meta: ImportedModelMeta): String =
         "${meta.displayName} ${meta.sha256.take(TrackerConfig.STAGED_MODEL_SHA_PREFIX_LENGTH)} ${size(meta)}"

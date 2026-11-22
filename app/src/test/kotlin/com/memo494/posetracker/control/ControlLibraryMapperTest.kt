@@ -37,7 +37,7 @@ class ControlLibraryMapperTest {
         assertThat(event.library)
             .containsExactly(
                 LibraryItem(metaA.sha256, "a.tflite", "640"),
-                LibraryItem(metaB.sha256, "b.tflite", "832x384"),
+                LibraryItem(metaB.sha256, "b.tflite", "832x384", onlyFor = ModelOrientation.LANDSCAPE),
             ).inOrder()
     }
 
@@ -161,5 +161,35 @@ class ControlLibraryMapperTest {
 
         assertThat(event.active).isEqualTo(ActiveModel.BuiltIn)
         assertThat(event.orientation).isEqualTo(ModelOrientation.LANDSCAPE)
+    }
+
+    @Test
+    fun eachItemSaysWhichOrientationItFits() {
+        val tall = ImportedModelMeta("t.tflite", "c".repeat(64), 1_000L, 448, 960, 300)
+        val entries = listOf(LibraryEntry(metaA, true), LibraryEntry(metaB, true), LibraryEntry(tall, true))
+
+        val items = load(library(entries = entries)).library.associateBy { it.displayName }
+
+        assertThat(items.getValue("a.tflite").fits(ModelOrientation.PORTRAIT)).isTrue()
+        assertThat(items.getValue("a.tflite").fits(ModelOrientation.LANDSCAPE)).isTrue()
+        assertThat(items.getValue("b.tflite").fits(ModelOrientation.PORTRAIT)).isFalse()
+        assertThat(items.getValue("b.tflite").fits(ModelOrientation.LANDSCAPE)).isTrue()
+        assertThat(items.getValue("t.tflite").fits(ModelOrientation.PORTRAIT)).isTrue()
+        assertThat(items.getValue("t.tflite").fits(ModelOrientation.LANDSCAPE)).isFalse()
+    }
+
+    @Test
+    fun aWideModelInThePortraitSlot_showsTheBuiltInModelAndTheWrongShapeNotice() {
+        val slots = OrientationSlots(SlotChoice.Library(metaB.sha256), SlotChoice.Library(metaB.sha256))
+        val state = library(slots)
+
+        val portrait = load(state, ModelOrientation.PORTRAIT)
+        val landscape = load(state, ModelOrientation.LANDSCAPE)
+
+        assertThat(portrait.active).isEqualTo(ActiveModel.BuiltIn)
+        assertThat(portrait.notice).isEqualTo(ModelNotice(ModelNoticeKind.WRONG_SHAPE, "b.tflite 832x384 (wide)"))
+        assertThat(portrait.portraitSha).isEqualTo(metaB.sha256)
+        assertThat(landscape.active).isEqualTo(ActiveModel.Imported("b.tflite", "832x384"))
+        assertThat(landscape.notice).isNull()
     }
 }

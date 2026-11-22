@@ -115,7 +115,8 @@ class SessionModelLoader(
      *   first Start of the kept model lifts the probe trip on purpose (the trip suspected a file that was never
      *   stored, and the model that ran has just loaded without killing the process).
      * - Otherwise the built-in model; the fallback mirrors the reason of `ModelChoice.BuiltIn`, and is `null` when
-     *   nothing is imported.
+     *   nothing is imported. A model refused for its shape ([ModelFallback.WRONG_SHAPE]) is never loaded and is named in
+     *   [LoadedModel.meta].
      * - The bundled model of the orientation is loaded with the marker `Pending(LOAD, <its sha256>)` like an imported
      *   one. When it is blocked (it killed the process before), its marker cannot be stored, or it throws (any
      *   `Throwable`), the square fallback model loads instead (logged): the status names its file, `message` says why
@@ -132,7 +133,7 @@ class SessionModelLoader(
             }
         return when (choice) {
             is ModelChoice.Imported -> loadImportedOrBuiltIn(choice.meta)
-            is ModelChoice.BuiltIn -> builtIn(null, choice.reason?.toFallback(), null)
+            is ModelChoice.BuiltIn -> builtIn(choice.refused, choice.reason?.toFallback(), null)
         }
     }
 
@@ -271,6 +272,7 @@ class SessionModelLoader(
             BuiltInReason.FILE_MISSING -> ModelFallback.FILE_MISSING
             BuiltInReason.GUARD_TRIPPED_PROBE -> ModelFallback.GUARD_TRIPPED_PROBE
             BuiltInReason.GUARD_TRIPPED_LOAD -> ModelFallback.GUARD_TRIPPED_LOAD
+            BuiltInReason.WRONG_SHAPE -> ModelFallback.WRONG_SHAPE
         }
 
     private companion object {

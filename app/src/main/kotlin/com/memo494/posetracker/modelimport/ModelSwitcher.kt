@@ -5,6 +5,8 @@ import com.memo494.posetracker.core.modelimport.ImportGuardState
 import com.memo494.posetracker.core.modelimport.ImportedModelMeta
 import com.memo494.posetracker.core.modelimport.ModelOrientation
 import com.memo494.posetracker.core.modelimport.SlotChoice
+import com.memo494.posetracker.core.modelimport.SlotLog
+import com.memo494.posetracker.core.modelimport.fitsSlot
 import com.memo494.posetracker.detector.BundledDetector
 import com.memo494.posetracker.detector.ModelProbe
 import com.memo494.posetracker.detector.PoseDetector
@@ -51,7 +53,8 @@ internal class ModelSelection(
  * that was loaded for the previous request, it closes the old detector and loads the new one through a
  * [SessionModelLoader], which keeps the crash marker around the load (it names the model, so a crash blocks only that
  * model), falls back to the built-in model when the model is blocked, missing or fails to load, and never stops the
- * session. A load that fails is tried again the next time its orientation comes back.
+ * session. A slot model that does not fit the orientation ([fitsSlot]) is never loaded: the built-in model of the
+ * orientation runs with [ModelFallback.WRONG_SHAPE] (logged by [SlotLog.notUsed]); `slots.txt` is not rewritten. A load that fails is tried again the next time its orientation comes back.
  *
  * Thermal step-down (F7): while [setThermalHot] says `true`, the small square built-in model (320) runs instead of the
  * slot's model, whatever the orientation (a square model fits both). It loads through the same [SessionModelLoader]
@@ -189,6 +192,7 @@ internal class ModelSwitcher(
         return loaded.status().copy(
             portrait = slotText(ModelOrientation.PORTRAIT),
             landscape = slotText(ModelOrientation.LANDSCAPE),
+            slotsRefused = lastLibrary?.slotsRefused().orEmpty(),
             switches = switches,
             switchMsMax = switchMsMax,
         )
@@ -207,7 +211,7 @@ internal class ModelSwitcher(
         }
         val wanted = library?.let { shaOf(it.slots.choiceFor(orientation)) } ?: builtInKey(orientation)
         val running = current
-        if (running != null && running.detector != null && wanted == loadedFor && builtInMatches(orientation)) return null
+        if (running != null && running.detector != null && wanted == loadedFor && runningFits(orientation)) return null
         val startNs = nowNs()
         if (running != null) closeQuietly(running.detector)
         oldClosed = running != null
@@ -224,6 +228,8 @@ internal class ModelSwitcher(
                 log = ::safeLog,
                 verifyStored = verifyStored,
             ).load()
+        val refused = if (loaded.fallback == ModelFallback.WRONG_SHAPE) loaded.meta else null
+        if (refused != null) safeLog(SlotLog.notUsed(orientation, refused), null)
         return commit(loaded, wanted, orientation, startNs, running, thermal = false)
     }
 
@@ -332,10 +338,17 @@ internal class ModelSwitcher(
     }
 
     /**
-     * Whether the running model still fits [orientation]: an imported model fits both, the built-in model only the one
-     * it was loaded for (also when it runs because the slot's model failed, so a rotation loads the other orientation's).
+     * Whether the running model still fits [orientation]: the built-in model only the one it was loaded for (also when
+     * it runs because the slot's model failed or was refused for its shape, so a rotation loads the other
+     * orientation's), an imported model every orientation it fits ([fitsSlot]: a square one both). So a wide model
+     * kept in both slots by an old version runs in Landscape and a rotation back to Portrait loads the built-in model.
      */
-    private fun builtInMatches(orientation: ModelOrientation): Boolean = loadedBuiltInFor.let { it == null || it == orientation }
+    private fun runningFits(orientation: ModelOrientation): Boolean {
+        val builtInFor = loadedBuiltInFor
+        if (builtInFor != null) return builtInFor == orientation
+        val imported = current?.takeIf { it.source == ModelSource.IMPORTED }?.meta
+        return imported == null || fitsSlot(imported, orientation)
+    }
 
     /** The built-in model differs per orientation, so a change of orientation reloads it; a sha256 never looks like this. */
     private fun builtInKey(orientation: ModelOrientation): String = "$BUILT_IN_KEY_PREFIX${orientation.logName}"

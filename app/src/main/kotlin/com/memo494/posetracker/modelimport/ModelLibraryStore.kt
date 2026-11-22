@@ -199,6 +199,15 @@ class ModelLibraryStore internal constructor(
         before: LibraryState,
         meta: ImportedModelMeta,
     ): ModelOrientation? {
+        // Fail closed: a blocked model (or any model, while the blocked list cannot be read) is never put into a slot.
+        if (before.blockedUnreadable) {
+            log("the new model was not assigned to a slot: the blocked list is unreadable", null)
+            return null
+        }
+        if (meta.sha256 in before.blocked) {
+            log("the new model was not assigned to a slot: the model is blocked", null)
+            return null
+        }
         if (before.slotsUnreadable.isNotEmpty()) {
             log("the new model was not assigned to a slot: the stored choice is unreadable", null)
             return null

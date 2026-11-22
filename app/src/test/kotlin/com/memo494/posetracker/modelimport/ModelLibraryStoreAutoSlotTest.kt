@@ -190,6 +190,40 @@ class ModelLibraryStoreAutoSlotTest {
     }
 
     @Test
+    fun aBlockedNewModel_isStoredButNeverAssignedAndStaysBlocked() {
+        File(directory, "blocked.txt").also { directory.mkdirs() }.writeText(tall.sha256)
+        val library = newLibrary()
+
+        val report = add(library, tall, tallBytes)
+
+        assertThat(report.result).isEqualTo(StoreResult.STORED)
+        assertThat(report.assignedSlot).isNull()
+        assertThat(library.slot(ModelOrientation.PORTRAIT)).isEqualTo(SlotChoice.BuiltIn)
+        assertThat(library.slot(ModelOrientation.LANDSCAPE)).isEqualTo(SlotChoice.BuiltIn)
+        assertThat(library.state().entries.map { it.meta.sha256 }).containsExactly(tall.sha256)
+        assertThat(library.state().blocked).containsExactly(tall.sha256)
+        assertThat(logs.filter { it.contains("blocked") }).hasSize(1)
+    }
+
+    @Test
+    fun anUnreadableBlockedList_failsClosedStoresTheModelAndAssignsNothing() {
+        directory.mkdirs()
+        File(directory, "blocked.txt").writeText(wide.sha256)
+        failReadOf = "blocked.txt"
+        val library = newLibrary()
+
+        val report = add(library, tall, tallBytes)
+
+        assertThat(report.result).isEqualTo(StoreResult.STORED)
+        assertThat(report.assignedSlot).isNull()
+        assertThat(library.state().blockedUnreadable).isTrue()
+        failReadOf = null
+        assertThat(library.slot(ModelOrientation.PORTRAIT)).isEqualTo(SlotChoice.BuiltIn)
+        assertThat(library.state().entries).hasSize(1)
+        assertThat(logs.filter { it.contains("blocked list is unreadable") }).hasSize(1)
+    }
+
+    @Test
     fun plainStore_assignsToo_sinceItIsTheSameStep() {
         val library = newLibrary()
 

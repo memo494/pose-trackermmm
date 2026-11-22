@@ -247,6 +247,21 @@ class TorsoRegionTest {
         )
 
     @Test
+    fun theTorsoSource_isKeypointsBoxOrUpperBody_andNoneAfterAFailure() {
+        assertThat(torso(person())).isTrue()
+        assertThat(out.source).isEqualTo(TorsoRect.SOURCE_KEYPOINTS)
+
+        assertThat(torso(person(hipScore = 0.1f))).isTrue()
+        assertThat(out.source).isEqualTo(TorsoRect.SOURCE_BOX)
+
+        assertThat(torso(upperBodyOnly(), upperConfig)).isTrue()
+        assertThat(out.source).isEqualTo(TorsoRect.SOURCE_UPPER_BODY)
+
+        assertThat(torso(upperBodyOnly(leftShoulderScore = 0.1f), upperConfig)).isFalse()
+        assertThat(out.source).isEqualTo(TorsoRect.SOURCE_NONE)
+    }
+
+    @Test
     fun withoutHips_theTorsoIsFromTheShouldersDownByTheUpperRatioTimesTheirWidth() {
         assertThat(torso(upperBodyOnly(), upperConfig)).isTrue()
 

@@ -587,12 +587,22 @@ uses no accessibility service.
   matched again first, judging stops and the candidates are forgotten (the lock stays). What was judged before the
   removal carries over into pending. Limit: a person who comes back far from where they were lost is only found after
   the removal, as before.
+  *F5 (relock reliability; accept rule and the hard rule unchanged):* only frames with a readable torso count toward
+  `relockJudgeFrames`; every matched frame counts toward the cap `relockJudgeMaxFrames` (30), so a person who enters clipped
+  is not used up before their shirt shows (then one reject "no torso"). The signature keeps one histogram per bucket:
+  whole torso (keypoint rectangle and box part together) and upper body; a sample is compared only with its own bucket, never
+  across buckets, and a bucket with fewer than `relockMinSourceSamples` (3) frames is "not comparable" (fail closed, never a
+  match, never "far"; reject "no comparable torso", and as a bystander, or as a bystander of the other bucket than the candidate, it makes the candidate ambiguous). The first samples
+  are a running mean (`alpha = max(1/n, relockSignatureAlpha)`), and a frame is not blended when another detected person's
+  box covers more than `relockOccluderMaxOverlap` (0.25) of the held torso. Log: reject lines carry `d=` (newest readable
+  frame) and `min=` (smallest of the window), accept lines `min=`; both carry `src=` (keypoints | box | upper) and `sig=`
+  (frames in the signature).
   *Ends:* reset, Stop, a handle tap (also one that replaces a pending lock with a new one) or the memory running
   out. The signature is a colour histogram in memory on the capture thread only (no face, no image), dropped at each
   of these.
   *Limits (by design, numbers are guesses until phone data exists):* two people in similar clothes may never be
-  told apart, and then the ring does not come back; a returning person is judged only on their first 10 matched
-  frames (a long entry half out of the picture can use them up); the colour of the light and of the video's
+  told apart, and then the ring does not come back; a returning person is judged on their first 10 readable
+  frames (F5; an entry half out of the picture is given up after 30 matched frames); the colour of the light and of the video's
   compression change the histogram; the distance and margin numbers are tuned from the `lock:` log lines (§6.7).
 - **Handle while pending:** the handle behaves as locked (a tap ends the wait, the next tap arms), though the ring
   is not drawn.
@@ -629,9 +639,10 @@ uses no accessibility service.
   `trackRemovals`. The last six are the tracker's cumulative counters since Start (§6.3; `reset()` on a geometry
   change keeps them); all are 0 before the first frame. They are read on the capture thread at the HUD tick.
 - **Lock in the log and in `summary.txt` (M4c).** One log line per lock event (never per frame): `lock: set id=N`,
-  `lock: pending id=N frames=K` (K = frames blended into the signature), `lock: relocked id=N -> M d=0.18 next=0.41` (`next=none` when nobody else was shown),
-  `lock: candidate id=M d=0.41 rejected (too far)` / `rejected (ambiguous, next=0.38)` (`next=unsampled` when
-  another track could not be sampled) / `rejected (no torso)`, `lock: expired`, and `lock: cleared (handle | reset |
+  `lock: pending id=N frames=K` (K = frames blended into the signature), `lock: relocked id=N -> M d=0.18 next=0.41 min=0.18 src=box sig=12` (`next=none` when nobody else was shown),
+  `lock: candidate id=M d=0.41 min=0.38 rejected (too far) src=box sig=12` / `rejected (ambiguous, next=0.38)`
+  (`next=unsampled` when another track could not be sampled or compared) / `rejected (no torso)` (clipped) /
+  `rejected (no comparable torso)` (read, but the signature has too little of that kind), `lock: expired`, and `lock: cleared (handle | reset |
   stop | replaced | no signature)`. The numbers `d` and `next` are what to read when tuning `relockMaxDistance` and
   `relockMinMargin`. Four counters follow `trackRemovals` in `summary.txt`: `locks` (locks set), `lockRelocks`,
   `lockRelockRejects` (candidates whose window ended without acceptance), `lockExpired`; since Start, read on the

@@ -916,6 +916,9 @@ class TrackerConfigTest {
         assertThat(config.relockFullBodyMinAspect).isEqualTo(1.8f)
         assertThat(config.relockJudgeFrames).isEqualTo(10)
         assertThat(config.relockUpperTorsoRatio).isEqualTo(0.8f)
+        assertThat(config.relockJudgeMaxFrames).isEqualTo(30)
+        assertThat(config.relockMinSourceSamples).isEqualTo(3)
+        assertThat(config.relockOccluderMaxOverlap).isEqualTo(0.25f)
     }
 
     @Test
@@ -946,6 +949,9 @@ class TrackerConfigTest {
             relockFullBodyMinAspect = TrackerConfig.MIN_RELOCK_FULL_BODY_ASPECT,
             relockJudgeFrames = TrackerConfig.MIN_RELOCK_JUDGE_FRAMES,
             relockUpperTorsoRatio = TrackerConfig.MIN_RELOCK_UPPER_TORSO_RATIO,
+            relockJudgeMaxFrames = TrackerConfig.MIN_RELOCK_JUDGE_FRAMES,
+            relockMinSourceSamples = TrackerConfig.MIN_RELOCK_MIN_SOURCE_SAMPLES,
+            relockOccluderMaxOverlap = TrackerConfig.MIN_RELOCK_OCCLUDER_MAX_OVERLAP,
         )
         TrackerConfig(
             relockHueBins = TrackerConfig.MAX_RELOCK_HUE_BINS,
@@ -967,6 +973,9 @@ class TrackerConfigTest {
             relockFullBodyMinAspect = TrackerConfig.MAX_RELOCK_FULL_BODY_ASPECT,
             relockJudgeFrames = TrackerConfig.MAX_RELOCK_JUDGE_FRAMES,
             relockUpperTorsoRatio = TrackerConfig.MAX_RELOCK_UPPER_TORSO_RATIO,
+            relockJudgeMaxFrames = TrackerConfig.MAX_RELOCK_JUDGE_MAX_FRAMES,
+            relockMinSourceSamples = TrackerConfig.MAX_RELOCK_MIN_SOURCE_SAMPLES,
+            relockOccluderMaxOverlap = 1f,
         )
     }
 
@@ -1013,6 +1022,14 @@ class TrackerConfigTest {
                 { TrackerConfig(relockFullBodyMinAspect = TrackerConfig.MAX_RELOCK_FULL_BODY_ASPECT + 0.1f) },
                 { TrackerConfig(relockJudgeFrames = 0) },
                 { TrackerConfig(relockJudgeFrames = TrackerConfig.MAX_RELOCK_JUDGE_FRAMES + 1) },
+                { TrackerConfig(relockJudgeMaxFrames = 0) },
+                { TrackerConfig(relockJudgeFrames = 20, relockJudgeMaxFrames = 19) },
+                { TrackerConfig(relockMinSourceSamples = 0) },
+                { TrackerConfig(relockMinSourceSamples = TrackerConfig.MAX_RELOCK_MIN_SOURCE_SAMPLES + 1) },
+                { TrackerConfig(relockJudgeMaxFrames = TrackerConfig.MAX_RELOCK_JUDGE_MAX_FRAMES + 1) },
+                { TrackerConfig(relockOccluderMaxOverlap = TrackerConfig.MIN_RELOCK_OCCLUDER_MAX_OVERLAP / 2f) },
+                { TrackerConfig(relockOccluderMaxOverlap = 1.01f) },
+                { TrackerConfig(relockOccluderMaxOverlap = Float.NaN) },
                 { TrackerConfig(relockUpperTorsoRatio = TrackerConfig.MIN_RELOCK_UPPER_TORSO_RATIO / 2f) },
                 { TrackerConfig(relockUpperTorsoRatio = TrackerConfig.MAX_RELOCK_UPPER_TORSO_RATIO + 0.1f) },
             )

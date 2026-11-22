@@ -160,9 +160,19 @@ class AppearanceSignatureTest {
         assertThat(signature.distanceTo(signatureOf(solid(RED)))).isWithin(DISTANCE_TOLERANCE).of(0f)
     }
 
+    /** A signature of [rgba] that has seen enough samples for the exponential average (weight alpha) to apply. */
+    private fun matured(
+        rgba: ByteArray,
+        area: TorsoRect = rect,
+    ): AppearanceSignature {
+        val signature = AppearanceSignature(config)
+        repeat(MATURE_BLENDS) { assertThat(signature.blend(rgba, SIDE, SIDE, area)).isTrue() }
+        return signature
+    }
+
     @Test
     fun blend_mixesTheNewSampleInWithTheAlphaWeight() {
-        val signature = signatureOf(solid(RED))
+        val signature = matured(solid(RED))
         assertThat(signature.blend(solid(BLUE), SIDE, SIDE, rect)).isTrue()
 
         // Bins are now 0.9 red and 0.1 blue: the distance to pure red is sqrt(1 - sqrt(0.9)), to pure blue sqrt(1 - sqrt(0.1)).
@@ -174,7 +184,7 @@ class AppearanceSignatureTest {
 
     @Test
     fun blend_oneBadFrame_doesNotReplaceTheSignature() {
-        val signature = signatureOf(halves(ORANGE, TEAL))
+        val signature = matured(halves(ORANGE, TEAL))
 
         signature.blend(solid(RED), SIDE, SIDE, rect)
 
@@ -191,6 +201,93 @@ class AppearanceSignatureTest {
     }
 
     @Test
+    fun blend_earlyOn_isARunningMeanSoTheFirstFramesAreNotOutweighedByTheFirstOne() {
+        val signature = AppearanceSignature(config)
+        signature.blend(solid(RED), SIDE, SIDE, rect)
+        signature.blend(solid(BLUE), SIDE, SIDE, rect)
+
+        // Two samples are weighted 1/2 each (the exponential weight 0.1 would give 0.9 / 0.1).
+        val toRed = signature.distanceTo(signatureOf(solid(RED)))
+        assertThat(toRed).isWithin(MIX_TOLERANCE).of(sqrt(1f - sqrt(0.5f)))
+    }
+
+    @Test
+    fun blend_afterManySamples_theWeightOfANewOneIsAlpha() {
+        val signature = matured(solid(RED))
+        signature.blend(solid(BLUE), SIDE, SIDE, rect)
+
+        val toBlue = signature.distanceTo(signatureOf(solid(BLUE)))
+        assertThat(toBlue).isWithin(MIX_TOLERANCE).of(sqrt(1f - sqrt(config.relockSignatureAlpha)))
+    }
+
+    private fun rectOf(source: Int): TorsoRect = TorsoRect().apply { set(0, 0, SIDE, SIDE, source = source) }
+
+    @Test
+    fun signaturesOfDifferentBuckets_areKeptApart_andOnlyTheSameBucketIsCompared() {
+        val keypoints = rectOf(TorsoRect.SOURCE_KEYPOINTS)
+        val upper = rectOf(TorsoRect.SOURCE_UPPER_BODY)
+        val held = matured(solid(RED), keypoints)
+
+        val sample = signatureOf(solid(RED), area = upper)
+
+        assertThat(held.hasDataFor(TorsoRect.BUCKET_WHOLE)).isTrue()
+        assertThat(held.hasDataFor(TorsoRect.BUCKET_UPPER)).isFalse()
+        assertThat(sample.distanceTo(held, sample.lastBucket).isNaN()).isTrue()
+        assertThat(signatureOf(solid(RED), area = keypoints).distanceTo(held, TorsoRect.BUCKET_WHOLE))
+            .isWithin(DISTANCE_TOLERANCE)
+            .of(0f)
+    }
+
+    @Test
+    fun keypointAndBoxTorsos_shareOneWholeTorsoBucket() {
+        val held = matured(solid(RED), rectOf(TorsoRect.SOURCE_KEYPOINTS))
+
+        val boxSample = signatureOf(solid(RED), area = rectOf(TorsoRect.SOURCE_BOX))
+
+        assertThat(boxSample.lastBucket).isEqualTo(TorsoRect.BUCKET_WHOLE)
+        assertThat(held.hasDataFor(boxSample.lastBucket)).isTrue()
+        assertThat(boxSample.distanceTo(held, boxSample.lastBucket)).isWithin(DISTANCE_TOLERANCE).of(0f)
+    }
+
+    @Test
+    fun aBucketWithFewerThanTheLeastSamples_isNotComparable() {
+        val signature = AppearanceSignature(config)
+        repeat(config.relockMinSourceSamples - 1) { signature.blend(solid(BLUE), SIDE, SIDE, rect) }
+
+        assertThat(signature.hasData).isTrue()
+        assertThat(signature.hasDataFor(TorsoRect.BUCKET_WHOLE)).isFalse()
+
+        signature.blend(solid(BLUE), SIDE, SIDE, rect)
+
+        assertThat(signature.hasDataFor(TorsoRect.BUCKET_WHOLE)).isTrue()
+    }
+
+    @Test
+    fun blend_aNewBucket_doesNotChangeTheHistogramOfTheOtherOne() {
+        val keypoints = rectOf(TorsoRect.SOURCE_KEYPOINTS)
+        val upper = rectOf(TorsoRect.SOURCE_UPPER_BODY)
+        val held = matured(solid(RED), keypoints)
+
+        repeat(MATURE_BLENDS) { held.blend(solid(BLUE), SIDE, SIDE, upper) }
+
+        assertThat(signatureOf(solid(RED), area = keypoints).distanceTo(held, TorsoRect.BUCKET_WHOLE))
+            .isWithin(DISTANCE_TOLERANCE)
+            .of(0f)
+        assertThat(signatureOf(solid(BLUE), area = upper).distanceTo(held, TorsoRect.BUCKET_UPPER))
+            .isWithin(DISTANCE_TOLERANCE)
+            .of(0f)
+    }
+
+    @Test
+    fun aRectangleWithAnUnknownSource_changesNothing() {
+        val bad = TorsoRect().apply { set(0, 0, SIDE, SIDE, source = TorsoRect.SOURCE_COUNT) }
+        val signature = AppearanceSignature(config)
+
+        assertThat(signature.blend(solid(RED), SIDE, SIDE, bad)).isFalse()
+        assertThat(signature.hasData).isFalse()
+    }
+
+    @Test
     fun blend_withoutData_setsTheSignature() {
         val signature = AppearanceSignature(config)
 
@@ -201,14 +298,14 @@ class AppearanceSignatureTest {
     }
 
     @Test
-    fun aSignatureWithoutData_isAtTheLargestDistanceFromEverything() {
+    fun aSignatureWithoutData_isNotComparableToAnything_theDistanceIsNotANumber() {
         val empty = AppearanceSignature(config)
         val red = signatureOf(solid(RED))
 
         assertThat(empty.hasData).isFalse()
-        assertThat(empty.distanceTo(red)).isEqualTo(1f)
-        assertThat(red.distanceTo(empty)).isEqualTo(1f)
-        assertThat(empty.distanceTo(empty)).isEqualTo(1f)
+        assertThat(empty.distanceTo(red).isNaN()).isTrue()
+        assertThat(red.distanceTo(empty).isNaN()).isTrue()
+        assertThat(empty.distanceTo(empty).isNaN()).isTrue()
     }
 
     @Test
@@ -218,7 +315,7 @@ class AppearanceSignatureTest {
         signature.clear()
 
         assertThat(signature.hasData).isFalse()
-        assertThat(signature.distanceTo(signatureOf(solid(RED)))).isEqualTo(1f)
+        assertThat(signature.distanceTo(signatureOf(solid(RED))).isNaN()).isTrue()
     }
 
     @Test
@@ -254,11 +351,11 @@ class AppearanceSignatureTest {
     }
 
     @Test
-    fun signaturesWithDifferentBinCounts_areAtTheLargestDistance() {
+    fun signaturesWithDifferentBinCounts_areNotComparable() {
         val a = signatureOf(solid(RED))
         val b = signatureOf(solid(RED), useConfig = TrackerConfig(relockHueBins = 8))
 
-        assertThat(a.distanceTo(b)).isEqualTo(1f)
+        assertThat(a.distanceTo(b).isNaN()).isTrue()
     }
 
     /** The smallest sample limit; the least sample count has to come down with it. */
@@ -327,6 +424,7 @@ class AppearanceSignatureTest {
         const val MIX_TOLERANCE = 0.02f
         const val FAR_DISTANCE = 0.9f
         const val MAX_RELOCK_DISTANCE = 0.3f
+        const val MATURE_BLENDS = 20
         const val SMALL_PIXELS = 225
         const val MANY_BLENDS = 60
     }

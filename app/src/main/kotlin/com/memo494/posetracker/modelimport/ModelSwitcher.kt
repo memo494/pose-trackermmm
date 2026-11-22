@@ -54,7 +54,8 @@ internal class ModelSelection(
  * [SessionModelLoader], which keeps the crash marker around the load (it names the model, so a crash blocks only that
  * model), falls back to the built-in model when the model is blocked, missing or fails to load, and never stops the
  * session. A slot model that does not fit the orientation ([fitsSlot]) is never loaded: the built-in model of the
- * orientation runs with [ModelFallback.WRONG_SHAPE] (logged by [SlotLog.notUsed]); `slots.txt` is not rewritten. A load that fails is tried again the next time its orientation comes back.
+ * orientation runs with [ModelFallback.WRONG_SHAPE] (logged by [SlotLog.notUsed]); `slots.txt` is not rewritten.
+ * A load that fails is tried again the next time its orientation comes back.
  *
  * Thermal step-down (F7): while [setThermalHot] says `true`, the small square built-in model (320) runs instead of the
  * slot's model, whatever the orientation (a square model fits both). It loads through the same [SessionModelLoader]

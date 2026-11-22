@@ -40,6 +40,7 @@ class ModelSwitcherTest {
 
     private val metaA = ImportedModelMeta("a.tflite", "a".repeat(64), 1_000L, 640, 640, 300)
     private val metaB = ImportedModelMeta("b.tflite", "b".repeat(64), 1_000L, 832, 384, 300)
+    private val metaT = ImportedModelMeta("t.tflite", "f".repeat(64), 1_000L, 384, 832, 300)
 
     private var slots = OrientationSlots()
     private var blocked = emptySet<String>()
@@ -71,7 +72,7 @@ class ModelSwitcherTest {
 
     private fun library() =
         LibraryState(
-            entries = listOf(LibraryEntry(metaA, true), LibraryEntry(metaB, true)),
+            entries = listOf(LibraryEntry(metaA, true), LibraryEntry(metaB, true), LibraryEntry(metaT, true)),
             slots = slots,
             slotsUnreadable = unreadable,
             blocked = blocked,
@@ -884,6 +885,57 @@ class ModelSwitcherTest {
 
         assertThat(selection.loaded.source).isEqualTo(ModelSource.IMPORTED)
         assertThat(loadsImported).containsExactly("b.tflite")
+        assertThat(switcher.status()!!.slotsRefused).isEmpty()
+    }
+
+    @Test
+    fun incident_wideInPortrait_tallInLandscape_eachOrientationRunsItsBuiltInModel_withWrongShape() {
+        // The owner's incident: the slots were filled the wrong way round.
+        choose(portrait = library(metaB), landscape = library(metaT))
+
+        val portrait = switcher.select(ModelOrientation.PORTRAIT)!!
+
+        assertThat(portrait.loaded.source).isEqualTo(ModelSource.BUILT_IN)
+        assertThat(portrait.loaded.fallback).isEqualTo(ModelFallback.WRONG_SHAPE)
+        assertThat(portrait.loaded.meta).isEqualTo(metaB)
+        assertThat(portrait.loaded.detector!!.inputHeight).isEqualTo(960)
+
+        val landscape = switcher.select(ModelOrientation.LANDSCAPE)!!
+
+        assertThat(landscape.loaded.source).isEqualTo(ModelSource.BUILT_IN)
+        assertThat(landscape.loaded.fallback).isEqualTo(ModelFallback.WRONG_SHAPE)
+        assertThat(landscape.loaded.meta).isEqualTo(metaT)
+        assertThat(landscape.loaded.detector!!.inputWidth).isEqualTo(960)
+        assertThat(loadsImported).isEmpty()
+        assertThat(builtInOrientations).containsExactly(ModelOrientation.PORTRAIT, ModelOrientation.LANDSCAPE).inOrder()
+        assertThat(logs).contains("model: landscape slot holds t.tflite 384x832 (tall), not used; built-in runs")
+        assertThat(switcher.status()!!.slotsRefused).containsExactly(ModelOrientation.PORTRAIT, ModelOrientation.LANDSCAPE).inOrder()
+    }
+
+    @Test
+    fun wrongShape_selectedTwiceForTheSameOrientation_loadsTheBuiltInModelOnce() {
+        choose(portrait = library(metaB))
+        switcher.select(ModelOrientation.PORTRAIT)
+
+        assertThat(switcher.select(ModelOrientation.PORTRAIT)).isNull()
+
+        assertThat(builtInLoads).isEqualTo(1)
+        assertThat(detectors.single().closeCount).isEqualTo(0)
+        assertThat(switcher.switches).isEqualTo(0)
+    }
+
+    @Test
+    fun wrongShape_thenTheSlotIsFixed_theNextSelectLoadsTheFittingModel_withoutAFallback() {
+        choose(portrait = library(metaB))
+        switcher.select(ModelOrientation.PORTRAIT)
+
+        choose(portrait = library(metaT))
+        val fixed = switcher.select(ModelOrientation.PORTRAIT)!!
+
+        assertThat(fixed.loaded.source).isEqualTo(ModelSource.IMPORTED)
+        assertThat(fixed.loaded.meta).isEqualTo(metaT)
+        assertThat(fixed.loaded.fallback).isNull()
+        assertThat(loadsImported).containsExactly("t.tflite")
         assertThat(switcher.status()!!.slotsRefused).isEmpty()
     }
 }

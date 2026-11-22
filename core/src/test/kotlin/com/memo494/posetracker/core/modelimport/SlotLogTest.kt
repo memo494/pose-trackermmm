@@ -32,8 +32,16 @@ class SlotLogTest {
     fun notStored_forAnotherReason_saysTheChoiceFailed() {
         assertThat(SlotLog.afterSetSlot(ModelOrientation.PORTRAIT, tall.sha256, tall, stored = false))
             .isEqualTo("storing the model choice failed")
-        assertThat(SlotLog.afterSetSlot(ModelOrientation.PORTRAIT, tall.sha256, null, stored = false))
+        assertThat(SlotLog.afterSetSlot(ModelOrientation.PORTRAIT, null, null, stored = false))
             .isEqualTo("storing the model choice failed")
+    }
+
+    @Test
+    fun aShaTheLibraryDoesNotHold_isAnUnknownModel_withItsShortSha() {
+        assertThat(SlotLog.afterSetSlot(ModelOrientation.PORTRAIT, tall.sha256, null, stored = false))
+            .isEqualTo("slot: portrait unknown model fedcba9876543210")
+        assertThat(SlotLog.afterSetSlot(ModelOrientation.LANDSCAPE, wide.sha256, null, stored = true))
+            .isEqualTo("slot: landscape unknown model 0123456789abcdef")
     }
 
     @Test

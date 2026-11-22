@@ -44,7 +44,9 @@
     <string name="model_importing">Importing: copying and checking the model. This can take a few seconds.</string>
     <string name="model_hint_trust">Only import model files you trust.</string>
     <string name="model_details">Details: %1$s</string>
-    <string name="model_result_accepted">Imported %1$s. Choose it for Portrait or Landscape below.</string>
+    <string name="model_result_added_portrait">Added. Now used for Portrait.</string>
+    <string name="model_result_added_landscape">Added. Now used for Landscape.</string>
+    <string name="model_result_added_library">Added to the library. Pick it under Portrait or Landscape.</string>
     <string name="model_result_failed">The file could not be imported. Details: %1$s</string>
     <string name="model_result_library_full">The model library is full. Delete a model, then import again.</string>
     <string name="model_result_busy">Another import is still running. Wait until it has finished.</string>

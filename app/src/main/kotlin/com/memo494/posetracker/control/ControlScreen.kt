@@ -266,7 +266,13 @@ private fun activeModelLine(state: ControlState): String =
 private fun ImportResultText(result: ImportSummary) {
     when (result) {
         is ImportSummary.Accepted -> {
-            Text(stringResource(R.string.model_result_accepted, result.displayName), style = MaterialTheme.typography.bodyMedium)
+            val sentence =
+                when (result.slot) {
+                    ModelOrientation.PORTRAIT -> R.string.model_result_added_portrait
+                    ModelOrientation.LANDSCAPE -> R.string.model_result_added_landscape
+                    null -> R.string.model_result_added_library
+                }
+            Text(stringResource(sentence), style = MaterialTheme.typography.bodyMedium)
         }
 
         is ImportSummary.Rejected -> {

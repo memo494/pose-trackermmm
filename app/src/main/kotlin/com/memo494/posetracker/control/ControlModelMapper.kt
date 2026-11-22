@@ -30,7 +30,7 @@ internal object ControlModelMapper {
     /** The importer's [outcome] as pure data for the reducer. */
     fun summary(outcome: ImportOutcome): ImportSummary =
         when (outcome) {
-            is ImportOutcome.Accepted -> ImportSummary.Accepted(outcome.meta.displayName, inputText(outcome.meta))
+            is ImportOutcome.Accepted -> ImportSummary.Accepted(outcome.meta.displayName, inputText(outcome.meta), outcome.assignedSlot)
             is ImportOutcome.Rejected -> ImportSummary.Rejected(reason(outcome.kind), outcome.details)
             is ImportOutcome.Failed -> ImportSummary.Failed(failure(outcome.kind), outcome.message)
         }

@@ -32,7 +32,7 @@ internal data class ControlState(
     val removeAllArmed: Boolean = false,
     /** `true` from the moment a picked file is handed to the importer until its result arrives; Start is disabled. */
     val importing: Boolean = false,
-    /** What the last import said; `null` before any import, after a new one starts and after "Use built-in model". */
+    /** What the last import said; `null` before any import, after a new one starts, after "Use built-in model" and after a slot change or a delete. */
     val importResult: ImportSummary? = null,
     /** Why the built-in model is used although an imported one may be expected, or `null`. */
     val modelNotice: ModelNotice? = null,
@@ -130,10 +130,14 @@ internal enum class ImportFailure {
 
 /** What an import came to, as small pure data (the importer's own outcome types stay out of the state). */
 internal sealed interface ImportSummary {
-    /** The model [displayName] with input size [inputText] (see [ActiveModel.Imported]) is now the imported model. */
+    /**
+     * The model [displayName] with input size [inputText] (see [ActiveModel.Imported]) is now in the library, and
+     * [slot] is the orientation whose slot it was put into, or `null` when the owner has to pick it by hand.
+     */
     data class Accepted(
         val displayName: String,
         val inputText: String,
+        val slot: ModelOrientation? = null,
     ) : ImportSummary
 
     /** The file was refused for [reason]; [details] names the size, the runtime's message or the shapes found. */
@@ -487,12 +491,13 @@ internal object ControlReducer {
     ): ControlStep {
         if (!state.importing) return ControlStep(state, null)
         val finished = state.copy(importing = false, importResult = summary)
-        // A refusal or a failure keeps the previous model and notice; the reload then shows what is really stored.
+        // The reducer does not know the screen's orientation, so it never names the new model active: only the slot
+        // of this orientation decides, and the reload (LOAD_MODEL_STATE) reads it. A refusal or a failure keeps the
+        // previous model and notice; the reload then shows what is really stored.
         val next =
             when (summary) {
                 is ImportSummary.Accepted -> {
                     finished.copy(
-                        activeModel = ActiveModel.Imported(summary.displayName, summary.inputText),
                         modelNotice = null,
                         modelFileStored = true,
                     )
@@ -537,6 +542,7 @@ internal object ControlReducer {
         if (modelBusy(state) || state.library.none { it.sha256 == sha256 }) return ControlStep(state, null)
         val next =
             state.copy(
+                importResult = null,
                 library = state.library.filterNot { it.sha256 == sha256 },
                 portraitSha = state.portraitSha.takeUnless { it == sha256 },
                 landscapeSha = state.landscapeSha.takeUnless { it == sha256 },
@@ -555,8 +561,8 @@ internal object ControlReducer {
         if (modelBusy(state) || !pickable) return ControlStep(state, null)
         val next =
             when (orientation) {
-                ModelOrientation.PORTRAIT -> state.copy(portraitSha = sha256)
-                ModelOrientation.LANDSCAPE -> state.copy(landscapeSha = sha256)
+                ModelOrientation.PORTRAIT -> state.copy(portraitSha = sha256, importResult = null)
+                ModelOrientation.LANDSCAPE -> state.copy(landscapeSha = sha256, importResult = null)
             }
         return ControlStep(next, ControlEffect.SET_SLOT, modelSha = sha256, slotOrientation = orientation)
     }

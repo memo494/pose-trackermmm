@@ -458,14 +458,14 @@ class ControlReducerTest {
     }
 
     @Test
-    fun importFinished_accepted_switchesTheActiveModelAndClearsTheOldNotice() {
+    fun importFinished_accepted_leavesTheActiveModelToTheReloadAndClearsTheOldNotice() {
         val state = ready.copy(importing = true, modelNotice = tripped)
         val summary = ImportSummary.Accepted("yolo26n-pose_640.tflite", "640")
 
         val step = reduce(state, ControlEvent.ImportFinished(summary))
 
         assertThat(step.state.importing).isFalse()
-        assertThat(step.state.activeModel).isEqualTo(imported)
+        assertThat(step.state.activeModel).isEqualTo(ActiveModel.BuiltIn)
         assertThat(step.state.importResult).isEqualTo(summary)
         assertThat(step.state.modelNotice).isNull()
         assertThat(step.effect).isEqualTo(ControlEffect.LOAD_MODEL_STATE)
@@ -705,7 +705,12 @@ class ControlReducerTest {
 
         state = reduce(state, ControlEvent.ImportPicked("content://docs/b")).state
         assertThat(state.importResult).isNull()
-        state = reduce(state, ControlEvent.ImportFinished(ImportSummary.Accepted("b.tflite", "640"))).state
+        val finished = reduce(state, ControlEvent.ImportFinished(ImportSummary.Accepted("b.tflite", "640")))
+        state = finished.state
+        // The reload, not the import result, says which model the slot of this orientation holds.
+        assertThat(state.activeModel).isEqualTo(ActiveModel.BuiltIn)
+        assertThat(finished.effect).isEqualTo(ControlEffect.LOAD_MODEL_STATE)
+        state = reduce(state, ControlEvent.ModelStateLoaded(ActiveModel.Imported("b.tflite", "640"), null)).state
         assertThat(state.activeModel).isEqualTo(ActiveModel.Imported("b.tflite", "640"))
 
         val reset = reduce(state, ControlEvent.UseBuiltInClicked)

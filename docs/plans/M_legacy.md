@@ -1,6 +1,6 @@
 # M-legacy — older models run, and the dot comes from the person box when there are no keypoints
 
-**Lead: Opus 5.5 · 2026-11-22 · branch `claude/great-bell-m374lx` (session branch) · status: WAITING FOR OWNER "approved"**
+**Lead: Opus 5.5 · 2026-11-22 · branch `claude/great-bell-m374lx` (session branch) · status: APPROVED by the owner for T1, T2, T3 (2026-11-22)**
 
 ## Analysis — why older models do not run today
 The import guard (`core/modelimport/ImportedModelRules.check`) refuses two families that most older YOLO `.tflite`
@@ -33,6 +33,18 @@ Then: `android-reviewer` on the whole diff → push → PR (owner merges).
    placed from the person box.** Say if you meant something else (e.g. the dot should follow the box instead of the
    head keypoints even for pose models).
 3. YOLOv5 (`[1,N,85]`, objectness column) is left refused in this plan; add it as T5?
+
+## Owner answers (2026-11-22)
+- Yes, the import refusal is the problem. Do T1, T2, T3.
+- The owner's model: input `[1,3,320,320]` (NCHW, already accepted), output `[1,6,2100]` = raw channels-first
+  detect head with **2 classes** (4 box + 2 class scores; 2100 = 40²+20²+10² anchors at 320). Today refused as
+  `output_detect_only`. So T2 must accept **any class count C from 1 to 80** (not only 1 or 80); the person class is
+  `TrackerConfig.detectPersonClass` (default 0). The meaning of the classes is unknown → class 0 = person is an
+  assumption the owner checks on the phone (T3 adds the class index to the HUD/summary so a wrong guess is visible).
+- Shape rule (fail closed): `[1,4+C,N]` with `4+C < N` = raw channels-first; `[1,N,6]` with `N <= 300` = end-to-end
+  (x1,y1,x2,y2,score,class); `[1,N,4+C]` with `N > 300` = raw channels-last. `5+3k` channel counts (8, 11, …) stay
+  `output_keypoint_count` (unchanged); YOLOv5 `85` (objectness) stays refused.
+- T4 is folded in: each task ships its own control-screen / HUD texts; ARCHITECTURE §8 note in T3.
 
 ## Consults
 None yet (budget 3).

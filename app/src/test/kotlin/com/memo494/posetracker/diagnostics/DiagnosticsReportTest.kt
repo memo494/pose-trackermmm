@@ -2,6 +2,7 @@ package com.memo494.posetracker.diagnostics
 
 import com.google.common.truth.Truth.assertThat
 import com.memo494.posetracker.core.modelimport.ImportedModelMeta
+import com.memo494.posetracker.core.stats.LeadSummary
 import com.memo494.posetracker.core.stats.Percentiles
 import com.memo494.posetracker.core.stats.TimingSummary
 import com.memo494.posetracker.modelimport.ModelFallback
@@ -458,6 +459,30 @@ class DiagnosticsReportTest {
                 "thermalStatus=MODERATE",
                 "thermalHeadroom=0.87",
             ).inOrder()
+    }
+
+    @Test
+    fun summary_leadLines_comeBeforeTheTimingLinesWithTheirNumbers() {
+        val withLead =
+            timedStats.copy(
+                timing =
+                    timedStats.timing.copy(
+                        lead = LeadSummary(leadMsP50 = 93.4f, appliedFraction = 0.2543f, speedHpsP50 = 0.07f, speedHpsP99 = 2.346f),
+                    ),
+            )
+
+        val lines = summaryLines(withLead)
+
+        assertThat(lines.slice(lines.indexOf("leadMsP50=93.4")..lines.indexOf("timingSamples=480")))
+            .containsExactly("leadMsP50=93.4", "leadAppliedFraction=0.25", "speedHpsP50=0.07", "speedHpsP99=2.35", "timingSamples=480")
+            .inOrder()
+    }
+
+    @Test
+    fun summary_leadLines_withoutASample_sayNotAvailable() {
+        val lines = summaryLines(stats)
+
+        assertThat(lines).containsAtLeast("leadMsP50=n/a", "leadAppliedFraction=n/a", "speedHpsP50=n/a", "speedHpsP99=n/a")
     }
 
     @Test

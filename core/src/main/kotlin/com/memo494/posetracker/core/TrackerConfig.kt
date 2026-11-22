@@ -125,6 +125,16 @@ package com.memo494.posetracker.core
  *   matching detection decays (`exp(-dt / tau)`), in [[MIN_TRACK_DURATION_MS], [MAX_TRACK_DURATION_MS]].
  * @property trackAccelSigmaRatio standard deviation of the head's acceleration (process noise) as a multiple of the
  *   track height per second squared (h/s²), in [[MIN_TRACK_ACCEL_SIGMA_RATIO], [MAX_TRACK_ACCEL_SIGMA_RATIO]].
+ * @property trackAccelRefDtMs frame interval in milliseconds at and below which [trackAccelSigmaRatio] applies as it is;
+ *   for a lower frame rate the head's acceleration sigma (so the noise variance by the square of it) is scaled by
+ *   `(ref / interval)^2`, no lower than [trackAccelMinScale], with `interval` a moving average of the frame interval
+ *   (see [trackAccelIntervalTauMs]); a track that coasts (LOST, or after a miss) is not scaled, so the filter's smoothing of a still head stays near its 20 fps level (S3 at 12 fps, F4); in
+ *   [[MIN_TRACK_ACCEL_REF_DT_MS], [MAX_TRACK_ACCEL_REF_DT_MS]]. A gap step (longer than [trackMaxDtMs]) is not scaled.
+ * @property trackAccelIntervalTauMs time constant in milliseconds of the moving average of the frame interval that
+ *   the scaling reads (so one slow frame does not change the scale), in [[MIN_TRACK_ACCEL_INTERVAL_TAU_MS],
+ *   [MAX_TRACK_ACCEL_INTERVAL_TAU_MS]]; gap steps are not averaged.
+ * @property trackAccelMinScale lowest factor of that scaling, unitless, in [[MIN_TRACK_ACCEL_MIN_SCALE],
+ *   [MAX_TRACK_ACCEL_MIN_SCALE]]; 1 = no scaling.
  * @property trackHeightAccelSigmaRatio the same for the track height's rate of change, in h/s², in
  *   [[MIN_TRACK_ACCEL_SIGMA_RATIO], [MAX_TRACK_ACCEL_SIGMA_RATIO]].
  * @property trackHeightNoiseRatio standard deviation of the measured box height as a fraction of the predicted
@@ -153,6 +163,29 @@ package com.memo494.posetracker.core
  *   speed / track height; 0 = a fixed cutoff.
  * @property smoothDerivativeCutoffHz cutoff frequency, in hertz, of the filter that measures the head point's speed
  *   for the smoother, in [[MIN_SMOOTH_DERIVATIVE_CUTOFF_HZ], [MAX_SMOOTH_DERIVATIVE_CUTOFF_HZ]].
+ * @property displayLeadEnabled `true` (default): a shown head that moves fast is drawn a little ahead of its smoothed
+ *   point (a forward lead of `speed * L`, display only; the tracker, the association and the lock never see it) to
+ *   make up the age of the result; `false` draws the smoothed point as it is.
+ * @property displayLeadMaxMs longest lead time `L` in milliseconds, in [[MIN_DISPLAY_LEAD_MAX_MS],
+ *   [MAX_DISPLAY_LEAD_MAX_MS]]; `L = min(result age + displayLeadExtraMs + half the frame interval, this)`; 0 = no lead.
+ * @property displayLeadExtraMs milliseconds added to the result age for what happens after publishing (the draw and
+ *   the screen), in [[MIN_DISPLAY_LEAD_EXTRA_MS], [MAX_DISPLAY_LEAD_EXTRA_MS]].
+ * @property displayLeadSpeedLowHps filtered speed in track heights per second at and below which there is no lead,
+ *   in [[MIN_DISPLAY_LEAD_SPEED_HPS], [MAX_DISPLAY_LEAD_SPEED_HPS]]; keeps a still or trembling head exactly where
+ *   the smoother puts it.
+ * @property displayLeadSpeedHighHps filtered speed in heights per second at and above which the lead is full, in
+ *   [[MIN_DISPLAY_LEAD_SPEED_HPS], [MAX_DISPLAY_LEAD_SPEED_HPS]], not below [displayLeadSpeedLowHps]; the lead grows
+ *   linearly in between.
+ * @property displayLeadStopFullRatio share of the tracker's speed that the measured head must still have along the
+ *   tracker's direction for the lead to be full, in [[MIN_DISPLAY_LEAD_STOP_FULL_RATIO],
+ *   [MAX_DISPLAY_LEAD_STOP_FULL_RATIO]]; below it the lead shrinks in proportion (a stop gives 0). A value under 1 keeps
+ *   the noise of the measured step from making the dot of a steady walker tremble.
+ * @property displayLeadFadeMs time constant in milliseconds with which the lead that is on screen decays when it is
+ *   switched off (a miss, an estimated head, a lost track), in [[MIN_DISPLAY_LEAD_FADE_MS], [MAX_DISPLAY_LEAD_FADE_MS]],
+ *   about one frame interval at low rates, so the dot does not jump back by the whole lead; 0 = cut at once. A fade
+ *   only lowers the lead: it never grows and never exceeds `displayLeadMaxRatio`.
+ * @property displayLeadMaxRatio longest lead as a multiple of the track height (unitless), in
+ *   [[MIN_DISPLAY_LEAD_MAX_RATIO], [MAX_DISPLAY_LEAD_MAX_RATIO]].
  * @property fadeMinAlpha lowest opacity, unitless, of the marks of a `LOST` track: the opacity falls from 1 to
  *   this as the lost time grows from 0 to [trackMaxLostMs] (`max(fadeMinAlpha, 1 - lostMs / trackMaxLostMs)`), in
  *   [[MIN_FADE_MIN_ALPHA], [MAX_FADE_MIN_ALPHA]]; 1 = no fading.
@@ -286,6 +319,9 @@ data class TrackerConfig(
     val trackGapNoiseInflate: Float = DEFAULT_TRACK_GAP_NOISE_INFLATE,
     val trackMissVelocityTauMs: Float = DEFAULT_TRACK_MISS_VELOCITY_TAU_MS,
     val trackAccelSigmaRatio: Float = DEFAULT_TRACK_ACCEL_SIGMA_RATIO,
+    val trackAccelRefDtMs: Float = DEFAULT_TRACK_ACCEL_REF_DT_MS,
+    val trackAccelMinScale: Float = DEFAULT_TRACK_ACCEL_MIN_SCALE,
+    val trackAccelIntervalTauMs: Float = DEFAULT_TRACK_ACCEL_INTERVAL_TAU_MS,
     val trackHeightAccelSigmaRatio: Float = DEFAULT_TRACK_HEIGHT_ACCEL_SIGMA_RATIO,
     val trackHeightNoiseRatio: Float = DEFAULT_TRACK_HEIGHT_NOISE_RATIO,
     val trackInitVelocitySigmaRatio: Float = DEFAULT_TRACK_INIT_VELOCITY_SIGMA_RATIO,
@@ -297,6 +333,14 @@ data class TrackerConfig(
     val smoothMinCutoffHz: Float = DEFAULT_SMOOTH_MIN_CUTOFF_HZ,
     val smoothBeta: Float = DEFAULT_SMOOTH_BETA,
     val smoothDerivativeCutoffHz: Float = DEFAULT_SMOOTH_DERIVATIVE_CUTOFF_HZ,
+    val displayLeadEnabled: Boolean = DEFAULT_DISPLAY_LEAD_ENABLED,
+    val displayLeadMaxMs: Float = DEFAULT_DISPLAY_LEAD_MAX_MS,
+    val displayLeadExtraMs: Float = DEFAULT_DISPLAY_LEAD_EXTRA_MS,
+    val displayLeadSpeedLowHps: Float = DEFAULT_DISPLAY_LEAD_SPEED_LOW_HPS,
+    val displayLeadSpeedHighHps: Float = DEFAULT_DISPLAY_LEAD_SPEED_HIGH_HPS,
+    val displayLeadStopFullRatio: Float = DEFAULT_DISPLAY_LEAD_STOP_FULL_RATIO,
+    val displayLeadFadeMs: Float = DEFAULT_DISPLAY_LEAD_FADE_MS,
+    val displayLeadMaxRatio: Float = DEFAULT_DISPLAY_LEAD_MAX_RATIO,
     val fadeMinAlpha: Float = DEFAULT_FADE_MIN_ALPHA,
     val fadeStepAlpha: Float = DEFAULT_FADE_STEP_ALPHA,
     val lockHandleSizeDp: Float = DEFAULT_LOCK_HANDLE_SIZE_DP,
@@ -519,6 +563,16 @@ data class TrackerConfig(
         require(trackAccelSigmaRatio in MIN_TRACK_ACCEL_SIGMA_RATIO..MAX_TRACK_ACCEL_SIGMA_RATIO) {
             "trackAccelSigmaRatio $trackAccelSigmaRatio outside [$MIN_TRACK_ACCEL_SIGMA_RATIO, $MAX_TRACK_ACCEL_SIGMA_RATIO]"
         }
+        require(trackAccelRefDtMs in MIN_TRACK_ACCEL_REF_DT_MS..MAX_TRACK_ACCEL_REF_DT_MS) {
+            "trackAccelRefDtMs $trackAccelRefDtMs outside [$MIN_TRACK_ACCEL_REF_DT_MS, $MAX_TRACK_ACCEL_REF_DT_MS]"
+        }
+        require(trackAccelMinScale in MIN_TRACK_ACCEL_MIN_SCALE..MAX_TRACK_ACCEL_MIN_SCALE) {
+            "trackAccelMinScale $trackAccelMinScale outside [$MIN_TRACK_ACCEL_MIN_SCALE, $MAX_TRACK_ACCEL_MIN_SCALE]"
+        }
+        require(trackAccelIntervalTauMs in MIN_TRACK_ACCEL_INTERVAL_TAU_MS..MAX_TRACK_ACCEL_INTERVAL_TAU_MS) {
+            "trackAccelIntervalTauMs $trackAccelIntervalTauMs outside " +
+                "[$MIN_TRACK_ACCEL_INTERVAL_TAU_MS, $MAX_TRACK_ACCEL_INTERVAL_TAU_MS]"
+        }
         require(trackHeightAccelSigmaRatio in MIN_TRACK_ACCEL_SIGMA_RATIO..MAX_TRACK_ACCEL_SIGMA_RATIO) {
             "trackHeightAccelSigmaRatio $trackHeightAccelSigmaRatio outside " +
                 "[$MIN_TRACK_ACCEL_SIGMA_RATIO, $MAX_TRACK_ACCEL_SIGMA_RATIO]"
@@ -552,6 +606,28 @@ data class TrackerConfig(
         require(smoothDerivativeCutoffHz in MIN_SMOOTH_DERIVATIVE_CUTOFF_HZ..MAX_SMOOTH_DERIVATIVE_CUTOFF_HZ) {
             "smoothDerivativeCutoffHz $smoothDerivativeCutoffHz outside " +
                 "[$MIN_SMOOTH_DERIVATIVE_CUTOFF_HZ, $MAX_SMOOTH_DERIVATIVE_CUTOFF_HZ]"
+        }
+        require(displayLeadMaxMs in MIN_DISPLAY_LEAD_MAX_MS..MAX_DISPLAY_LEAD_MAX_MS) {
+            "displayLeadMaxMs $displayLeadMaxMs outside [$MIN_DISPLAY_LEAD_MAX_MS, $MAX_DISPLAY_LEAD_MAX_MS]"
+        }
+        require(displayLeadExtraMs in MIN_DISPLAY_LEAD_EXTRA_MS..MAX_DISPLAY_LEAD_EXTRA_MS) {
+            "displayLeadExtraMs $displayLeadExtraMs outside [$MIN_DISPLAY_LEAD_EXTRA_MS, $MAX_DISPLAY_LEAD_EXTRA_MS]"
+        }
+        require(displayLeadSpeedLowHps in MIN_DISPLAY_LEAD_SPEED_HPS..MAX_DISPLAY_LEAD_SPEED_HPS) {
+            "displayLeadSpeedLowHps $displayLeadSpeedLowHps outside [$MIN_DISPLAY_LEAD_SPEED_HPS, $MAX_DISPLAY_LEAD_SPEED_HPS]"
+        }
+        require(displayLeadSpeedHighHps in displayLeadSpeedLowHps..MAX_DISPLAY_LEAD_SPEED_HPS) {
+            "displayLeadSpeedHighHps $displayLeadSpeedHighHps outside [$displayLeadSpeedLowHps (the low speed), $MAX_DISPLAY_LEAD_SPEED_HPS]"
+        }
+        require(displayLeadStopFullRatio in MIN_DISPLAY_LEAD_STOP_FULL_RATIO..MAX_DISPLAY_LEAD_STOP_FULL_RATIO) {
+            "displayLeadStopFullRatio $displayLeadStopFullRatio outside " +
+                "[$MIN_DISPLAY_LEAD_STOP_FULL_RATIO, $MAX_DISPLAY_LEAD_STOP_FULL_RATIO]"
+        }
+        require(displayLeadFadeMs in MIN_DISPLAY_LEAD_FADE_MS..MAX_DISPLAY_LEAD_FADE_MS) {
+            "displayLeadFadeMs $displayLeadFadeMs outside [$MIN_DISPLAY_LEAD_FADE_MS, $MAX_DISPLAY_LEAD_FADE_MS]"
+        }
+        require(displayLeadMaxRatio in MIN_DISPLAY_LEAD_MAX_RATIO..MAX_DISPLAY_LEAD_MAX_RATIO) {
+            "displayLeadMaxRatio $displayLeadMaxRatio outside [$MIN_DISPLAY_LEAD_MAX_RATIO, $MAX_DISPLAY_LEAD_MAX_RATIO]"
         }
         require(fadeMinAlpha in MIN_FADE_MIN_ALPHA..MAX_FADE_MIN_ALPHA) {
             "fadeMinAlpha $fadeMinAlpha outside [$MIN_FADE_MIN_ALPHA, $MAX_FADE_MIN_ALPHA]"
@@ -880,6 +956,9 @@ data class TrackerConfig(
         /** 95th percentile, as a fraction in [0, 1], for the timing statistics in the diagnostics. */
         const val TIMING_P95_FRACTION = 0.95
 
+        /** 99th percentile, as a fraction in [0, 1], for the filtered-speed statistics in the diagnostics. */
+        const val TIMING_P99_FRACTION = 0.99
+
         /** Default [thermalSampleIntervalMs], in milliseconds. */
         const val DEFAULT_THERMAL_SAMPLE_INTERVAL_MS = 2000L
 
@@ -1099,6 +1178,33 @@ data class TrackerConfig(
         /** Default [trackAccelSigmaRatio], in h/s². */
         const val DEFAULT_TRACK_ACCEL_SIGMA_RATIO = 8f
 
+        /** Default [trackAccelRefDtMs], in milliseconds (20 fps). */
+        const val DEFAULT_TRACK_ACCEL_REF_DT_MS = 50f
+
+        /** Lowest accepted [trackAccelRefDtMs], in milliseconds. */
+        const val MIN_TRACK_ACCEL_REF_DT_MS = 10f
+
+        /** Highest accepted [trackAccelRefDtMs], in milliseconds. */
+        const val MAX_TRACK_ACCEL_REF_DT_MS = 200f
+
+        /** Default [trackAccelMinScale], unitless (F4: S3 at 12 fps measured 0.698, needs below 0.60). */
+        const val DEFAULT_TRACK_ACCEL_MIN_SCALE = 0.5f
+
+        /** Lowest accepted [trackAccelMinScale]. */
+        const val MIN_TRACK_ACCEL_MIN_SCALE = 0.05f
+
+        /** Highest accepted [trackAccelMinScale]: no scaling. */
+        const val MAX_TRACK_ACCEL_MIN_SCALE = 1f
+
+        /** Default [trackAccelIntervalTauMs], in milliseconds. */
+        const val DEFAULT_TRACK_ACCEL_INTERVAL_TAU_MS = 1000f
+
+        /** Lowest accepted [trackAccelIntervalTauMs], in milliseconds. */
+        const val MIN_TRACK_ACCEL_INTERVAL_TAU_MS = 100f
+
+        /** Highest accepted [trackAccelIntervalTauMs], in milliseconds. */
+        const val MAX_TRACK_ACCEL_INTERVAL_TAU_MS = 10_000f
+
         /** Default [trackHeightAccelSigmaRatio], in h/s². */
         const val DEFAULT_TRACK_HEIGHT_ACCEL_SIGMA_RATIO = 2f
 
@@ -1185,6 +1291,66 @@ data class TrackerConfig(
 
         /** Highest accepted [smoothDerivativeCutoffHz], in hertz. */
         const val MAX_SMOOTH_DERIVATIVE_CUTOFF_HZ = 30.0f
+
+        /** Default [displayLeadEnabled]: the forward lead is on (F4). */
+        const val DEFAULT_DISPLAY_LEAD_ENABLED = true
+
+        /** Default [displayLeadMaxMs], in milliseconds. */
+        const val DEFAULT_DISPLAY_LEAD_MAX_MS = 130f
+
+        /** Lowest accepted [displayLeadMaxMs], in milliseconds (0 = no lead). */
+        const val MIN_DISPLAY_LEAD_MAX_MS = 0f
+
+        /** Highest accepted [displayLeadMaxMs], in milliseconds. */
+        const val MAX_DISPLAY_LEAD_MAX_MS = 400f
+
+        /** Default [displayLeadExtraMs], in milliseconds. */
+        const val DEFAULT_DISPLAY_LEAD_EXTRA_MS = 10f
+
+        /** Lowest accepted [displayLeadExtraMs], in milliseconds. */
+        const val MIN_DISPLAY_LEAD_EXTRA_MS = 0f
+
+        /** Highest accepted [displayLeadExtraMs], in milliseconds. */
+        const val MAX_DISPLAY_LEAD_EXTRA_MS = 100f
+
+        /** Default [displayLeadSpeedLowHps], in track heights per second. */
+        const val DEFAULT_DISPLAY_LEAD_SPEED_LOW_HPS = 0.5f
+
+        /** Default [displayLeadSpeedHighHps], in track heights per second. */
+        const val DEFAULT_DISPLAY_LEAD_SPEED_HIGH_HPS = 1.0f
+
+        /** Lowest accepted [displayLeadSpeedLowHps] / [displayLeadSpeedHighHps], in track heights per second. */
+        const val MIN_DISPLAY_LEAD_SPEED_HPS = 0f
+
+        /** Highest accepted [displayLeadSpeedLowHps] / [displayLeadSpeedHighHps], in track heights per second. */
+        const val MAX_DISPLAY_LEAD_SPEED_HPS = 10f
+
+        /** Default [displayLeadStopFullRatio], unitless. */
+        const val DEFAULT_DISPLAY_LEAD_STOP_FULL_RATIO = 0.8f
+
+        /** Lowest accepted [displayLeadStopFullRatio]. */
+        const val MIN_DISPLAY_LEAD_STOP_FULL_RATIO = 0.1f
+
+        /** Highest accepted [displayLeadStopFullRatio]: the measured step must match the tracker's speed. */
+        const val MAX_DISPLAY_LEAD_STOP_FULL_RATIO = 1f
+
+        /** Default [displayLeadFadeMs], in milliseconds. */
+        const val DEFAULT_DISPLAY_LEAD_FADE_MS = 80f
+
+        /** Lowest accepted [displayLeadFadeMs], in milliseconds (0 = cut at once). */
+        const val MIN_DISPLAY_LEAD_FADE_MS = 0f
+
+        /** Highest accepted [displayLeadFadeMs], in milliseconds. */
+        const val MAX_DISPLAY_LEAD_FADE_MS = 1000f
+
+        /** Default [displayLeadMaxRatio], in track heights. */
+        const val DEFAULT_DISPLAY_LEAD_MAX_RATIO = 0.25f
+
+        /** Lowest accepted [displayLeadMaxRatio] (0 = no lead). */
+        const val MIN_DISPLAY_LEAD_MAX_RATIO = 0f
+
+        /** Highest accepted [displayLeadMaxRatio], in track heights. */
+        const val MAX_DISPLAY_LEAD_MAX_RATIO = 1f
 
         /** Default [fadeMinAlpha], unitless. */
         const val DEFAULT_FADE_MIN_ALPHA = 0.25f

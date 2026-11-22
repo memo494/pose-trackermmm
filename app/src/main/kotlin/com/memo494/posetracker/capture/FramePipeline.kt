@@ -9,6 +9,7 @@ import com.memo494.posetracker.core.model.DetectionFrame
 import com.memo494.posetracker.core.model.TimestampSource
 import com.memo494.posetracker.core.overlay.OverlayWarning
 import com.memo494.posetracker.core.overlay.RedrawPolicy
+import com.memo494.posetracker.core.stats.LeadSummary
 import com.memo494.posetracker.core.stats.Percentiles
 import com.memo494.posetracker.core.stats.TimingSummary
 import com.memo494.posetracker.core.stats.TimingWindow
@@ -120,6 +121,10 @@ internal class FramePipeline(
     private val postWindow = TimingWindow(config.timingWindowFrames)
     private val frameWindow = TimingWindow(config.timingWindowFrames)
     private val resultAgeWindow = TimingWindow(config.timingWindowFrames)
+    private val leadMsWindow = TimingWindow(config.timingWindowFrames)
+    private val speedWindow = TimingWindow(config.timingWindowFrames)
+    private var leadSamples = 0L
+    private var leadApplied = 0L
 
     /** Frames that went through detection and were published. */
     @Volatile
@@ -355,6 +360,7 @@ internal class FramePipeline(
             postWindow.clear()
             frameWindow.clear()
             resultAgeWindow.clear()
+            clearLeadStats()
             republish(dropFrame = true)
         } catch (e: Throwable) {
             safeLog("changing the model failed", e)
@@ -424,7 +430,40 @@ internal class FramePipeline(
             postMs = Percentiles.of(postWindow),
             frameMs = Percentiles.of(frameWindow),
             resultAgeMs = Percentiles.of(resultAgeWindow),
+            lead = leadSummary(),
         )
+
+    /** The lead and speed statistics of the shown tracks; allocates the summary, so only at the HUD tick. */
+    private fun leadSummary(): LeadSummary =
+        if (leadSamples == 0L) {
+            LeadSummary.NONE
+        } else {
+            LeadSummary(
+                leadMsP50 = leadMsWindow.percentile(TrackerConfig.TIMING_MEDIAN_FRACTION),
+                appliedFraction = leadApplied.toFloat() / leadSamples.toFloat(),
+                speedHpsP50 = speedWindow.percentile(TrackerConfig.TIMING_MEDIAN_FRACTION),
+                speedHpsP99 = speedWindow.percentile(TrackerConfig.TIMING_P99_FRACTION),
+            )
+        }
+
+    /** One sample per shown track of [tracks]: its filtered speed, and its lead time when it had one. Allocation-free. */
+    private fun recordLead(tracks: TrackSnapshot) {
+        for (i in 0 until tracks.count) {
+            leadSamples++
+            speedWindow.add(tracks.speedHps(i))
+            if (tracks.leadMs(i) > 0f) {
+                leadApplied++
+                leadMsWindow.add(tracks.leadMs(i))
+            }
+        }
+    }
+
+    private fun clearLeadStats() {
+        leadMsWindow.clear()
+        speedWindow.clear()
+        leadSamples = 0L
+        leadApplied = 0L
+    }
 
     private fun process(
         image: FrameImage,
@@ -459,7 +498,9 @@ internal class FramePipeline(
         val result = detector.detect(captureFrame)
         val list = tracker.update(result)
         logMisses(nowNs)
-        val tracks = TrackSnapshot.ofSmoothed(list, widthImg, heightImg, smoother, result.timestampNs)
+        val resultAgeMs = msOf(clock.nowNs() - result.timestampNs)
+        val tracks = TrackSnapshot.ofSmoothed(list, widthImg, heightImg, smoother, result.timestampNs, resultAgeMs)
+        recordLead(tracks)
         followLock(list, tracks, result)
         trackedFrameNewest = true
         fpsMeter.onFrame(acquireNs)

@@ -8,6 +8,7 @@ import com.memo494.posetracker.core.model.DetectionFrame
 import com.memo494.posetracker.core.model.PoseDetection
 import com.memo494.posetracker.core.model.TimestampSource
 import com.memo494.posetracker.core.overlay.OverlayWarning
+import com.memo494.posetracker.core.stats.LeadSummary
 import com.memo494.posetracker.core.stats.Percentiles
 import com.memo494.posetracker.core.stats.TimingSummary
 import com.memo494.posetracker.detector.Accelerator
@@ -29,6 +30,12 @@ private const val HEAD_KEYPOINTS = TrackerConfig.HEAD_KEYPOINT_COUNT
 private const val TRACK_WIDTH = 320
 private const val TRACK_HEIGHT = 240
 private const val FRAME_STEP_MS = 50L
+private const val LEAD_FRAMES = 30
+private const val FAST_STEP_IMG = 20f
+private const val LEAD_EXPECTED_IMG = 17f
+private const val LEAD_TOLERANCE_IMG = 6f
+private const val LEAD_EXPECTED_MS = 42f
+private const val LEAD_MS_TOLERANCE = 4f
 private const val SLOW_DETECT_MS = 300L
 private const val NEW_PERSON_SHIFT_X_IMG = 150f
 private const val HEAD_TOLERANCE_IMG = 3f
@@ -1078,6 +1085,56 @@ class FramePipelineTest {
             if (i < count - 1) atMs += FRAME_STEP_MS
         }
         return atMs
+    }
+
+    // ---- the display lead (F4) ----
+
+    /** Feeds [count] frames of a person who moves [stepXImg] to the right every frame; returns the pipeline's last state. */
+    private fun movingFrames(
+        pipeline: FramePipeline,
+        count: Int,
+        stepXImg: Float,
+    ): OverlayState {
+        for (i in 0 until count) {
+            detector.people = listOf(walker(shiftXImg = stepXImg * i))
+            frameAt(pipeline, i * FRAME_STEP_MS)
+        }
+        return states.last()
+    }
+
+    @Test
+    fun lead_aFastWalker_isDrawnAheadOfTheSameWalkerWithoutTheLead_andIsCountedInTheSummary() {
+        val ledPipeline = trackingPipeline()
+        val led = movingFrames(ledPipeline, LEAD_FRAMES, FAST_STEP_IMG)
+        states.clear()
+        val plainPipeline = trackingPipeline(TrackerConfig(displayLeadEnabled = false))
+        val plain = movingFrames(plainPipeline, LEAD_FRAMES, FAST_STEP_IMG)
+
+        // The result age is 2 ms here: L = 2 + 15 + 25 = 42 ms at 400 px/s is about 17 px.
+        assertThat(led.tracks.headXImg(0) - plain.tracks.headXImg(0)).isWithin(LEAD_TOLERANCE_IMG).of(LEAD_EXPECTED_IMG)
+        assertThat(led.tracks.leadMs(0)).isGreaterThan(0f)
+        val lead = ledPipeline.timingSummary().lead
+        assertThat(lead.appliedFraction).isGreaterThan(0f)
+        assertThat(lead.leadMsP50).isWithin(LEAD_MS_TOLERANCE).of(LEAD_EXPECTED_MS)
+        assertThat(lead.speedHpsP99).isGreaterThan(1f)
+        assertThat(plainPipeline.timingSummary().lead.appliedFraction).isEqualTo(0f)
+    }
+
+    @Test
+    fun lead_aStillPerson_hasNoLeadAndAlmostNoSpeed() {
+        val pipeline = trackingPipeline()
+        val state = movingFrames(pipeline, LEAD_FRAMES, 0f)
+
+        val lead = pipeline.timingSummary().lead
+        assertThat(state.tracks.leadMs(0)).isEqualTo(0f)
+        assertThat(lead.appliedFraction).isEqualTo(0f)
+        assertThat(lead.leadMsP50.isNaN()).isTrue()
+        assertThat(lead.speedHpsP99).isLessThan(0.5f)
+    }
+
+    @Test
+    fun lead_beforeAnyTrackedFrame_isUnknown() {
+        assertThat(trackingPipeline().timingSummary().lead).isEqualTo(LeadSummary.NONE)
     }
 
     @Test

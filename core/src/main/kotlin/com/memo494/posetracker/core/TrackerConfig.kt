@@ -870,6 +870,9 @@ data class TrackerConfig(
         /** 95th percentile, as a fraction in [0, 1], for the timing statistics in the diagnostics. */
         const val TIMING_P95_FRACTION = 0.95
 
+        /** 99th percentile, as a fraction in [0, 1], for the filtered-speed statistics in the diagnostics. */
+        const val TIMING_P99_FRACTION = 0.99
+
         /** Default [thermalSampleIntervalMs], in milliseconds. */
         const val DEFAULT_THERMAL_SAMPLE_INTERVAL_MS = 2000L
 

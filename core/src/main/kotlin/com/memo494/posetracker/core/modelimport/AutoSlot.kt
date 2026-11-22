@@ -13,7 +13,9 @@ package com.memo494.posetracker.core.modelimport
  * - the slot of the model's orientation already holds a model that is not of the opposite shape. Only a library model
  *   whose tensor is strictly the other way round (a tall model in Landscape, the migration state where both slots
  *   share one model) counts as not fitting; a square model in the slot is the owner's choice and is kept;
- * - that slot points to a sha256 that is not in [library]: fail closed, the owner picks by hand.
+ * - that slot points to a sha256 that is not in [library]: fail closed, the owner picks by hand. In production this
+ *   branch cannot be reached: `OrientationSlots.read` turns such a slot into built-in and marks it unreadable, and
+ *   the store's `autoAssign` then declines before calling this function. The branch is defence only.
  *
  * Otherwise the slot is built-in or holds a model of the opposite shape, and its orientation is returned. The other
  * slot is never touched. Pure; never throws.

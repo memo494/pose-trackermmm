@@ -1055,6 +1055,8 @@ class TrackerConfigTest {
 
         assertThat(config.trackHighScore).isEqualTo(0.5f)
         assertThat(config.trackBirthScore).isEqualTo(0.25f)
+        assertThat(config.trackBirthSuppressIou).isEqualTo(0.5f)
+        assertThat(config.trackBirthSuppressHeadRatio).isEqualTo(0.15f)
         assertThat(config.trackConfirmHits).isEqualTo(3)
         assertThat(config.trackIdlePromoteMs).isEqualTo(400L)
         assertThat(config.trackIdlePromoteNs).isEqualTo(400_000_000L)
@@ -1077,6 +1079,16 @@ class TrackerConfigTest {
 
         assertWithin(config.trackHighScore, TrackerConfig.MIN_TRACK_SCORE, TrackerConfig.MAX_TRACK_SCORE)
         assertWithin(config.trackBirthScore, TrackerConfig.MIN_TRACK_SCORE, TrackerConfig.MAX_TRACK_SCORE)
+        assertWithin(
+            config.trackBirthSuppressIou,
+            TrackerConfig.MIN_TRACK_BIRTH_SUPPRESS_IOU,
+            TrackerConfig.MAX_TRACK_BIRTH_SUPPRESS_IOU,
+        )
+        assertWithin(
+            config.trackBirthSuppressHeadRatio,
+            TrackerConfig.MIN_TRACK_BIRTH_SUPPRESS_HEAD_RATIO,
+            TrackerConfig.MAX_TRACK_BIRTH_SUPPRESS_HEAD_RATIO,
+        )
         assertThat(config.trackConfirmHits).isAtLeast(TrackerConfig.MIN_TRACK_CONFIRM_HITS)
         assertThat(config.trackConfirmHits).isAtMost(TrackerConfig.MAX_TRACK_CONFIRM_HITS)
         assertThat(config.trackIdlePromoteMs).isAtLeast(TrackerConfig.MIN_TRACK_DURATION_MS_LONG)
@@ -1124,6 +1136,8 @@ class TrackerConfigTest {
             TrackerConfig(
                 trackHighScore = TrackerConfig.MIN_TRACK_SCORE,
                 trackBirthScore = TrackerConfig.MIN_TRACK_SCORE,
+                trackBirthSuppressIou = TrackerConfig.MIN_TRACK_BIRTH_SUPPRESS_IOU,
+                trackBirthSuppressHeadRatio = TrackerConfig.MIN_TRACK_BIRTH_SUPPRESS_HEAD_RATIO,
                 trackConfirmHits = TrackerConfig.MIN_TRACK_CONFIRM_HITS,
                 trackIdlePromoteMs = TrackerConfig.MIN_TRACK_DURATION_MS_LONG,
                 trackMaxLostMs = TrackerConfig.MIN_TRACK_DURATION_MS,
@@ -1142,6 +1156,8 @@ class TrackerConfigTest {
             TrackerConfig(
                 trackHighScore = TrackerConfig.MAX_TRACK_SCORE,
                 trackBirthScore = TrackerConfig.MAX_TRACK_SCORE,
+                trackBirthSuppressIou = TrackerConfig.MAX_TRACK_BIRTH_SUPPRESS_IOU,
+                trackBirthSuppressHeadRatio = TrackerConfig.MAX_TRACK_BIRTH_SUPPRESS_HEAD_RATIO,
                 trackConfirmHits = TrackerConfig.MAX_TRACK_CONFIRM_HITS,
                 trackIdlePromoteMs = TrackerConfig.MAX_TRACK_DURATION_MS_LONG,
                 trackMaxLostMs = TrackerConfig.MAX_TRACK_DURATION_MS,
@@ -1172,6 +1188,10 @@ class TrackerConfigTest {
                 { TrackerConfig(trackHighScore = TrackerConfig.MAX_TRACK_SCORE + 0.01f) },
                 { TrackerConfig(trackBirthScore = TrackerConfig.MIN_TRACK_SCORE - 0.01f) },
                 { TrackerConfig(trackBirthScore = TrackerConfig.MAX_TRACK_SCORE + 0.01f) },
+                { TrackerConfig(trackBirthSuppressIou = TrackerConfig.MIN_TRACK_BIRTH_SUPPRESS_IOU - 0.01f) },
+                { TrackerConfig(trackBirthSuppressIou = TrackerConfig.MAX_TRACK_BIRTH_SUPPRESS_IOU + 0.01f) },
+                { TrackerConfig(trackBirthSuppressHeadRatio = TrackerConfig.MIN_TRACK_BIRTH_SUPPRESS_HEAD_RATIO - 0.01f) },
+                { TrackerConfig(trackBirthSuppressHeadRatio = TrackerConfig.MAX_TRACK_BIRTH_SUPPRESS_HEAD_RATIO + 0.01f) },
                 { TrackerConfig(trackConfirmHits = TrackerConfig.MIN_TRACK_CONFIRM_HITS - 1) },
                 { TrackerConfig(trackConfirmHits = TrackerConfig.MAX_TRACK_CONFIRM_HITS + 1) },
                 { TrackerConfig(trackIdlePromoteMs = TrackerConfig.MIN_TRACK_DURATION_MS_LONG - 1L) },

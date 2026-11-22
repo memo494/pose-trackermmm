@@ -208,6 +208,7 @@ class CaptureStatsHolderTest {
         assertThat(stats.assocMissLowBirth).isEqualTo(0)
         assertThat(stats.assocBirthNearLive).isEqualTo(0)
         assertThat(stats.assocBirthAfterRemoval).isEqualTo(0)
+        assertThat(stats.assocBirthSuppressed).isEqualTo(0)
     }
 
     @Test

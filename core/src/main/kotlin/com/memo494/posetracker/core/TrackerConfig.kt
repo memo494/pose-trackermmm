@@ -98,6 +98,15 @@ package com.memo494.posetracker.core
  *   stage of the tracker, in [[MIN_TRACK_SCORE], [MAX_TRACK_SCORE]]; lower ones only in the second stage.
  * @property trackBirthScore a detection that matches no track starts a new track only with at least this score
  *   (unitless), in [[MIN_TRACK_SCORE], [MAX_TRACK_SCORE]]; weaker detections can keep a track alive but never start one.
+ * @property trackBirthSuppressIou an unmatched detection whose box overlaps, with at least this IoU (unitless), a
+ *   detection that a confirmed or lost track took in the same frame is a near duplicate of that person and starts no
+ *   track, in [[MIN_TRACK_BIRTH_SUPPRESS_IOU], [MAX_TRACK_BIRTH_SUPPRESS_IOU]]; it is looser than [dedupeIou], which
+ *   drops the pair earlier.
+ * @property trackBirthSuppressHeadRatio the head distance, as a fraction of the followed track's box height `h`
+ *   (unitless), within which an overlapping box (see [trackBirthSuppressIou]) is one person and not another: a box
+ *   that overlaps with the IoU limit but whose head is farther away may be a second person and is not suppressed;
+ *   also decides which tentative tracks are shadows of an older track, in [[MIN_TRACK_BIRTH_SUPPRESS_HEAD_RATIO],
+ *   [MAX_TRACK_BIRTH_SUPPRESS_HEAD_RATIO]].
  * @property trackConfirmHits matched frames, counting the first, after which a tentative track becomes confirmed
  *   and is shown, in frames, in [[MIN_TRACK_CONFIRM_HITS], [MAX_TRACK_CONFIRM_HITS]]; 1 = a new track is confirmed
  *   (and shown) at once, from its first detection.
@@ -258,6 +267,8 @@ data class TrackerConfig(
     val rawNmsIou: Float = DEFAULT_RAW_NMS_IOU,
     val trackHighScore: Float = DEFAULT_TRACK_HIGH_SCORE,
     val trackBirthScore: Float = DEFAULT_TRACK_BIRTH_SCORE,
+    val trackBirthSuppressIou: Float = DEFAULT_TRACK_BIRTH_SUPPRESS_IOU,
+    val trackBirthSuppressHeadRatio: Float = DEFAULT_TRACK_BIRTH_SUPPRESS_HEAD_RATIO,
     val trackConfirmHits: Int = DEFAULT_TRACK_CONFIRM_HITS,
     val trackIdlePromoteMs: Long = DEFAULT_TRACK_IDLE_PROMOTE_MS,
     val trackMaxLostMs: Float = DEFAULT_TRACK_MAX_LOST_MS,
@@ -466,6 +477,13 @@ data class TrackerConfig(
         }
         require(trackBirthScore in MIN_TRACK_SCORE..MAX_TRACK_SCORE) {
             "trackBirthScore $trackBirthScore outside [$MIN_TRACK_SCORE, $MAX_TRACK_SCORE]"
+        }
+        require(trackBirthSuppressIou in MIN_TRACK_BIRTH_SUPPRESS_IOU..MAX_TRACK_BIRTH_SUPPRESS_IOU) {
+            "trackBirthSuppressIou $trackBirthSuppressIou outside [$MIN_TRACK_BIRTH_SUPPRESS_IOU, $MAX_TRACK_BIRTH_SUPPRESS_IOU]"
+        }
+        require(trackBirthSuppressHeadRatio in MIN_TRACK_BIRTH_SUPPRESS_HEAD_RATIO..MAX_TRACK_BIRTH_SUPPRESS_HEAD_RATIO) {
+            "trackBirthSuppressHeadRatio $trackBirthSuppressHeadRatio outside " +
+                "[$MIN_TRACK_BIRTH_SUPPRESS_HEAD_RATIO, $MAX_TRACK_BIRTH_SUPPRESS_HEAD_RATIO]"
         }
         require(trackConfirmHits in MIN_TRACK_CONFIRM_HITS..MAX_TRACK_CONFIRM_HITS) {
             "trackConfirmHits $trackConfirmHits outside [$MIN_TRACK_CONFIRM_HITS, $MAX_TRACK_CONFIRM_HITS]"
@@ -982,6 +1000,24 @@ data class TrackerConfig(
 
         /** Default [trackBirthScore]: unitless confidence. */
         const val DEFAULT_TRACK_BIRTH_SCORE = 0.25f
+
+        /** Default [trackBirthSuppressIou]: unitless. */
+        const val DEFAULT_TRACK_BIRTH_SUPPRESS_IOU = 0.5f
+
+        /** Lowest accepted [trackBirthSuppressIou]. */
+        const val MIN_TRACK_BIRTH_SUPPRESS_IOU = 0.2f
+
+        /** Highest accepted [trackBirthSuppressIou]. */
+        const val MAX_TRACK_BIRTH_SUPPRESS_IOU = 1.0f
+
+        /** Default [trackBirthSuppressHeadRatio]: fraction of the track height (owner's log: 14 of 19 duplicates <= 0.12). */
+        const val DEFAULT_TRACK_BIRTH_SUPPRESS_HEAD_RATIO = 0.15f
+
+        /** Lowest accepted [trackBirthSuppressHeadRatio]. */
+        const val MIN_TRACK_BIRTH_SUPPRESS_HEAD_RATIO = 0.05f
+
+        /** Highest accepted [trackBirthSuppressHeadRatio]. */
+        const val MAX_TRACK_BIRTH_SUPPRESS_HEAD_RATIO = 0.5f
 
         /** Lowest accepted [trackHighScore] / [trackBirthScore]. */
         const val MIN_TRACK_SCORE = 0.0f

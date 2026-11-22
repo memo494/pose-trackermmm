@@ -369,7 +369,10 @@ tracks, index loops); deterministic.
   the number of pairs (a missing person must not shift the ids of the others).
 - **Lifecycle** (time in `dtEff`, measured over frames that exist):
   - an unmatched detection with score ≥ `trackBirthScore` (0.25) starts a TENTATIVE track (while fewer than
-    `maxTracks` = 32 exist);
+    `maxTracks` = 32 exist), **unless** its box overlaps with IoU ≥ `trackBirthSuppressIou` (0.5) a detection that a
+    CONFIRMED or LOST track took in this frame (F3/A1: a near duplicate of a followed person, IoU 0.3–0.69, below
+    `dedupeIou`, used to be born next to the live track and then won the person's detection from it; counted in
+    `assocBirthSuppressed`). A neighbour with no overlap is still born; neighbours are not affected as no cost or gate changed;
   - CONFIRMED, and shown, from the `trackConfirmHits`-th (3rd) consecutive hit; a tentative track survives
     `trackTentativeMaxMisses` (1, bounds 0..5) consecutive missed frames and is removed on the next one. While it
     survives it coasts like a lost track (velocity decay as for a miss, no `lostMs`), is not shown and not LOST;
@@ -627,8 +630,8 @@ uses no accessibility service.
   cannot be computed); a birth next to a live track ends `reason=live state=confirmed|tentative detIou=0.23`, one
   after a removal `reason=removed cause=lostTime|exit|other`. When a window ends with dropped lines, the next line
   written is `track: miss suppressed N`. Read it with the limits: `gateChi2` above 9.21 = gated, `cost` at or above 0.7 (high) / 0.6
-  (low) = too expensive. Seven counters follow `lockExpired` in `summary.txt`: `assocMisses`, `assocMissGate`,
-  `assocMissCost`, `assocMissTaken`, `assocMissLowBirth`, `assocBirthNearLive`, `assocBirthAfterRemoval`; since Start, read at the HUD tick, 0 before the first miss.
+  (low) = too expensive. Eight counters follow `lockExpired` in `summary.txt`: `assocMisses`, `assocMissGate`,
+  `assocMissCost`, `assocMissTaken`, `assocMissLowBirth`, `assocBirthNearLive`, `assocBirthAfterRemoval`, `assocBirthSuppressed` (F3/A1, §6.3); since Start, read at the HUD tick, 0 before the first miss.
 - **Model per orientation in the log and in `summary.txt` (M1b-1).** After the model fields: `modelPortrait` and
   `modelLandscape` (`builtin` or `<name> <first 12 hex of sha256>`), `modelSwitches` (changes of the model caused by a
   change of orientation since Start; the load at Start is not counted) and `modelSwitchMsMax` (the longest, ms, from

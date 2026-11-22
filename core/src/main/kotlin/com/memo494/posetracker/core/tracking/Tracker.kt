@@ -24,7 +24,9 @@ import kotlin.math.sqrt
  *    an unmatched confirmed one is LOST (its velocity decays) and is removed after `trackMaxLostMs` or when
  *    its head point is more than `trackExitMarginRatio` heights outside the image;
  * 7. an unmatched detection with a score of at least `trackBirthScore` starts a tentative track while fewer
- *    than `maxTracks` tracks exist (confirmed at once when `trackConfirmHits` is 1);
+ *    than `maxTracks` tracks exist (confirmed at once when `trackConfirmHits` is 1); not when its box overlaps with
+ *    `trackBirthSuppressIou` or more a detection that a confirmed or lost track took in this frame (a near duplicate
+ *    of that person, counted in [assocBirthSuppressed]);
  * 8. [onIdle] promotes the tentative tracks after `trackIdlePromoteMs` without a frame and removes a LOST track
  *    whose lost time plus the idle time exceeds `trackMaxLostMs` (so a still screen does not keep a ring for ever).
  *
@@ -176,6 +178,10 @@ class Tracker(
 
     /** Births next to a track removed in the same frame (reason REMOVED), count; kept by `reset()`. */
     var assocBirthAfterRemoval: Int = 0
+        private set
+
+    /** Unmatched detections not given a track because they overlap what a confirmed or lost track took; kept by `reset()`. */
+    var assocBirthSuppressed: Int = 0
         private set
 
     private val misses = Array(TrackerConfig.MAX_DETECTIONS_PER_FRAME) { AssociationMiss() }
@@ -478,6 +484,10 @@ class Tracker(
                 if (nearestSlot(heads[index], trackCountBeforeBirths, true) >= 0) assocMissLowBirth++
                 continue
             }
+            if (overlapsTakenDetection(detections, detection, trackCountBeforeBirths)) {
+                assocBirthSuppressed++
+                continue
+            }
             if (activeCount >= maxTracks) return
             val slot = freeSlot()
             if (slot < 0) return
@@ -489,6 +499,37 @@ class Tracker(
                 noteBirth(detections, index, tracks[slot].id, trackCountBeforeBirths)
             }
         }
+    }
+
+    /**
+     * True when [detection] overlaps, with `trackBirthSuppressIou` or more, the detection that one of the first
+     * [trackCount] tracks that is not tentative took in this frame: a near duplicate of a person already followed.
+     */
+    private fun overlapsTakenDetection(
+        detections: List<PoseDetection>,
+        detection: PoseDetection,
+        trackCount: Int,
+    ): Boolean {
+        for (pos in 0 until trackCount) {
+            val track = tracks[order[pos]]
+            if (track.state == TrackState.TENTATIVE) continue
+            val matched = track.matchedDet
+            if (matched < 0 || matched >= detections.size) continue
+            val other = detections[matched]
+            val iou =
+                BoxOverlap.iou(
+                    detection.boxLeftImg,
+                    detection.boxTopImg,
+                    detection.boxRightImg,
+                    detection.boxBottomImg,
+                    other.boxLeftImg,
+                    other.boxTopImg,
+                    other.boxRightImg,
+                    other.boxBottomImg,
+                )
+            if (iou >= config.trackBirthSuppressIou) return true
+        }
+        return false
     }
 
     /** Copies what the diagnostics need of the removed [track] (confirmed or lost) before its slot is reused. */

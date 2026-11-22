@@ -11,7 +11,7 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 
 /**
- * The acceptance scenarios S1 to S15 of docs/plans/M3.md (T5). The Python functions in
+ * The acceptance scenarios S1 to S16 of docs/plans/M3.md (T5). The Python functions in
  * `docs/plans/M3_sim/scenarios.py` define each scenario; every asserted number is in [MetricsThresholds].
  * Each scenario runs at 20, 30 and 60 fps and at 30 fps +-30 %, with seeds 1, 2 and 3; a failure message names
  * the scenario, the rate, the seed and the quantity.
@@ -230,6 +230,21 @@ class TrackerScenarioTest {
             val first = run.firstShownFrame()
             assertWithMessage(c.message("a track is shown at all")).that(first).isAtLeast(0)
             assertAtMost(c.message("ms until first shown"), times[first] * MS_PER_S, MetricsThresholds.S15_MAX_FIRST_SHOWN_MS)
+        }
+
+    @Test
+    fun s16_personWithARecurringLooseDuplicateBox_keepsOneId() =
+        forEachRun("S16 near duplicate") { c ->
+            val person =
+                ScenePerson(
+                    1,
+                    listOf(pt(0.0, 300.0), pt(NEAR_DUPLICATE_DURATION_S, 900.0)),
+                    nearDuplicates = listOf(TimeInterval(NEAR_DUPLICATE_FROM_S, NEAR_DUPLICATE_DURATION_S)),
+                )
+            val run = runScene(scene(listOf(person), NEAR_DUPLICATE_DURATION_S, c))
+            assertCount(c.message("ids"), run.highestId, S16_EXPECTED_IDS)
+            assertAtMost(c.message("largest list size"), run.maxListSize().toDouble(), S16_EXPECTED_IDS.toDouble())
+            assertAtLeast(c.message("coverage"), run.metrics.coverage(1, COVERAGE_FROM_FRAME), S16_MIN_COVERAGE)
         }
 
     private fun crossing(
@@ -484,6 +499,10 @@ class TrackerScenarioTest {
         const val TIME_EPS_S = 1e-7
         const val FALSE_POSITIVE_DURATION_S = 3.0
         const val FALSE_POSITIVE_DETECTIONS = 4
+        const val NEAR_DUPLICATE_DURATION_S = 4.0
+        const val NEAR_DUPLICATE_FROM_S = 0.5
+        const val S16_EXPECTED_IDS = 1
+        const val S16_MIN_COVERAGE = 0.95
         const val FLICKER_DURATION_S = 4.0
         const val FLICKER_PEOPLE = 3
         const val FLICKER_FROM_FRAME = 5

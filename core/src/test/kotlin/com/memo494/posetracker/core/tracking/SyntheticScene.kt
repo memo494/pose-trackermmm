@@ -56,6 +56,8 @@ data class FalsePositive(
  * @property dropouts intervals in which the person exists but the detector emits nothing.
  * @property keypointDropouts intervals in which chosen head keypoints get a low confidence.
  * @property duplicates intervals in which the same person is emitted twice (second box slightly shifted, lower score).
+ * @property nearDuplicates intervals in which the detector also emits a looser box of the same person (IoU 0.54 to
+ *   0.67 with the original, below the dedupe IoU; score 0.25 to 0.45), its shift and score cycling with the frame.
  */
 class ScenePerson(
     val id: Int,
@@ -64,6 +66,7 @@ class ScenePerson(
     val dropouts: List<TimeInterval> = emptyList(),
     val keypointDropouts: List<KeypointDropout> = emptyList(),
     val duplicates: List<TimeInterval> = emptyList(),
+    val nearDuplicates: List<TimeInterval> = emptyList(),
 ) {
     init {
         require(path.isNotEmpty()) { "a person needs at least one waypoint" }
@@ -213,6 +216,9 @@ class SyntheticScene(
             if (person.duplicates.any { timeS in it }) {
                 detections.add(shifted(detection, at.heightImg))
             }
+            if (person.nearDuplicates.any { timeS in it }) {
+                detections.add(nearShifted(detection, at.heightImg, index))
+            }
             var sumX = 0.0
             var sumY = 0.0
             for (k in 0 until TrackerConfig.HEAD_KEYPOINT_COUNT) {
@@ -276,6 +282,26 @@ class SyntheticScene(
         )
     }
 
+    private fun nearShifted(
+        source: PoseDetection,
+        h: Double,
+        frameIndex: Int,
+    ): PoseDetection {
+        val step = frameIndex % NEAR_DUPLICATE_SHIFT_RATIOS.size
+        val shift = (NEAR_DUPLICATE_SHIFT_RATIOS[step] * h).toFloat()
+        val xy = FloatArray(source.keypointsXyImg.size)
+        for (i in xy.indices) xy[i] = source.keypointsXyImg[i] + if (i % 2 == 0) shift else 0f
+        return PoseDetection(
+            source.boxLeftImg + shift,
+            source.boxTopImg,
+            source.boxRightImg + shift,
+            source.boxBottomImg,
+            NEAR_DUPLICATE_SCORES[step],
+            xy,
+            source.keypointScores.copyOf(),
+        )
+    }
+
     private fun gaussian(sigma: Double): Double = if (sigma > 0.0) random.nextGaussian() * sigma else 0.0
 
     private fun toNs(seconds: Double): Long = (seconds * NS_PER_S).roundToLong()
@@ -313,6 +339,12 @@ class SyntheticScene(
 
         /** Score a duplicate loses against its original. */
         const val DUPLICATE_SCORE_DROP = 0.05f
+
+        /** Horizontal shifts of a near duplicate in units of the height: box IoU (0.4 - r) / (0.4 + r) = 0.67, 0.54, 0.60. */
+        private val NEAR_DUPLICATE_SHIFT_RATIOS = doubleArrayOf(0.08, 0.12, 0.10)
+
+        /** Scores of a near duplicate, one per shift. */
+        private val NEAR_DUPLICATE_SCORES = floatArrayOf(0.30f, 0.40f, 0.45f)
 
         private const val NS_PER_S = 1e9
         private const val MAX_JITTER_FRACTION = 0.95

@@ -329,6 +329,7 @@ class DiagnosticsReportTest {
             "assocMissLowBirth",
             "assocBirthNearLive",
             "assocBirthAfterRemoval",
+            "assocBirthSuppressed",
         )
 
     @Test
@@ -342,6 +343,7 @@ class DiagnosticsReportTest {
                 assocMissLowBirth = 4,
                 assocBirthNearLive = 5,
                 assocBirthAfterRemoval = 7,
+                assocBirthSuppressed = 8,
             )
 
         val lines = build(stats = missed).text("summary.txt").trimEnd('\n').split("\n")
@@ -357,6 +359,7 @@ class DiagnosticsReportTest {
                 "assocMissLowBirth=4",
                 "assocBirthNearLive=5",
                 "assocBirthAfterRemoval=7",
+                "assocBirthSuppressed=8",
             ).inOrder()
         assertThat(first + assocKeys.size).isEqualTo(lines.indexOf("modelSource=unknown"))
     }
@@ -375,6 +378,7 @@ class DiagnosticsReportTest {
                 "assocMissLowBirth=0",
                 "assocBirthNearLive=0",
                 "assocBirthAfterRemoval=0",
+                "assocBirthSuppressed=0",
             ).inOrder()
         assertThat(without.none { line -> assocKeys.any { line.startsWith("$it=") } }).isTrue()
     }

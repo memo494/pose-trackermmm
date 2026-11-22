@@ -138,6 +138,7 @@ internal object DiagnosticsReport {
         line(out, "assocMissLowBirth", stats.assocMissLowBirth)
         line(out, "assocBirthNearLive", stats.assocBirthNearLive)
         line(out, "assocBirthAfterRemoval", stats.assocBirthAfterRemoval)
+        line(out, "assocBirthSuppressed", stats.assocBirthSuppressed)
         appendModel(out, stats.model)
         appendTiming(out, stats)
     }

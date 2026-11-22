@@ -72,6 +72,7 @@ internal object CaptureStatsHolder {
                 assocMissLowBirth = pipeline.assocMissLowBirth,
                 assocBirthNearLive = pipeline.assocBirthNearLive,
                 assocBirthAfterRemoval = pipeline.assocBirthAfterRemoval,
+                assocBirthSuppressed = pipeline.assocBirthSuppressed,
                 model = ModelStatusHolder.latest(),
                 timing = pipeline.timingSummary(),
                 thermalStatus = thermal?.status ?: ThermalStatusText.NOT_AVAILABLE,

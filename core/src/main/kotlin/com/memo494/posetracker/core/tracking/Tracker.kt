@@ -136,7 +136,7 @@ class Tracker(
     private val maxDtNs: Double = config.trackMaxDtMs.toDouble() * TrackerConfig.NANOS_PER_MILLI
     private val nanosPerSecond: Double = TrackerConfig.NANOS_PER_SECOND.toDouble()
     private val nanosPerMilli: Double = TrackerConfig.NANOS_PER_MILLI.toDouble()
-    private val accelRefS: Float = (config.trackAccelRefDtMs.toDouble() * nanosPerMilli / nanosPerSecond).toFloat()
+    private val accelScale = AccelScale(config)
     private val missTauS: Float = (config.trackMissVelocityTauMs.toDouble() * nanosPerMilli / nanosPerSecond).toFloat()
 
     private var hasLastFrame = false
@@ -295,24 +295,26 @@ class Tracker(
         missCount = 0
         removedCount = 0
         hasLastFrame = false
+        accelScale.reset()
     }
 
     /**
-     * Moves every track forward by [dteS]. For a step longer than `trackAccelRefDtMs` (a low frame rate; not for a
-     * [gap] step) the head's process noise is scaled by `(ref / dt)^2`, at least `trackAccelMinScale`, so the filter's
-     * smoothing of a still head does not fall off at low rates.
+     * Moves every track forward by [dteS]. At a low frame rate (see [AccelScale]; not for a [gap] step) the head's
+     * process noise of a track that continues a match is scaled down, so the filter's smoothing of a still head does
+     * not fall off. A track that coasts (LOST, or tentative after a miss) keeps the unscaled noise: its gate and its
+     * prediction must stay as wide as at any other rate.
      */
     private fun predictAll(
         dteS: Float,
         inflate: Float,
         gap: Boolean,
     ) {
-        val ratio = if (gap || dteS <= accelRefS) 1f else accelRefS / dteS
-        val headAccelScale = maxOf(ratio * ratio, config.trackAccelMinScale)
+        val headAccelScale = accelScale.update(dteS, gap)
         for (pos in 0 until activeCount) {
             val track = tracks[order[pos]]
             val heightImg = track.height.position
-            val headSigmaImg = config.trackAccelSigmaRatio * headAccelScale * heightImg
+            val coasting = track.state == TrackState.LOST || track.misses > 0
+            val headSigmaImg = config.trackAccelSigmaRatio * (if (coasting) 1f else headAccelScale) * heightImg
             track.x.predict(dteS, headSigmaImg, inflate)
             track.y.predict(dteS, headSigmaImg, inflate)
             track.height.predict(dteS, config.trackHeightAccelSigmaRatio * heightImg, inflate)

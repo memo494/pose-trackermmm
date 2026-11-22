@@ -119,6 +119,9 @@ package com.memo494.posetracker.core
  *   for a longer step (a lower frame rate) the head's process noise is scaled by `(ref / dt)^2`, no lower than
  *   [trackAccelMinScale], so the filter's smoothing of a still head stays near its 20 fps level (S3 at 12 fps, F4); in
  *   [[MIN_TRACK_ACCEL_REF_DT_MS], [MAX_TRACK_ACCEL_REF_DT_MS]]. A gap step (longer than [trackMaxDtMs]) is not scaled.
+ * @property trackAccelIntervalTauMs time constant in milliseconds of the moving average of the frame interval that
+ *   the scaling reads (so one slow frame does not change the scale), in [[MIN_TRACK_ACCEL_INTERVAL_TAU_MS],
+ *   [MAX_TRACK_ACCEL_INTERVAL_TAU_MS]]; gap steps are not averaged.
  * @property trackAccelMinScale lowest factor of that scaling, unitless, in [[MIN_TRACK_ACCEL_MIN_SCALE],
  *   [MAX_TRACK_ACCEL_MIN_SCALE]]; 1 = no scaling.
  * @property trackHeightAccelSigmaRatio the same for the track height's rate of change, in h/s², in
@@ -285,6 +288,7 @@ data class TrackerConfig(
     val trackAccelSigmaRatio: Float = DEFAULT_TRACK_ACCEL_SIGMA_RATIO,
     val trackAccelRefDtMs: Float = DEFAULT_TRACK_ACCEL_REF_DT_MS,
     val trackAccelMinScale: Float = DEFAULT_TRACK_ACCEL_MIN_SCALE,
+    val trackAccelIntervalTauMs: Float = DEFAULT_TRACK_ACCEL_INTERVAL_TAU_MS,
     val trackHeightAccelSigmaRatio: Float = DEFAULT_TRACK_HEIGHT_ACCEL_SIGMA_RATIO,
     val trackHeightNoiseRatio: Float = DEFAULT_TRACK_HEIGHT_NOISE_RATIO,
     val trackInitVelocitySigmaRatio: Float = DEFAULT_TRACK_INIT_VELOCITY_SIGMA_RATIO,
@@ -511,6 +515,10 @@ data class TrackerConfig(
         }
         require(trackAccelMinScale in MIN_TRACK_ACCEL_MIN_SCALE..MAX_TRACK_ACCEL_MIN_SCALE) {
             "trackAccelMinScale $trackAccelMinScale outside [$MIN_TRACK_ACCEL_MIN_SCALE, $MAX_TRACK_ACCEL_MIN_SCALE]"
+        }
+        require(trackAccelIntervalTauMs in MIN_TRACK_ACCEL_INTERVAL_TAU_MS..MAX_TRACK_ACCEL_INTERVAL_TAU_MS) {
+            "trackAccelIntervalTauMs $trackAccelIntervalTauMs outside " +
+                "[$MIN_TRACK_ACCEL_INTERVAL_TAU_MS, $MAX_TRACK_ACCEL_INTERVAL_TAU_MS]"
         }
         require(trackHeightAccelSigmaRatio in MIN_TRACK_ACCEL_SIGMA_RATIO..MAX_TRACK_ACCEL_SIGMA_RATIO) {
             "trackHeightAccelSigmaRatio $trackHeightAccelSigmaRatio outside " +
@@ -1109,6 +1117,15 @@ data class TrackerConfig(
 
         /** Highest accepted [trackAccelMinScale]: no scaling. */
         const val MAX_TRACK_ACCEL_MIN_SCALE = 1f
+
+        /** Default [trackAccelIntervalTauMs], in milliseconds. */
+        const val DEFAULT_TRACK_ACCEL_INTERVAL_TAU_MS = 1000f
+
+        /** Lowest accepted [trackAccelIntervalTauMs], in milliseconds. */
+        const val MIN_TRACK_ACCEL_INTERVAL_TAU_MS = 100f
+
+        /** Highest accepted [trackAccelIntervalTauMs], in milliseconds. */
+        const val MAX_TRACK_ACCEL_INTERVAL_TAU_MS = 10_000f
 
         /** Default [trackHeightAccelSigmaRatio], in h/s². */
         const val DEFAULT_TRACK_HEIGHT_ACCEL_SIGMA_RATIO = 2f

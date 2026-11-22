@@ -713,6 +713,12 @@ class TrackerConfigTest {
 
         assertThat(config.trackAccelRefDtMs).isEqualTo(50f)
         assertThat(config.trackAccelMinScale).isEqualTo(0.5f)
+        assertThat(config.trackAccelIntervalTauMs).isEqualTo(1000f)
+        assertWithin(
+            config.trackAccelIntervalTauMs,
+            TrackerConfig.MIN_TRACK_ACCEL_INTERVAL_TAU_MS,
+            TrackerConfig.MAX_TRACK_ACCEL_INTERVAL_TAU_MS,
+        )
         assertWithin(config.trackAccelRefDtMs, TrackerConfig.MIN_TRACK_ACCEL_REF_DT_MS, TrackerConfig.MAX_TRACK_ACCEL_REF_DT_MS)
         assertWithin(config.trackAccelMinScale, TrackerConfig.MIN_TRACK_ACCEL_MIN_SCALE, TrackerConfig.MAX_TRACK_ACCEL_MIN_SCALE)
         TrackerConfig(
@@ -735,6 +741,9 @@ class TrackerConfigTest {
                 { TrackerConfig(trackAccelMinScale = TrackerConfig.MIN_TRACK_ACCEL_MIN_SCALE / 2f) },
                 { TrackerConfig(trackAccelMinScale = TrackerConfig.MAX_TRACK_ACCEL_MIN_SCALE * 2f) },
                 { TrackerConfig(trackAccelMinScale = Float.NaN) },
+                { TrackerConfig(trackAccelIntervalTauMs = TrackerConfig.MIN_TRACK_ACCEL_INTERVAL_TAU_MS / 2f) },
+                { TrackerConfig(trackAccelIntervalTauMs = TrackerConfig.MAX_TRACK_ACCEL_INTERVAL_TAU_MS * 2f) },
+                { TrackerConfig(trackAccelIntervalTauMs = Float.NaN) },
             )
         for (build in rejected) assertThrows(IllegalArgumentException::class.java) { build() }
     }

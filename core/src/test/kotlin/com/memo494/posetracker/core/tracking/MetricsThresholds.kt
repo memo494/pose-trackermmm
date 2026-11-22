@@ -147,4 +147,22 @@ object MetricsThresholds {
 
     /** S15: time in milliseconds from the first frame until a track is shown, at most. Model p90 600 ms at 20 fps. */
     const val S15_MAX_FIRST_SHOWN_MS = 1000.0
+
+    /**
+     * F4 (display lead): walker at 1 and 2 h/s, time-averaged error on the display model (frame on screen 75 ms after
+     * capture), with the lead over without it, at most.
+     */
+    const val F4_MAX_ERROR_RATIO_WITH_LEAD = 0.5
+
+    /** F4: the same walker's time-averaged error with the lead, in units of h, at most. */
+    const val F4_MAX_WALKER_ERROR_H = 0.08
+
+    /** F4: abrupt stop of a walker at 1 or 2 h/s: largest distance on screen past the stop point, in units of h, at most. */
+    const val F4_MAX_STOP_OVERSHOOT_H = 0.20
+
+    /** F4: the point counts as past the stop point when it is further than this, in units of h. */
+    const val F4_STOP_PAST_LIMIT_H = 0.05
+
+    /** F4: capture to screen in the display model, in milliseconds. */
+    const val F4_DISPLAY_LATENCY_MS = 75.0
 }

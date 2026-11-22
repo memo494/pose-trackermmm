@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import com.memo494.posetracker.core.TrackerConfig
 import com.memo494.posetracker.core.capture.CaptureFrame
 import com.memo494.posetracker.core.model.PoseDetection
+import com.memo494.posetracker.core.modelimport.InputLayout
 import com.ultralytics.yolo.PoseEstimator
 import java.io.File
 import java.nio.ByteBuffer
@@ -117,9 +118,12 @@ internal class UltralyticsPoseEngine private constructor(
          * @param scoreThreshold minimum person confidence, unitless in [0, 1].
          * @param rawNmsIou IoU above which a raw model output's lower-scored box is dropped, unitless
          *   (see [TrackerConfig.rawNmsIou]); unused for an end-to-end output.
-         * @throws IllegalStateException when the input layout was not recognised as NCHW `[1,3,H,W]` or the
-         *   accelerator is neither GPU nor CPU; LiteRT exceptions for a model that cannot be loaded. The input
-         *   may be rectangular; its width and height are reported as [inputWidth] and [inputHeight].
+         * @param expectedLayout the input layout the import check recorded (NCHW `[1,3,H,W]` or NHWC `[1,H,W,3]`).
+         * @throws IllegalStateException when the layout the vendored model read from the file differs from
+         *   [expectedLayout] (it falls back to NHWC when it cannot read the input by name, which would feed an NCHW model
+         *   wrong data) or the accelerator is neither GPU nor CPU; LiteRT exceptions for a model that cannot be loaded.
+         *   The input may be rectangular; its width and height are reported as [inputWidth] and [inputHeight], the real
+         *   width and height for either layout.
          */
         fun create(
             context: Context,
@@ -127,6 +131,7 @@ internal class UltralyticsPoseEngine private constructor(
             useGpu: Boolean,
             scoreThreshold: Float,
             rawNmsIou: Float = TrackerConfig.DEFAULT_RAW_NMS_IOU,
+            expectedLayout: InputLayout = InputLayout.NCHW,
         ): UltralyticsPoseEngine {
             val estimator =
                 PoseEstimator(
@@ -139,15 +144,19 @@ internal class UltralyticsPoseEngine private constructor(
                     rawNmsIou,
                 )
             try {
-                return wrap(estimator)
+                return wrap(estimator, expectedLayout)
             } catch (e: Throwable) {
                 runCatching { estimator.close() }
                 throw e
             }
         }
 
-        private fun wrap(estimator: PoseEstimator): UltralyticsPoseEngine {
-            check(estimator.inputUsesNchw) { "model input layout was not recognised as NCHW [1,3,H,W]" }
+        private fun wrap(
+            estimator: PoseEstimator,
+            expectedLayout: InputLayout,
+        ): UltralyticsPoseEngine {
+            val actualLayout = if (estimator.inputUsesNchw) InputLayout.NCHW else InputLayout.NHWC
+            check(actualLayout == expectedLayout) { "model input layout is $actualLayout but $expectedLayout was expected" }
             val modelInput = estimator.inputSize
             val accelerator =
                 when (val name = estimator.accelerator) {

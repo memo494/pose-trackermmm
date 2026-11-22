@@ -297,10 +297,10 @@ Thread-confined: create, `detect` and `close` on the capture thread (a call from
 - **Model file:** packaged as an app asset (the `stage<Variant>ModelAssets` build task, §8), staged at start by
   `ModelStager` into `noBackupFilesDir/models` (versioned name, temp file + rename) with a sha256 check, and only
   then opened by LiteRT **by path**; a file that does not match its hash is never opened.
-- Input tensor layout **read from the model** (expected NCHW `(1,3,H,W)`, RGB, 0–1; **not necessarily square** since
-  M1a). Never hard-coded. If the
-  vendored `LiteRtModel` could not read the layout by name it silently assumes NHWC; the adapter checks
-  `BasePredictor.inputUsesNchw` and refuses to run (fail closed). It also requires the input width and height
+- Input tensor layout **read from the model** (NCHW `(1,3,H,W)` or NHWC `(1,H,W,3)` since M-legacy T1, RGB, 0–1;
+  **not necessarily square** since M1a). Never hard-coded. If the
+  vendored `LiteRtModel` could not read the layout by name it silently assumes NHWC; the adapter compares
+  `BasePredictor.inputUsesNchw` with the layout the import check recorded and refuses to run on a mismatch (fail closed). It also requires the input width and height
   it was created for: `PoseDetectors.fromAssets` expects the square `TrackerConfig.modelInputSize`,
   `fromImported` the width and height of the stored meta; `LiteRtPoseDetector.create` closes the engine and throws
   when either side differs.
@@ -778,7 +778,8 @@ step back up after 60 s below the threshold. Every step is logged and shown in t
     as `model-<first 16 hex of sha256>.tflite` (named by content, so two imports of equal size never share the
     name the GPU program cache is keyed by); importing again replaces it, **Use built-in model** deletes it. Import
     and reset work only while the capture is stopped; one import runs at a time per process.
-  - *Accepted layout, version 2 (M1a):* exactly one float32 input `[1, 3, H, W]` (channels first; height and width
+  - *Accepted layout, version 2 (M1a):* exactly one float32 input `[1, 3, H, W]` (channels first; since M-legacy T1
+    also channels last `[1, H, W, 3]`, stored as meta text v4 `inputLayout=nhwc`, with the same size rules; height and width
     each a multiple of 32 between `importMinInputSize` and `importMaxInputSize`, 160 to 1280 by default; the long
     side at most `importMaxInputAspect` (4.0) times the short side) and exactly one float32 output `[1, N, 57]`
     (end-to-end pose head, 17 keypoints, `0 < N <= 300`: the vendored decoder treats 57 columns as end-to-end only

@@ -3,6 +3,7 @@ package com.memo494.posetracker.detector
 import android.content.Context
 import com.memo494.posetracker.core.TrackerConfig
 import com.memo494.posetracker.core.modelimport.ImportedModelMeta
+import com.memo494.posetracker.core.modelpack.ModelEntry
 import com.memo494.posetracker.core.modelpack.ModelInfo
 import com.memo494.posetracker.core.modelpack.ModelIntegrityException
 import com.memo494.posetracker.core.modelpack.ModelStager
@@ -14,6 +15,25 @@ import java.io.FileNotFoundException
 object PoseDetectors {
     /** Directory under `noBackupFilesDir` that holds the staged model files. */
     private const val MODELS_DIRECTORY = "models"
+
+    /**
+     * The `model_info.json` entry of the bundled model of [inputWidth] x [inputHeight] (file name and sha256), read
+     * from the assets; the crash marker of its load names the sha256. Small asset read, but still not for the main thread.
+     *
+     * @throws java.io.IOException when the asset cannot be read.
+     * @throws IllegalArgumentException when `model_info.json` is invalid or has no entry for the size.
+     */
+    fun bundledEntry(
+        context: Context,
+        inputWidth: Int,
+        inputHeight: Int,
+    ): ModelEntry {
+        val infoText =
+            context.applicationContext.assets
+                .open(ModelInfo.ASSET_NAME)
+                .use { it.readBytes().decodeToString() }
+        return ModelInfo.parse(infoText).entryFor(inputWidth, inputHeight)
+    }
 
     /**
      * Creates the detector for the bundled model of [inputWidth] x [inputHeight] model pixels (the built-in model of
@@ -38,8 +58,7 @@ object PoseDetectors {
         inputHeight: Int,
     ): BundledDetector {
         val appContext = context.applicationContext
-        val infoText = appContext.assets.open(ModelInfo.ASSET_NAME).use { it.readBytes().decodeToString() }
-        val entry = ModelInfo.parse(infoText).entryFor(inputWidth, inputHeight)
+        val entry = bundledEntry(appContext, inputWidth, inputHeight)
         val stager = ModelStager(File(appContext.noBackupFilesDir, MODELS_DIRECTORY))
         val modelFile = stager.stage(entry.fileName, entry.sha256) { appContext.assets.open(entry.fileName) }
         val factory =

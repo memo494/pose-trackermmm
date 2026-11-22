@@ -34,6 +34,8 @@ private class TestDetector(
 }
 
 class ModelSwitcherTest {
+    private val bundledSha = "c".repeat(64)
+
     private val metaA = ImportedModelMeta("a.tflite", "a".repeat(64), 1_000L, 640, 640, 300)
     private val metaB = ImportedModelMeta("b.tflite", "b".repeat(64), 1_000L, 832, 384, 300)
 
@@ -93,6 +95,7 @@ class ModelSwitcherTest {
                 importedFailure?.let { throw it }
                 newDetector(meta.displayName, meta.inputWidth, meta.inputHeight)
             },
+            builtInSha256 = { bundledSha },
             loadBuiltIn = { orientation ->
                 now += loadNs
                 builtInLoads++
@@ -100,7 +103,7 @@ class ModelSwitcherTest {
                 builtInFailure?.let { throw it }
                 val width = BuiltInModels.widthFor(orientation)
                 val height = BuiltInModels.heightFor(orientation)
-                BundledDetector(newDetector("builtin", width, height), "yolo26n-pose_${width}x$height.tflite", "c".repeat(64))
+                BundledDetector(newDetector("builtin", width, height), "yolo26n-pose_${width}x$height.tflite", bundledSha)
             },
             loadFallbackBuiltIn = {
                 now += loadNs
@@ -230,6 +233,74 @@ class ModelSwitcherTest {
 
         assertThat(selection.loaded.source).isEqualTo(ModelSource.BUILT_IN)
         assertThat(selection.loaded.detector!!.inputWidth).isEqualTo(960)
+    }
+
+    @Test
+    fun rotation_withTheSameFailingModelInBothSlots_loadsTheBuiltInModelOfTheOtherOrientation() {
+        choose(portrait = library(metaA), landscape = library(metaA))
+        importedFailure = IllegalStateException("bad model")
+        val first = switcher.select(ModelOrientation.PORTRAIT)!!
+
+        val second = switcher.select(ModelOrientation.LANDSCAPE)
+
+        assertThat(first.loaded.detector!!.inputWidth).isEqualTo(448)
+        assertThat(second!!.loaded.detector!!.inputWidth).isEqualTo(960)
+        assertThat(second.loaded.detector!!.inputHeight).isEqualTo(448)
+        assertThat(detectors.first().closeCount).isEqualTo(1)
+    }
+
+    @Test
+    fun aFailingModelInTheSlot_isNotRetriedWhileTheOrientationStays() {
+        choose(portrait = library(metaA))
+        importedFailure = IllegalStateException("bad model")
+        switcher.select(ModelOrientation.PORTRAIT)
+
+        assertThat(switcher.select(ModelOrientation.PORTRAIT)).isNull()
+        assertThat(loadsImported).hasSize(1)
+    }
+
+    @Test
+    fun squareFallback_thenRotation_loadsTheBundledModelOfTheOtherOrientation() {
+        builtInFailure = IllegalStateException("portrait model broken")
+        val first = switcher.select(ModelOrientation.PORTRAIT)!!
+        builtInFailure = null
+
+        val second = switcher.select(ModelOrientation.LANDSCAPE)!!
+
+        assertThat(first.loaded.detector!!.inputWidth).isEqualTo(416)
+        assertThat(second.loaded.detector!!.inputWidth).isEqualTo(960)
+        assertThat(second.loaded.status().builtInFile).isEqualTo("yolo26n-pose_960x448.tflite")
+        assertThat(second.loaded.builtInFailed).isFalse()
+    }
+
+    @Test
+    fun squareFallback_isNotRetriedWhileTheOrientationStays() {
+        builtInFailure = IllegalStateException("portrait model broken")
+        switcher.select(ModelOrientation.PORTRAIT)
+
+        assertThat(switcher.select(ModelOrientation.PORTRAIT)).isNull()
+        assertThat(builtInLoads).isEqualTo(1)
+    }
+
+    @Test
+    fun bundledModelOnTheBlockedList_isSkipped_andTheSquareFallbackRuns() {
+        blocked = setOf(bundledSha)
+
+        val loaded = switcher.select(ModelOrientation.PORTRAIT)!!.loaded
+
+        assertThat(builtInLoads).isEqualTo(0)
+        assertThat(loaded.detector!!.inputWidth).isEqualTo(416)
+        assertThat(loaded.fallback).isEqualTo(ModelFallback.BUILT_IN_FAILED)
+    }
+
+    @Test
+    fun anUnreadableLibrary_failsClosedToTheSquareFallback() {
+        readFailure = IllegalStateException("cannot read")
+
+        val loaded = switcher.select(ModelOrientation.PORTRAIT)!!.loaded
+
+        assertThat(builtInLoads).isEqualTo(0)
+        assertThat(loaded.detector!!.inputWidth).isEqualTo(416)
     }
 
     @Test

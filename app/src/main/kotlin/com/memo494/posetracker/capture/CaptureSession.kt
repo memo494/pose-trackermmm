@@ -281,6 +281,7 @@ internal class CaptureSession(
                 CaptureLog::log,
                 modelImported = loaded?.source == ModelSource.IMPORTED,
                 importedModelNotUsed = loaded?.importedModelNotUsed == true,
+                builtInModelFailed = loaded?.builtInFailed == true,
             )
         thermalSampler =
             ThermalSampler(
@@ -306,6 +307,16 @@ internal class CaptureSession(
             readLibrary = store::state,
             setGuard = store::setGuard,
             loadImported = { meta -> PoseDetectors.fromImported(context, store.modelFileFor(meta), meta, config) },
+            builtInSha256 = { orientation ->
+                try {
+                    PoseDetectors
+                        .bundledEntry(context, BuiltInModels.widthFor(orientation), BuiltInModels.heightFor(orientation))
+                        .sha256
+                } catch (e: Exception) {
+                    CaptureLog.log("the built-in model is not listed in model_info.json", e)
+                    null
+                }
+            },
             loadBuiltIn = { orientation ->
                 PoseDetectors.fromAssets(context, config, BuiltInModels.widthFor(orientation), BuiltInModels.heightFor(orientation))
             },
@@ -353,7 +364,12 @@ internal class CaptureSession(
         detector = loaded.detector
         publishModelStatus(switcher)
         CaptureLog.log(selection.logLine(), null)
-        activePipeline.onModelChanged(loaded.detector, loaded.source == ModelSource.IMPORTED, loaded.importedModelNotUsed)
+        activePipeline.onModelChanged(
+            loaded.detector,
+            loaded.source == ModelSource.IMPORTED,
+            loaded.importedModelNotUsed,
+            loaded.builtInFailed,
+        )
     }
 
     /**

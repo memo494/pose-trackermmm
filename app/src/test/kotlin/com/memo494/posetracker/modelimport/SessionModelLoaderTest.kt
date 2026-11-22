@@ -42,6 +42,11 @@ class SessionModelLoaderTest {
     /** Only the bundled model of the orientation fails; the 416 fallback is fine. */
     private var preferredFailure: Throwable? = null
     private var fallbackLoads = 0
+
+    /** `null` = the hash of the bundled model is unknown, so it loads without a marker; the guard tests set it. */
+    private var builtInSha: String? = null
+    private val blockedShas = mutableSetOf<String>()
+    private var guardDuringBuiltInLoad: ImportGuardState? = null
     private var storedFileMatches = false
     private var verifyFailure: Throwable? = null
     private val logs = mutableListOf<String>()
@@ -71,11 +76,14 @@ class SessionModelLoaderTest {
                 importedFailure?.let { throw it }
                 importedDetector
             },
+            builtInSha256 = { builtInSha },
+            isBuiltInBlocked = { it in blockedShas },
             loadBuiltIn = {
                 builtInLoads++
+                guardDuringBuiltInLoad = storedGuard
                 preferredFailure?.let { throw it }
                 builtInFailure?.let { throw it }
-                BundledDetector(builtInDetector, "yolo26n-pose_448x960.tflite", "e".repeat(64))
+                BundledDetector(builtInDetector, "yolo26n-pose_448x960.tflite", BUILT_IN_SHA)
             },
             loadFallbackBuiltIn = {
                 fallbackLoads++
@@ -380,9 +388,9 @@ class SessionModelLoaderTest {
 
         assertThat(loaded.detector).isSameInstanceAs(builtInDetector)
         assertThat(loaded.builtInFile).isEqualTo("yolo26n-pose_448x960.tflite")
-        assertThat(loaded.builtInSha256).isEqualTo("e".repeat(64))
+        assertThat(loaded.builtInSha256).isEqualTo(BUILT_IN_SHA)
         assertThat(loaded.status().builtInFile).isEqualTo("yolo26n-pose_448x960.tflite")
-        assertThat(loaded.status().builtInSha256).isEqualTo("e".repeat(64))
+        assertThat(loaded.status().builtInSha256).isEqualTo(BUILT_IN_SHA)
         assertThat(fallbackLoads).isEqualTo(0)
     }
 
@@ -395,7 +403,9 @@ class SessionModelLoaderTest {
 
         assertThat(loaded.detector).isSameInstanceAs(squareDetector)
         assertThat(loaded.source).isEqualTo(ModelSource.BUILT_IN)
-        assertThat(loaded.fallback).isNull()
+        assertThat(loaded.fallback).isEqualTo(ModelFallback.BUILT_IN_FAILED)
+        assertThat(loaded.builtInFailed).isTrue()
+        assertThat(loaded.status().builtInFailed).isTrue()
         assertThat(loaded.builtInFile).isEqualTo("yolo26n-pose_416.tflite")
         assertThat(loaded.message).isEqualTo("built-in model failed: IllegalStateException: input size differs")
         assertThat(loaded.status().inputWidth).isEqualTo(416)
@@ -420,6 +430,8 @@ class SessionModelLoaderTest {
 
         assertThat(loaded.detector).isSameInstanceAs(squareDetector)
         assertThat(loaded.fallback).isEqualTo(ModelFallback.LOAD_FAILED)
+        assertThat(loaded.builtInFailed).isTrue()
+        assertThat(loaded.importedModelNotUsed).isTrue()
         assertThat(loaded.message).isEqualTo("IllegalStateException: imported")
     }
 
@@ -433,6 +445,92 @@ class SessionModelLoaderTest {
 
         assertThat(loaded.detector).isNull()
         assertThat(loaded.builtInFile).isNull()
+        assertThat(loaded.fallback).isNull()
+    }
+
+    @Test
+    fun bundledModel_loadsWithTheMarkerNamingItExactlyWhileItLoads() {
+        state = StoredModelState(null, fileExists = false, guard = ImportGuardState.Idle)
+        builtInSha = BUILT_IN_SHA
+
+        loader().load()
+
+        assertThat(guardDuringBuiltInLoad).isEqualTo(ImportGuardState.Pending(ImportStage.LOAD, BUILT_IN_SHA))
+        assertThat(guardWrites).containsExactly(ImportGuardState.Pending(ImportStage.LOAD, BUILT_IN_SHA), ImportGuardState.Idle).inOrder()
+        assertThat(storedGuard).isEqualTo(ImportGuardState.Idle)
+    }
+
+    @Test
+    fun bundledModelThatFailsCatchably_putsTheMarkerBackToIdle_andIsNotABlock() {
+        state = StoredModelState(null, fileExists = false, guard = ImportGuardState.Idle)
+        builtInSha = BUILT_IN_SHA
+        preferredFailure = IllegalStateException("bad")
+
+        loader().load()
+
+        assertThat(storedGuard).isEqualTo(ImportGuardState.Idle)
+        assertThat(guardWrites).containsExactly(ImportGuardState.Pending(ImportStage.LOAD, BUILT_IN_SHA), ImportGuardState.Idle).inOrder()
+    }
+
+    @Test
+    fun bundledModelThatCrashedBefore_isSkipped_andTheSquareFallbackRuns() {
+        state = StoredModelState(null, fileExists = false, guard = ImportGuardState.Idle)
+        builtInSha = BUILT_IN_SHA
+        blockedShas.add(BUILT_IN_SHA)
+
+        val loaded = loader().load()
+
+        assertThat(builtInLoads).isEqualTo(0)
+        assertThat(fallbackLoads).isEqualTo(1)
+        assertThat(loaded.detector).isSameInstanceAs(squareDetector)
+        assertThat(loaded.fallback).isEqualTo(ModelFallback.BUILT_IN_FAILED)
+        assertThat(loaded.builtInFailed).isTrue()
+        assertThat(loaded.message).contains("crashed")
+        assertThat(guardWrites).isEmpty()
+        assertThat(logs.any { it.contains("crashed") }).isTrue()
+    }
+
+    @Test
+    fun bundledModelWhoseMarkerCannotBeStored_isNotLoaded_theSquareFallbackRuns() {
+        state = StoredModelState(null, fileExists = false, guard = ImportGuardState.Idle)
+        builtInSha = BUILT_IN_SHA
+        failGuardWritesFrom = 0
+
+        val loaded = loader().load()
+
+        assertThat(builtInLoads).isEqualTo(0)
+        assertThat(loaded.detector).isSameInstanceAs(squareDetector)
+        assertThat(loaded.fallback).isEqualTo(ModelFallback.BUILT_IN_FAILED)
+    }
+
+    @Test
+    fun bundledModelWithoutAKnownHash_loadsWithoutAMarker() {
+        state = StoredModelState(null, fileExists = false, guard = ImportGuardState.Idle)
+
+        val loaded = loader().load()
+
+        assertThat(loaded.detector).isSameInstanceAs(builtInDetector)
+        assertThat(guardWrites).isEmpty()
+    }
+
+    @Test
+    fun squareFallback_isNeverGuarded() {
+        state = StoredModelState(null, fileExists = false, guard = ImportGuardState.Idle)
+        builtInSha = BUILT_IN_SHA
+        blockedShas.add(BUILT_IN_SHA)
+
+        loader().load()
+
+        assertThat(guardWrites).isEmpty()
+    }
+
+    @Test
+    fun theSquareFallback_isNotAnImportedModelNote() {
+        val detector: PoseDetector = squareDetector
+        val loaded = LoadedModel(detector, ModelSource.BUILT_IN, null, ModelFallback.BUILT_IN_FAILED, builtInFailed = true)
+
+        assertThat(loaded.importedModelNotUsed).isFalse()
+        assertThat(loaded.builtInFailed).isTrue()
     }
 
     // ---- the status the rest of the app reads ----
@@ -501,5 +599,6 @@ class SessionModelLoaderTest {
 
     private companion object {
         const val NEVER = Int.MAX_VALUE
+        val BUILT_IN_SHA = "e".repeat(64)
     }
 }

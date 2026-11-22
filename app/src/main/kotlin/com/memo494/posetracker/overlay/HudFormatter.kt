@@ -20,6 +20,7 @@ object HudFormatter {
     private const val WARNING_CAPTURE_SIZE = "Capture not display-sized: dots hidden"
     private const val WARNING_DETECTOR_UNAVAILABLE = "Model not loaded: no detection"
     private const val WARNING_NOT_VISIBLE = "Content not visible: dots hidden"
+    private const val WARNING_BUILT_IN_FAILED = "Built-in model failed: "
     private const val WARNING_IMPORTED_NOT_USED = "Imported model not used: built-in model"
     private const val HINT_TAP_A_PERSON = "tap a person"
     private const val TRACKS_PREFIX = " trk "
@@ -91,7 +92,8 @@ object HudFormatter {
 
     /**
      * Writes the warning line into [out], by priority: a missing detector, a capture that is not display-sized,
-     * content that is not visible, then the note that an imported model is not used, and last, while [armed] (the
+     * content that is not visible, then the note that the built-in model failed (with the input size of the fallback that
+     * runs), then the note that an imported model is not used, and last, while [armed] (the
      * overlay waits for the tap that locks a person), the hint `tap a person`. Returns the number of characters
      * written; 0 = nothing to show.
      */
@@ -103,6 +105,9 @@ object HudFormatter {
         if (state.warning == OverlayWarning.DETECTOR_UNAVAILABLE) return putText(out, 0, WARNING_DETECTOR_UNAVAILABLE)
         if (state.warning == OverlayWarning.CAPTURE_NOT_DISPLAY_SIZED) return putText(out, 0, WARNING_CAPTURE_SIZE)
         if (!state.dotsVisible) return putText(out, 0, WARNING_NOT_VISIBLE)
+        if (state.warning == OverlayWarning.BUILT_IN_MODEL_FAILED) {
+            return ModelInputText.write(state.modelInputWidth, state.modelInputHeight, out, putText(out, 0, WARNING_BUILT_IN_FAILED))
+        }
         if (state.warning == OverlayWarning.IMPORTED_MODEL_NOT_USED) return putText(out, 0, WARNING_IMPORTED_NOT_USED)
         if (armed) return putText(out, 0, HINT_TAP_A_PERSON)
         return 0

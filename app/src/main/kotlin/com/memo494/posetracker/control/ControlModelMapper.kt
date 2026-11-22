@@ -129,7 +129,7 @@ internal object ControlModelMapper {
                         BuiltInReason.FILE_MISSING -> ModelNotice(ModelNoticeKind.FILE_MISSING)
                         BuiltInReason.GUARD_TRIPPED_PROBE -> ModelNotice(ModelNoticeKind.GUARD_TRIPPED_PROBE)
                         BuiltInReason.GUARD_TRIPPED_LOAD -> ModelNotice(ModelNoticeKind.GUARD_TRIPPED_LOAD)
-                        null -> unreadableNotice(status)
+                        null -> unreadableNotice(status) ?: builtInFailedNotice(status)
                     }
                 ControlEvent.ModelStateLoaded(ActiveModel.BuiltIn, notice, stored.anyFileStored)
             }
@@ -182,6 +182,9 @@ internal object ControlModelMapper {
     /** Only a trip at the probe reaches here with an imported model active (a load trip is always built-in). */
     private fun probeTripNotice(guard: ImportGuardState): ModelNotice? =
         if (guard == ImportGuardState.Tripped(ImportStage.PROBE)) ModelNotice(ModelNoticeKind.PROBE_TRIP_MODEL_KEPT) else null
+
+    private fun builtInFailedNotice(status: ModelStatus?): ModelNotice? =
+        if (status?.builtInFailed == true) ModelNotice(ModelNoticeKind.BUILT_IN_FAILED, status.message) else null
 
     private fun unreadableNotice(status: ModelStatus?): ModelNotice? =
         if (status?.fallback == ModelFallback.STATE_UNREADABLE) {
@@ -241,6 +244,7 @@ internal object ControlModelMapper {
             ModelNoticeKind.GUARD_NOT_STORED -> R.string.model_notice_guard_not_stored
             ModelNoticeKind.LOAD_FAILED -> R.string.model_notice_load_failed
             ModelNoticeKind.STATE_UNREADABLE -> R.string.model_notice_state_unreadable
+            ModelNoticeKind.BUILT_IN_FAILED -> R.string.model_notice_built_in_failed
             ModelNoticeKind.BLOCKED_UNREADABLE -> R.string.model_notice_blocked_unreadable
         }
 }

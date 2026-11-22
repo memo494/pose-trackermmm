@@ -50,8 +50,9 @@ internal class ModelSelection(
  * @param readLibrary what is stored now (`ModelLibraryStore.state`); a failure means "built-in, unreadable".
  * @param setGuard stores the crash marker (`ModelLibraryStore.setGuard`).
  * @param loadImported builds the detector of a library model (`PoseDetectors.fromImported`).
+ * @param builtInSha256 the sha256 of the bundled model of an orientation (`null` = unknown): the crash marker names it.
  * @param loadBuiltIn builds the detector of the built-in model of an orientation (`PoseDetectors.fromAssets`).
- * @param loadFallbackBuiltIn builds the detector of the square 416 model, used when [loadBuiltIn] fails.
+ * @param loadFallbackBuiltIn builds the detector of the square fallback model, used when [loadBuiltIn] fails.
  * @param verifyStored whether a stored file still has its length and sha256 (`ModelLibraryStore.storedFileMatches`).
  * @param nowNs a monotonic clock in nanoseconds.
  * @param log receives a message and the failure, if any; it must not throw.
@@ -60,6 +61,7 @@ internal class ModelSwitcher(
     private val readLibrary: () -> LibraryState,
     private val setGuard: (ImportGuardState) -> Boolean,
     private val loadImported: (ImportedModelMeta) -> PoseDetector,
+    private val builtInSha256: (ModelOrientation) -> String?,
     private val loadBuiltIn: (ModelOrientation) -> BundledDetector,
     private val loadFallbackBuiltIn: () -> BundledDetector,
     private val verifyStored: (ImportedModelMeta) -> Boolean,
@@ -71,6 +73,9 @@ internal class ModelSwitcher(
     /** What the slot asked for when [current] was loaded: the sha256, or [builtInKey]; `null` = nothing loaded yet. */
     private var loadedFor: String? = null
     private var lastLibrary: LibraryState? = null
+
+    /** The orientation the built-in model of [current] was loaded for; `null` when [current] is an imported model. */
+    private var loadedBuiltInFor: ModelOrientation? = null
 
     /** Set while one [select] runs: the old detector was closed / the new model was built (for [recover]). */
     private var oldClosed = false
@@ -120,6 +125,7 @@ internal class ModelSwitcher(
         val failed = LoadedModel(null, ModelSource.BUILT_IN, null, ModelFallback.LOAD_FAILED, ModelProbe.failureMessage(error))
         current = failed
         loadedFor = null
+        loadedBuiltInFor = null
         switches++
         return ModelSelection(failed, orientation, 0L, true)
     }
@@ -140,7 +146,7 @@ internal class ModelSwitcher(
         if (library != null) lastLibrary = library
         val wanted = library?.let { shaOf(it.slots.choiceFor(orientation)) } ?: builtInKey(orientation)
         val running = current
-        if (running != null && running.detector != null && wanted == loadedFor) return null
+        if (running != null && running.detector != null && wanted == loadedFor && builtInMatches(orientation)) return null
         val startNs = nowNs()
         if (running != null) closeQuietly(running.detector)
         oldClosed = running != null
@@ -150,6 +156,8 @@ internal class ModelSwitcher(
                 readState = { stateOf(library, orientation) },
                 setGuard = setGuard,
                 loadImported = loadImported,
+                builtInSha256 = { builtInSha256(orientation) },
+                isBuiltInBlocked = { sha256 -> library?.isBlocked(sha256) ?: true },
                 loadBuiltIn = { loadBuiltIn(orientation) },
                 loadFallbackBuiltIn = loadFallbackBuiltIn,
                 log = ::safeLog,
@@ -159,6 +167,7 @@ internal class ModelSwitcher(
         val ms = (nowNs() - startNs) / TrackerConfig.NANOS_PER_MILLI
         current = loaded
         loadedFor = wanted
+        loadedBuiltInFor = if (loaded.source == ModelSource.BUILT_IN) orientation else null
         val isSwitch = running != null
         if (isSwitch) {
             switches++
@@ -207,6 +216,12 @@ internal class ModelSwitcher(
             // Nowhere left to report it.
         }
     }
+
+    /**
+     * Whether the running model still fits [orientation]: an imported model fits both, the built-in model only the one
+     * it was loaded for (also when it runs because the slot's model failed, so a rotation loads the other orientation's).
+     */
+    private fun builtInMatches(orientation: ModelOrientation): Boolean = loadedBuiltInFor.let { it == null || it == orientation }
 
     /** The built-in model differs per orientation, so a change of orientation reloads it; a sha256 never looks like this. */
     private fun builtInKey(orientation: ModelOrientation): String = "$BUILT_IN_KEY_PREFIX${orientation.logName}"

@@ -31,6 +31,12 @@ enum class ModelFallback {
 
     /** What is stored about the imported model could not be read, so nothing imported was used. */
     STATE_UNREADABLE,
+
+    /**
+     * The bundled model of the orientation could not run (it failed to load, its crash marker could not be stored, or
+     * it killed the process before) and the square fallback model runs instead. Not about an imported model.
+     */
+    BUILT_IN_FAILED,
 }
 
 /**
@@ -43,13 +49,16 @@ enum class ModelFallback {
  *   report (an imported model in use, or nothing imported).
  * @property message the one-line failure text for [ModelFallback.LOAD_FAILED] and
  *   [ModelFallback.STATE_UNREADABLE] (class name and message, at most `ModelProbe.MAX_MESSAGE_CHARS`
- *   characters), or "built-in model failed: ..." when the 416 model runs because the model of the orientation
+ *   characters), or "built-in model failed: ..." when the square fallback model runs because the model of the orientation
  *   failed to load; `null` otherwise.
  * @property inputWidth width of the running model's input, in model pixels (Mdl); 0 = no model is running.
  * @property inputHeight height of the running model's input, in model pixels (Mdl); 0 = no model is running.
  * @property builtInFile bare file name of the bundled model that runs ([ModelSource.BUILT_IN] with a detector), e.g.
  *   `yolo26n-pose_448x960.tflite`; `null` otherwise.
  * @property builtInSha256 SHA-256 of [builtInFile], 64 lowercase hex characters; `null` when [builtInFile] is.
+ * @property builtInFailed `true` when the square fallback model runs because the bundled model of the orientation
+ *   could not (see [ModelFallback.BUILT_IN_FAILED]; also `true` when an imported model's fallback is the one in
+ *   [fallback]).
  * @property portrait what the portrait slot is set to (M1b-1): [SLOT_BUILT_IN] or the name and short sha256 of the
  *   library model, as `name 0123456789ab`.
  * @property landscape what the landscape slot is set to, like [portrait].
@@ -67,6 +76,7 @@ data class ModelStatus(
     val inputHeight: Int,
     val builtInFile: String? = null,
     val builtInSha256: String? = null,
+    val builtInFailed: Boolean = false,
     val portrait: String = SLOT_BUILT_IN,
     val landscape: String = SLOT_BUILT_IN,
     val switches: Int = 0,

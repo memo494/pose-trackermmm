@@ -181,6 +181,9 @@ internal enum class ModelNoticeKind {
     /** The last session could not load the imported model ([ModelNotice.message] says why). */
     LOAD_FAILED,
 
+    /** The bundled model of the orientation failed at the last session, so the square fallback model ran ([ModelNotice.message] says why). */
+    BUILT_IN_FAILED,
+
     /** What is stored about the imported model could not be read ([ModelNotice.message] says why). */
     STATE_UNREADABLE,
 

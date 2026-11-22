@@ -186,7 +186,8 @@ internal object DiagnosticsReport {
 
     /**
      * The model of the session: `modelFile`, `modelSha256` (first [TrackerConfig.SHA256_SHORT_CHARS] hex characters)
-     * and `modelOutputRows` describe the imported model in use (`builtin` / `none` otherwise); a refused imported
+     * and `modelOutputRows` describe the imported model in use; for the built-in model `modelFile` is the bundled file
+     * (`yolo26n-pose_448x960.tflite`) with its `modelSha256` (`builtin` / `none` when no bundled model runs); a refused imported
      * model is named in `modelFallbackFile`. The model fields describe the model loaded now; `modelPortrait` and
      * `modelLandscape` (`builtin` or `name sha-prefix`) say what each orientation is set to, `modelSwitches` how many
      * times a change of orientation changed the model since Start and `modelSwitchMsMax` the longest change (ms).
@@ -201,8 +202,8 @@ internal object DiagnosticsReport {
         }
         val inUse = if (model.source == ModelSource.IMPORTED) model.meta else null
         line(out, "modelSource", if (model.source == ModelSource.IMPORTED) SOURCE_IMPORTED else SOURCE_BUILT_IN)
-        line(out, "modelFile", inUse?.displayName ?: SOURCE_BUILT_IN)
-        line(out, "modelSha256", inUse?.let(::shortSha) ?: NONE)
+        line(out, "modelFile", inUse?.displayName ?: model.builtInFile ?: SOURCE_BUILT_IN)
+        line(out, "modelSha256", inUse?.let(::shortSha) ?: model.builtInSha256?.take(TrackerConfig.SHA256_SHORT_CHARS) ?: NONE)
         line(out, "modelInputSize", ModelInputText.text(model.inputWidth, model.inputHeight))
         line(out, "modelOutputRows", inUse?.outputRows ?: NONE)
         line(out, "modelFallback", model.fallback?.name ?: NONE)

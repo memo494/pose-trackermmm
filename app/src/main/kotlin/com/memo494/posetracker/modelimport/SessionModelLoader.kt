@@ -5,8 +5,16 @@ import com.memo494.posetracker.core.modelimport.ImportGuard
 import com.memo494.posetracker.core.modelimport.ImportGuardState
 import com.memo494.posetracker.core.modelimport.ImportStage
 import com.memo494.posetracker.core.modelimport.ImportedModelMeta
+import com.memo494.posetracker.detector.BundledDetector
 import com.memo494.posetracker.detector.ModelProbe
 import com.memo494.posetracker.detector.PoseDetector
+
+/**
+ * Runs the model creation it is given (the risky LiteRT step: `CompiledModel.create`, the GPU compile) inside the crash
+ * marker `Pending(LOAD, sha256)` of the bundled model, and returns what it returned. Staging the file (copy and hash) is
+ * not part of it, so it runs before the guard is used: a kill during the first-run copy must not block the model.
+ */
+typealias CreateGuard = (() -> PoseDetector) -> PoseDetector
 
 /**
  * The outcome of [SessionModelLoader.load].
@@ -17,6 +25,10 @@ import com.memo494.posetracker.detector.PoseDetector
  * @property meta see [ModelStatus.meta].
  * @property fallback see [ModelStatus.fallback].
  * @property message see [ModelStatus.message].
+ * @property builtInFile see [ModelStatus.builtInFile].
+ * @property builtInSha256 see [ModelStatus.builtInSha256].
+ * @property builtInFailed see [ModelStatus.builtInFailed].
+ * @property builtInBlocked see [ModelStatus.builtInBlocked].
  */
 data class LoadedModel(
     val detector: PoseDetector?,
@@ -24,13 +36,29 @@ data class LoadedModel(
     val meta: ImportedModelMeta?,
     val fallback: ModelFallback?,
     val message: String? = null,
+    val builtInFile: String? = null,
+    val builtInSha256: String? = null,
+    val builtInFailed: Boolean = false,
+    val builtInBlocked: Boolean = false,
 ) {
-    /** Whether the HUD shows the "imported model not used" note: some fallback happened. */
+    /** Whether the HUD shows the "imported model not used" note: an imported model's fallback happened. */
     val importedModelNotUsed: Boolean
-        get() = fallback != null
+        get() = fallback != null && fallback != ModelFallback.BUILT_IN_FAILED
 
     /** The status for [ModelStatusHolder]; the input width and height are the running detector's, 0 without one. */
-    fun status(): ModelStatus = ModelStatus(source, meta, fallback, message, detector?.inputWidth ?: 0, detector?.inputHeight ?: 0)
+    fun status(): ModelStatus =
+        ModelStatus(
+            source,
+            meta,
+            fallback,
+            message,
+            detector?.inputWidth ?: 0,
+            detector?.inputHeight ?: 0,
+            builtInFile = builtInFile,
+            builtInSha256 = builtInSha256,
+            builtInFailed = builtInFailed,
+            builtInBlocked = builtInBlocked,
+        )
 
     /** The one log line of the model choice; the input text is [ModelInputText.text] (`0` without a detector). */
     fun logLine(): String {
@@ -49,7 +77,14 @@ data class LoadedModel(
  *   (`ImportedModelStore.setGuard`).
  * @param loadImported builds the detector for the imported model (`PoseDetectors.fromImported`); any `Throwable`
  *   means "use the built-in model".
- * @param loadBuiltIn builds the built-in detector (`PoseDetectors.fromAssets`).
+ * @param builtInSha256 the sha256 of the bundled model about to be loaded for the orientation, `null` = unknown (it
+ *   then loads without a crash marker).
+ * @param isBuiltInBlocked whether the model with that sha256 is on the blocked list (the process died while loading it).
+ * @param loadBuiltIn builds the detector of the built-in model of the orientation being loaded
+ *   (`PoseDetectors.fromAssets`: 448x960 portrait, 960x448 landscape). It stages the file first, then wraps only the
+ *   model creation in the [CreateGuard] it is given.
+ * @param loadFallbackBuiltIn builds the detector of the square fallback model (`TrackerConfig.modelInputSize`), the
+ *   last resort when [loadBuiltIn] throws or the bundled model is blocked. It has no crash marker.
  * @param log receives a message and the failure, if any; it must not throw.
  * @param verifyStored whether the stored model file still has the length and sha256 of its meta
  *   (`ImportedModelStore.storedFileMatches`); asked only after a probe trip, which keeps such a model. The default
@@ -59,7 +94,10 @@ class SessionModelLoader(
     private val readState: () -> StoredModelState,
     private val setGuard: (ImportGuardState) -> Boolean,
     private val loadImported: (ImportedModelMeta) -> PoseDetector,
-    private val loadBuiltIn: () -> PoseDetector,
+    private val builtInSha256: () -> String?,
+    private val isBuiltInBlocked: (String) -> Boolean,
+    private val loadBuiltIn: (CreateGuard) -> BundledDetector,
+    private val loadFallbackBuiltIn: () -> BundledDetector,
     private val log: (String, Throwable?) -> Unit,
     private val verifyStored: (ImportedModelMeta) -> Boolean = { false },
 ) {
@@ -78,7 +116,11 @@ class SessionModelLoader(
      *   stored, and the model that ran has just loaded without killing the process).
      * - Otherwise the built-in model; the fallback mirrors the reason of `ModelChoice.BuiltIn`, and is `null` when
      *   nothing is imported.
-     * - The built-in model failing too gives `detector == null` (logged), keeping the other fields.
+     * - The bundled model of the orientation is loaded with the marker `Pending(LOAD, <its sha256>)` like an imported
+     *   one. When it is blocked (it killed the process before), its marker cannot be stored, or it throws (any
+     *   `Throwable`), the square fallback model loads instead (logged): the status names its file, `message` says why
+     *   and `fallback` is [ModelFallback.BUILT_IN_FAILED] unless an imported model's fallback is already set. The
+     *   fallback failing too gives `detector == null` (logged), keeping the other fields.
      */
     fun load(): LoadedModel {
         val choice =
@@ -122,16 +164,98 @@ class SessionModelLoader(
         fallback: ModelFallback?,
         message: String?,
     ): LoadedModel {
-        val detector =
+        var note = message
+        var failed = false
+        var blocked = false
+        var bundled: BundledDetector? = null
+        val sha = bundledSha()
+        val skip = if (sha == null) null else bundledSkip(sha)
+        if (skip != null) {
+            log(skip.note, null)
+            failed = true
+            blocked = skip.crashed
+            note = note ?: skip.note
+        } else {
             try {
-                loadBuiltIn()
+                bundled = loadBuiltIn(guardFor(sha))
             } catch (t: Throwable) {
-                // No detector is not fatal: the HUD shows DETECTOR_UNAVAILABLE and frames are still drained.
-                log("detector unavailable", t)
-                null
+                log("built-in model failed to load, using the square fallback model", t)
+                failed = true
+                note = note ?: "built-in model failed: ${ModelProbe.failureMessage(t)}"
             }
-        return LoadedModel(detector, ModelSource.BUILT_IN, attempted, fallback, message)
+        }
+        if (bundled == null) {
+            bundled =
+                try {
+                    loadFallbackBuiltIn()
+                } catch (t: Throwable) {
+                    // No detector is not fatal: the HUD shows DETECTOR_UNAVAILABLE and frames are still drained.
+                    log("detector unavailable", t)
+                    null
+                }
+        }
+        val squareRuns = failed && bundled != null
+        val shown = fallback ?: if (squareRuns) ModelFallback.BUILT_IN_FAILED else null
+        return LoadedModel(
+            bundled?.detector,
+            ModelSource.BUILT_IN,
+            attempted,
+            shown,
+            note,
+            bundled?.fileName,
+            bundled?.sha256,
+            squareRuns,
+            squareRuns && blocked,
+        )
     }
+
+    /** Why the bundled model is not loaded: [crashed] = on the blocked list, else the record could not be read. */
+    private class Skip(
+        val note: String,
+        val crashed: Boolean,
+    )
+
+    /** The hash of the bundled model about to load, read once per load; `null` when unknown (then no marker names it). */
+    private fun bundledSha(): String? =
+        try {
+            builtInSha256()
+        } catch (t: Throwable) {
+            log("the hash of the built-in model is unknown", t)
+            null
+        }
+
+    /**
+     * Why the bundled model with [sha] must not be loaded now (fail closed), or `null`: the process died while loading
+     * it before (it is on the blocked list), or the crash record cannot be read (the check throws).
+     */
+    private fun bundledSkip(sha: String): Skip? =
+        try {
+            if (isBuiltInBlocked(sha)) Skip(BUNDLED_BLOCKED_NOTE, crashed = true) else null
+        } catch (t: Throwable) {
+            log("cannot read the crash record of the built-in model", t)
+            Skip(BUNDLED_UNREADABLE_NOTE, crashed = false)
+        }
+
+    /**
+     * The guard handed to [loadBuiltIn]: the marker `Pending(LOAD, sha256)` goes around the creation it is given, as for
+     * an imported model (the marker names the model, the app moves a crashed one to the blocked list), and back to Idle
+     * after, also when it threw. A marker that cannot be stored throws before the creation runs, so the square fallback
+     * runs instead. Without a known hash there is no marker.
+     */
+    private fun guardFor(sha: String?): CreateGuard =
+        { create ->
+            if (sha == null) {
+                create()
+            } else {
+                check(store(ImportGuard.begin(ImportStage.LOAD, sha))) { BUNDLED_MARKER_NOTE }
+                try {
+                    create()
+                } finally {
+                    // A caught failure is not a crash: the marker goes back to Idle either way.
+                    storeAfterLoad()
+                }
+            }
+        }
 
     /** [setGuard] that cannot throw: a failure to store counts as "not stored". */
     private fun store(state: ImportGuardState): Boolean =
@@ -148,4 +272,10 @@ class SessionModelLoader(
             BuiltInReason.GUARD_TRIPPED_PROBE -> ModelFallback.GUARD_TRIPPED_PROBE
             BuiltInReason.GUARD_TRIPPED_LOAD -> ModelFallback.GUARD_TRIPPED_LOAD
         }
+
+    private companion object {
+        const val BUNDLED_BLOCKED_NOTE = "built-in model skipped: it crashed earlier"
+        const val BUNDLED_UNREADABLE_NOTE = "built-in model skipped: crash record unreadable"
+        const val BUNDLED_MARKER_NOTE = "built-in model skipped: its crash marker could not be stored"
+    }
 }

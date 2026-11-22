@@ -24,4 +24,12 @@ class CommittedModelFilesTest {
             assertThat(actual).isEqualTo(entry.sha256)
         }
     }
+
+    @Test
+    fun everyCommittedTfliteFile_isListedInModelInfo() {
+        val info = ModelInfo.parse(File(modelDirectory, ModelInfo.ASSET_NAME).readText())
+
+        val onDisk = modelDirectory.listFiles { file -> file.name.endsWith(".tflite") }.orEmpty().map { it.name }
+        assertThat(onDisk).containsExactlyElementsIn(info.entries.map { it.fileName })
+    }
 }

@@ -179,6 +179,7 @@ class FramePipelineTest {
         detector: PoseDetector? = this.detector,
         modelImported: Boolean = false,
         importedModelNotUsed: Boolean = false,
+        builtInModelFailed: Boolean = false,
         config: TrackerConfig = TrackerConfig(),
     ): FramePipeline {
         val pipeline =
@@ -199,6 +200,7 @@ class FramePipelineTest {
                 },
                 modelImported,
                 importedModelNotUsed,
+                builtInModelFailed,
             )
         pipeline.setExpectedSize(CaptureSize(WIDTH, HEIGHT))
         return pipeline
@@ -2705,5 +2707,36 @@ class FramePipelineTest {
         pipeline.holdDetector(detector)
         framesFrom(pipeline, 400, 2)
         assertThat(detector.calls).isEqualTo(calls + 2)
+    }
+
+    @Test
+    fun builtInModelFailed_isTheNoteOfADetectedFrameAndKeepsTheDotsShown() {
+        val pipeline = pipeline(builtInModelFailed = true)
+
+        pipeline.onFrame(image(), acquireNs())
+
+        val state = states.last()
+        assertThat(state.warning).isEqualTo(OverlayWarning.BUILT_IN_MODEL_FAILED)
+        assertThat(state.detectionsShown).isTrue()
+    }
+
+    @Test
+    fun builtInModelFailed_losesToTheMissingDetector() {
+        val pipeline = pipeline(detector = null, builtInModelFailed = true)
+
+        pipeline.onFrame(image(), acquireNs())
+
+        assertThat(states.last().warning).isEqualTo(OverlayWarning.DETECTOR_UNAVAILABLE)
+    }
+
+    @Test
+    fun modelChanged_withTheSquareFallback_addsTheBuiltInModelFailedNote_andLaterRemovesIt() {
+        val pipeline = trackingPipeline()
+
+        pipeline.onModelChanged(ScriptedDetector(events), imported = false, notUsed = false, builtInFailed = true)
+        assertThat(states.last().warning).isEqualTo(OverlayWarning.BUILT_IN_MODEL_FAILED)
+
+        pipeline.onModelChanged(ScriptedDetector(events), imported = false, notUsed = false)
+        assertThat(states.last().warning).isNull()
     }
 }

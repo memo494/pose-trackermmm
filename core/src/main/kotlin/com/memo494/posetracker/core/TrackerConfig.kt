@@ -34,9 +34,10 @@ package com.memo494.posetracker.core
  * @property debugMarks `false` (default): only the head ring and the corner brackets are drawn, because
  *   the overlay is part of the capture and every extra mark lowers the model's score of the person on the
  *   next frame. `true`: also the full box and the keypoint dots, for debugging.
- * @property modelInputSize side of the square model input, in pixels (Mdl space), of the BUILT-IN
- *   models; only [MODEL_INPUT_SIZE_SMALL] (320) or [MODEL_INPUT_SIZE_LARGE] (416) is accepted because only
- *   those two model files are shipped. An imported model brings its own size, limited by
+ * @property modelInputSize side of the square model input, in pixels (Mdl space), of the bundled SQUARE
+ *   models: the safety fallback when the model of an orientation cannot be loaded (416) and the thermal
+ *   fallback (320); only [MODEL_INPUT_SIZE_SMALL] (320) or [MODEL_INPUT_SIZE_LARGE] (416) is accepted. The
+ *   built-in model of an orientation is the rectangular one of `BuiltInModels` (448x960 / 960x448). An imported model brings its own size, limited by
  *   [importMinInputSize]..[importMaxInputSize] (it is not described by this field).
  * @property importMinBytes smallest accepted size of an imported model file, in bytes (a smaller file
  *   cannot be a pose model).
@@ -743,6 +744,18 @@ data class TrackerConfig(
 
         /** Large model input side, in pixels (Mdl): small people need the extra pixels. */
         const val MODEL_INPUT_SIZE_LARGE = 416
+
+        /** Width of the built-in model of the portrait orientation, in pixels (Mdl): `yolo26n-pose_448x960`. */
+        const val BUILT_IN_PORTRAIT_WIDTH = 448
+
+        /** Height of the built-in model of the portrait orientation, in pixels (Mdl). */
+        const val BUILT_IN_PORTRAIT_HEIGHT = 960
+
+        /** Width of the built-in model of the landscape orientation, in pixels (Mdl): `yolo26n-pose_960x448`. */
+        const val BUILT_IN_LANDSCAPE_WIDTH = 960
+
+        /** Height of the built-in model of the landscape orientation, in pixels (Mdl). */
+        const val BUILT_IN_LANDSCAPE_HEIGHT = 448
 
         /** Default [modelInputSize], in pixels (the thermal policy steps 416 to 320). */
         const val DEFAULT_MODEL_INPUT_SIZE = MODEL_INPUT_SIZE_LARGE

@@ -142,4 +142,24 @@ class ControlLibraryMapperTest {
     fun aReadableBlockedList_showsNoSuchNotice() {
         assertThat(load(library()).notice).isNull()
     }
+
+    @Test
+    fun builtInLabel_isThePortraitModelSizeInPortraitAndTheLandscapeOneInLandscape() {
+        assertThat(ControlModelMapper.builtInInputText(ModelOrientation.PORTRAIT)).isEqualTo("448x960")
+        assertThat(ControlModelMapper.builtInInputText(ModelOrientation.LANDSCAPE)).isEqualTo("960x448")
+    }
+
+    @Test
+    fun theEventCarriesTheScreensOrientation_soTheBuiltInLineNamesTheRightModel() {
+        assertThat(load(library(), ModelOrientation.PORTRAIT).orientation).isEqualTo(ModelOrientation.PORTRAIT)
+        assertThat(load(library(), ModelOrientation.LANDSCAPE).orientation).isEqualTo(ModelOrientation.LANDSCAPE)
+    }
+
+    @Test
+    fun anUnreadableChoice_stillCarriesTheOrientationOfTheBuiltInLine() {
+        val event = load(library(unreadable = setOf(ModelOrientation.LANDSCAPE)), ModelOrientation.LANDSCAPE)
+
+        assertThat(event.active).isEqualTo(ActiveModel.BuiltIn)
+        assertThat(event.orientation).isEqualTo(ModelOrientation.LANDSCAPE)
+    }
 }

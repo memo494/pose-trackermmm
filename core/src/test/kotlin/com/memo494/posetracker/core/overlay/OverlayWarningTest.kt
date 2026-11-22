@@ -14,4 +14,9 @@ class OverlayWarningTest {
     fun theImportedModelNote_doesNotHideTheDetections() {
         assertThat(OverlayWarning.IMPORTED_MODEL_NOT_USED.hidesDetections).isFalse()
     }
+
+    @Test
+    fun theBuiltInModelFailedNote_doesNotHideTheDetections() {
+        assertThat(OverlayWarning.BUILT_IN_MODEL_FAILED.hidesDetections).isFalse()
+    }
 }

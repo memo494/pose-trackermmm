@@ -572,4 +572,21 @@ class HudFormatterTest {
 
         assertThat(HudFormatter.hudChanged(before, moved, idleFps)).isFalse()
     }
+
+    @Test
+    fun warning_namesTheSquareFallbackThatRunsBecauseTheBuiltInModelFailed() {
+        val square = sample.copy(modelInputWidth = 416, modelInputHeight = 416, warning = OverlayWarning.BUILT_IN_MODEL_FAILED)
+        val rectangular = sample.copy(modelInputWidth = 448, modelInputHeight = 960, warning = OverlayWarning.BUILT_IN_MODEL_FAILED)
+
+        assertThat(warning(square)).isEqualTo("Built-in model failed: 416")
+        assertThat(warning(rectangular)).isEqualTo("Built-in model failed: 448x960")
+    }
+
+    @Test
+    fun warning_theBuiltInModelFailedNoteComesAfterTheOtherWarnings() {
+        val note = OverlayWarning.BUILT_IN_MODEL_FAILED
+
+        assertThat(warning(sample.copy(dotsVisible = false, warning = note))).isEqualTo("Content not visible: dots hidden")
+        assertThat(warning(sample.copy(warning = note), armed = true)).startsWith("Built-in model failed")
+    }
 }

@@ -68,6 +68,8 @@ import com.memo494.posetracker.overlay.OverlayState
  * @param modelImported whether [detector] runs the owner's imported model; every state carries it for the HUD.
  * @param importedModelNotUsed whether an imported model exists that this session does not use (a fallback to the
  *   built-in one); it adds the note [OverlayWarning.IMPORTED_MODEL_NOT_USED] with the lowest priority.
+ * @param builtInModelFailed whether the square fallback model runs because the bundled model of the orientation could
+ *   not; it adds the note [OverlayWarning.BUILT_IN_MODEL_FAILED], just above the imported-model note.
  */
 internal class FramePipeline(
     detector: PoseDetector?,
@@ -77,11 +79,13 @@ internal class FramePipeline(
     private val logger: (String, Throwable?) -> Unit,
     modelImported: Boolean = false,
     importedModelNotUsed: Boolean = false,
+    builtInModelFailed: Boolean = false,
 ) {
     // The model can change when the orientation changes (M1b-1): see onModelChanged. Capture thread only.
     private var detector: PoseDetector? = detector
     private var modelImported: Boolean = modelImported
     private var importedModelNotUsed: Boolean = importedModelNotUsed
+    private var builtInModelFailed: Boolean = builtInModelFailed
 
     private val captureFrame = CaptureFrame()
     private val fpsMeter = FpsMeter()
@@ -320,16 +324,19 @@ internal class FramePipeline(
      *
      * @param imported whether [newDetector] runs an imported model (the HUD mark `imp`).
      * @param notUsed whether an imported model is expected but the built-in one runs (the lowest-priority warning).
+     * @param builtInFailed whether the square fallback model runs because the orientation's bundled model could not.
      */
     fun onModelChanged(
         newDetector: PoseDetector?,
         imported: Boolean,
         notUsed: Boolean,
+        builtInFailed: Boolean = false,
     ) {
         try {
             detector = newDetector
             modelImported = imported
             importedModelNotUsed = notUsed
+            builtInModelFailed = builtInFailed
             modelInputWidth = newDetector?.inputWidth ?: 0
             modelInputHeight = newDetector?.inputHeight ?: 0
             lastState = lastState.copy(modelInputWidth = modelInputWidth, modelInputHeight = modelInputHeight, modelImported = imported)
@@ -579,6 +586,7 @@ internal class FramePipeline(
         when {
             detector == null -> OverlayWarning.DETECTOR_UNAVAILABLE
             !displaySized -> OverlayWarning.CAPTURE_NOT_DISPLAY_SIZED
+            builtInModelFailed -> OverlayWarning.BUILT_IN_MODEL_FAILED
             importedModelNotUsed -> OverlayWarning.IMPORTED_MODEL_NOT_USED
             else -> null
         }

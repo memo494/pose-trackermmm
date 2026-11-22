@@ -541,12 +541,110 @@ If you had one imported model before this version, it is already in the list and
 
 **Pass:** delete removes only that model; the other slot keeps its model.
 
+## M-final — the final check on the phone
+
+One session on the last build covers everything added since M1b-1: the bundled portrait and landscape models, raw
+model files, a tracker that keeps people who are still visible, a more reliable lock, less lag on moving heads, the
+**Tuning** sheet and the step down to a smaller model when the phone is hot. Use a video or the camera app with
+**one to three people** walking in front of the camera. Blocks 1 to 6 take about 20 minutes; block 7 needs 15 to
+20 more. Send **one** diagnostics zip at the end (block 8); also send it right after any step that fails.
+
+### 1. Install and version
+1. Install the APK from this build. Open Pose Tracker.
+2. Press **Start** and look at the corner text (HUD): it shows the build id.
+
+**Pass:** the build id is the one the agent named for this build.
+**If it fails:** the id is older: the old APK is still installed; uninstall it and install again.
+
+### 2. Bundled models and rotation (nothing imported)
+1. On the control screen, choose **Built-in** for both Portrait and Landscape (or delete your imported copies, or press
+   **Remove all imported models**). Portrait should say "Built-in (448x960)".
+2. Press **Start**, hold the phone upright: the `det` line ends with `in 448x960`.
+3. Rotate to landscape: the line ends with `in 960x448` and people get marks again. Rotate back and forth 5 times.
+4. Press **Save diagnostics**. In `summary.txt`: `modelFallback=none`, `modelSwitches` 5 or more, `modelSwitchMsMax`
+   under about 2000.
+
+**Pass:** the right size after each rotation, marks return within a second or two, no crash.
+**If it fails:** the HUD says "Built-in model failed: 416" (the app fell back to the square model; `modelFallback=BUILT_IN_FAILED`
+in the zip), the size does not change, or the app closes: Share diagnostics.
+
+### 3. Import a raw model, and a detect-only model
+1. Stop. Import a pose model exported from Ultralytics Platform with the default settings (LiteRT, FP32, Post-processing
+   left at the default). Expected: it is accepted. The message says where it is used ("Added. Now used for Portrait/Landscape."
+   or "Added to the library. Pick it under …") and it is not a refusal.
+2. Pick it for Portrait or Landscape, press **Start**: rings on heads like the built-in model. Import the same file
+   again: "Already in the library. …".
+3. Import the old detect-only file (`[1,6,2100]`). Expected: refused with "This is a detection model without body
+   keypoints. Export a pose model (for example yolo26n-pose)."
+4. Optional: save diagnostics after one minute with people and compare `frameMsP95` with the built-in model; the raw
+   model reads a bigger output, so a little slower is normal.
+
+**Pass:** the raw model is accepted and tracks; the detect-only file is refused with that message.
+**If it fails:** the raw model is refused, or accepted but no marks: Share diagnostics and say which file.
+
+### 4. Walk, lock, leave, return (tracker and lock)
+1. Press **Start**, tap the handle and tap one person: double ring. Let one or two people walk across for 2 to 3 minutes.
+2. Watch that the ring **stays on the same person** while they are visible (it must not jump to a new ring next to them).
+3. Let the locked person **leave the picture** and come back, clipped at the edge at first. The double ring should return
+   once their shirt is visible.
+4. While they are gone, let someone in a **different shirt** walk through. The double ring must **never** go to them.
+5. Press **Save diagnostics**.
+
+**Pass:** the ring stays on the person; the double ring comes back to the right person or does not come back (never to a
+stranger). In `summary.txt`: `assocBirthSuppressed` above 0, `trackBirths` per minute clearly lower than before
+(it was 487 in 13 minutes), `lockRelocks` higher compared with `lockRelockRejects` than before (11 against 101). The
+`lock:` lines show `d=`, `min=`, `src=` and `sig=`.
+**If it fails:** the double ring jumps to another person (say how similar the clothes were), or a visible person loses the
+ring and gets a new id: Share diagnostics. Two people standing exactly one behind the other may count as one person
+(known limit).
+
+### 5. Fast walker, still person, sudden stop (lag and tremble)
+1. Play a video of someone **walking or running across**. The ring should sit on the head, not trail behind it.
+2. Watch a person **standing still**. The ring must not tremble more than before.
+3. Watch someone **stop suddenly**. The ring may overshoot a little for under 0.1 s, then settle.
+4. Press **Save diagnostics**. In `summary.txt`: `leadAppliedFraction` (about the share of time people move), `speedHpsP99`
+   for a still scene (under 0.5), `leadMsP50`.
+
+**Pass:** less lag than the previous build on the walker, no extra tremble on the still person, short overshoot only.
+**If it fails:** the ring trembles on a still person, flies away after a stop, or jumps back while someone walks: Share
+diagnostics. (You can turn the lead off in block 6 to compare.)
+
+### 6. Tuning sheet
+1. Open **Tuning**. Move a few sliders (for example score threshold and max lead time). The header shows the number of
+   overrides. Each slider shows its value, unit and default.
+2. Close the app fully and open it again: the values are still there. Rotate the screen while dragging: nothing is lost.
+3. Change a value **while tracking is running**: nothing changes until you press Stop and **Start** again (new values
+   apply on the next Start).
+4. Press **Start**, then **Save diagnostics**: `summary.txt` has `tuningOverrides=N`, and `config.txt` shows your values.
+5. Press **Reset to defaults**, **Start** again, save diagnostics: `tuningOverrides=0`.
+
+**Pass:** values persist, apply only at the next Start, and reset clears them.
+**If it fails:** a value is lost after reopening, or `config.txt` does not show it: Share diagnostics.
+
+### 7. Hot phone: smaller model and back (15 to 20 minutes)
+1. Run tracking on a long video for 15 to 20 minutes until the phone is hot (charging at the same time helps).
+2. When the phone is hot the HUD shows **"Hot: smaller model (320)"** and the rings keep working.
+3. Let it cool (stop the video or lay the phone down for a few minutes). About 1 minute after it is cool, the HUD note
+   goes away and the big model comes back.
+4. Press **Save diagnostics**. In `summary.txt`: `thermalStepDowns` 1 or more, `thermalSmallModel=yes` (or `no` if
+   it never got hot), `thermalHotMs`; `log.txt` has `thermal:` lines.
+
+**Pass:** the note appears when hot and disappears after cooling; marks never stop.
+**If it fails:** `thermalSmallModel=failed` or `blocked`, a crash while hot, or the note never goes away after the phone
+is cool: Share diagnostics. (`blocked` after a crash: **Remove all imported models** lifts it.)
+
+### 8. Send the zip
+Press **Share diagnostics** once after block 7 (or **Save diagnostics** after each block, then send the last one) and
+send it with one sentence about what you did and the build id.
+
+---
+
 ## What to send back
 1. The **diagnostics zip** (press **Share diagnostics** or **Save diagnostics** right after the problem, not hours
    later; a saved zip can be sent later).
 2. **One sentence** about what was on the screen (which app, how many people, what you did).
 3. The **block number** of this checklist that failed (for example "block 5"; for the M0c section say "M0c block 5",
-   for M1a "M1a block 3", for M3 "M3 block 3", for M4a "M4a block 2", for M4b "M4b block 2", for M4c "M4c block 2", for M4f "M4f block 1").
+   for M1a "M1a block 3", for M3 "M3 block 3", for M4a "M4a block 2", for M4b "M4b block 2", for M4c "M4c block 2", for M4f "M4f block 1", for the last check "M-final block 4").
 4. A **screenshot** if the corner text or a warning looked strange.
 5. If everything passed: say "all blocks passed" and the build id from the top of the app.
 

@@ -931,18 +931,19 @@ Agents may not loosen asserted thresholds (protected files).
 | M0c | Import one model file (layout checked from its real tensors, crash guard, fallback to the built-in model); `yolo26n-pose_640.tflite` as a download under the release tag `models`; steadier marks (head ring + corner brackets, **Debug marks** switch); plan `docs/plans/M0c.md` | import the 640 file, HUD shows `in 640 imp`; a medium-distance person detected and blinking less |
 | M0d | Video-area crop: bigger people for the model (parked, not approved; plan `docs/plans/M0d.md`) | — |
 | M1a | Rectangular model inputs end to end (import layout v2, meta v2, engine, HUD, diagnostics), rectangular models to download (`640x288`, `832x384`, `960x448`), timing statistics (p50/p95 per stage, result age, thermal state) in `summary.txt`; plan `docs/plans/M1.md`. Done in this PR; the one-thread LiteRT item is already true since M0b | import `832x384`, HUD `in 832x384 imp`; real ms / fps per model on one video; timing lines in the diagnostics |
-| M1b | Later: raw-output goldens and the golden decode test, allocation-free pure-Kotlin decoder (D2), benchmark screen with CSV and soak mode, a bundled landscape model with a per-geometry choice | real numbers for fps / ms / heat; no per-frame allocation in the decoder |
-| M2 | Img→View hardening: `FitCenter` extended and checked on the phone across rotation, cutout and resize events (no camera) | green dots exactly on heads in portrait and landscape |
+| M1b | **M1b-1** (done): a model per orientation (library, slots, switch on rotation); a fix PR made an accepted import go to the slot it fits (`autoSlotFor`). **Done in M-final:** bundled portrait and landscape models (F1), raw pose output accepted (F2). **Dropped** (owner-approved scope of M-final): raw-output goldens, pure allocation-free decoder as in M1b-3 (D2), benchmark screen with CSV and soak mode | HUD `in 448x960` / `in 960x448` with nothing imported; no benchmark screen (use the diagnostics zip) |
+| M2 | Img→View hardening: `FitCenter` extended and checked on the phone across rotation, cutout and resize events (no camera). **Dropped** (not part of M-final); the existing mapping stays | green dots exactly on heads in portrait and landscape |
 | M3 | **M3a** (done): tracker + Kalman in `core`, scenario tests S1-S14 (20/30/60 fps, idle gaps); **M3b** (done): the tracker in the app (`FramePipeline` → `TrackSnapshot` → overlay; rings and brackets from tracks, `trk N` in the HUD, track ids with `debugMarks`, tracker counters in `summary.txt`); plan `docs/plans/M3.md` | rings and brackets from tracks that bridge short misses, a ring on a still picture after 0.4 to 0.9 s, `trk N` in the HUD, `track…` lines in the diagnostics |
-| M4 | **M4a** (done): tentative tracks survive one missed frame (rings come sooner), display smoother (OneEuro per shown track, box moves with the head), scenario S15; plan `docs/plans/M4.md`; **M4b** (done except the phone check): no forward prediction (measured, §6.4), fading LOST tracks, handle-window tap-to-lock; the tuning sheet is not built; **M4c** (built, phone check open): the lock comes back to a person who left the picture and returned, by the colours of their torso (§6.6) | M4a: rings that come sooner and do not tremble on a still person; M4b: LOST rings fade, tap-to-lock with a double ring; M4c: the double ring comes back on the same person within a minute, `lock:` lines in the log |
-| M5 | Thermal policy, perf pass, lifecycle/permission polish, replay mode | stable over 30 min |
+| M4 | **M4a** (done): tentative tracks survive one missed frame (rings come sooner), display smoother (OneEuro per shown track, box moves with the head), scenario S15; plan `docs/plans/M4.md`; **M4b** (done except the phone check): no forward prediction (measured, §6.4; superseded by the display-only lead of M-final F4), fading LOST tracks, handle-window tap-to-lock; the tuning sheet came later in M-final F6; **M4c** (built, phone check open; M4e/M4f added id-change logs and fixes): the lock comes back to a person who left the picture and returned, by the colours of their torso (§6.6) | M4a: rings that come sooner and do not tremble on a still person; M4b: LOST rings fade, tap-to-lock with a double ring; M4c: the double ring comes back on the same person within a minute, `lock:` lines in the log |
+| M5 | Thermal policy, perf pass, lifecycle/permission polish, replay mode. **Done in M-final F7:** step down to the 320 model when hot (§7.2). **Dropped:** replay mode, the fps-cap step; perf pass and lifecycle polish as a separate milestone are not planned | stable over 30 min (HUD note when hot) |
+| M-final | **F1** bundled `448x960` / `960x448` models, crash guard and `BUILT_IN_FAILED`; **F2** raw pose output accepted (`RawPoseDecoder`); **F3** tracker keeps a visible person (birth suppression, shadowed tentatives, S16, 12 fps rates); **F4** display-only lead and S3 at 12 fps; **F5** re-lock reliability (judge window, buckets, min samples, logs); **F6** tuning sheet; **F7** thermal step-down to 320; **F8** these docs. Plan `docs/plans/M_final.md` | `docs/TEST_CHECKLIST.md`, "M-final — the final check on the phone" |
 
 One session per milestone; M4 may need a second session for tuning on the phone.
 
 ## 13. Open items
-- Exact output column order / scale — settled by the golden decode test in M1b.
+- ~~Exact output column order / scale~~ — settled by the layout rule (`PoseOutputLayout`) and the raw decoder (F2); the golden decode test was dropped.
 - Real capture fps of the virtual display on the Poco X7 Pro (and `image.timestamp` reliability) — measured in M0b;
-  the timing lines of M1a (`resultAgeMsP50/P95`, `captureFps`) add numbers, the benchmark screen is M1b.
+  the timing lines of M1a (`resultAgeMsP50/P95`, `captureFps`) add numbers; the benchmark screen was dropped.
 - **HyperOS restrictions:** battery/auto-start limits killing the foreground service, extra "display pop-up"
   toggles, overlay or notification quirks — checked on the phone in M0b; findings go in `docs/TEST_CHECKLIST.md`.
 - **Dot A/B (overlay in the capture):** answered offline in M0c: the keypoint dots and the full box lower the
@@ -951,8 +952,8 @@ One session per milestone; M4 may need a second session for tuning on the phone.
   **Debug marks** switch off and on (`docs/TEST_CHECKLIST.md`, M0c).
 - **People of 12–15 % of the video height stay undetected** at 640 (and far workers and the snow scene still
   score 0.00); the area crop is M0d (parked), rectangular inputs M1a (the phone numbers decide which size to use).
-- **Duplicate boxes on one person** were seen once (v0.1.37): dedupe before association is in the tracker (IoU ≥
-  0.7). Not handled: duplicate boxes with IoU below 0.7 give two tracks on one person.
+- ~~Duplicate boxes below IoU 0.7~~ — handled by birth suppression and shadowed tentatives (F3, §6.3). **Known
+  limit:** a person directly behind another, heads within 0.15 h, is not born while the front track is matched.
 - **Tracker limits (M3a, not asserted):** slow crossings in one row can swap ids (no appearance model); a person
   missing for 0.5 s while moving at 2 h/s gets a new id; a person faster than about 1 h/s whose picture freezes
   without a frozen frame gets a new id afterwards. Score numbers (`trackBirthScore` 0.25, `trackHighScore` 0.5) and
@@ -961,23 +962,27 @@ One session per milestone; M4 may need a second session for tuning on the phone.
   detections of the detector per processed frame, and a `TrackSnapshot` (arrays inside) whenever somebody is
   shown; `TrackSnapshot.EMPTY` is shared, so nothing is allocated for that part while nobody is tracked. The
   `Tracker` itself allocates nothing after construction (§6.3). Making the state objects reusable is not done;
-  decide it with the allocation numbers of the M1b benchmark.
+  the benchmark screen was dropped, so decide it from the diagnostics numbers.
 - **Unmerged branch `fix-export-model-deps`** holds a stricter export script (self-check against `predict()`,
-  raw-output goldens, public-domain fixture); its raw-output goldens are needed for M1b.
-- **M1b:** raw-output goldens (script on `fix-export-model-deps`), pure decoder + golden test, benchmark screen, a
-  bundled landscape model with a per-geometry choice once the phone numbers of M1a are in.
+  raw-output goldens, public-domain fixture); no longer needed for M1b (goldens dropped), still unmerged.
+- **`export-model.yml` / `tools/export_model.py`** write `model_info.json` with square sizes only; a re-export
+  would drop the `448x960` and `960x448` entries (CI tests catch it). Needs its own PR.
+- ~~M1b items~~ — bundled landscape model: done (F1). Raw goldens, pure decoder, benchmark screen: dropped.
 - **Rectangular model on the Mali GPU:** if one compiles only for the CPU, the red banner shows it; report the size.
 - **`readFloat()` allocates:** the LiteRT Kotlin `TensorBuffer.readFloat()` returns a new `FloatArray` per call, so
   the 300x57 output readback (68 KB per frame) cannot be allocation-free with the bundled runtime
-  (`third_party/ULTRALYTICS.md`).
+  (`third_party/ULTRALYTICS.md`). A raw (non-e2e) 640 model reads about 1.9 MB per frame (F2); prefer e2e exports.
 - **DRM / secure apps capture black** (`FLAG_SECURE`): expected and unfixable by us; no dots there. Only
   documented, plus the HUD may say "no frames".
-- Tuning sheet (sliders for the important `TrackerConfig` numbers): not built in M4b; later.
-- **Re-lock limits (M4c):** the colour signature cannot tell two people in similar clothes apart (then the ring does not
-  come back, by design); it is judged on the first 10 matched frames of a new track; `relockMaxDistance` 0.40 (M4d, from the first
-  phone test) and `relockMinMargin` 0.10 are to be tuned from the `d=` and `next=` values of the `lock:` log lines; the
-  phone shows how often the torso rows land on clothes and how often a returning person is half out of the picture
-  when first shown. A video paused for more than `relockMemoryMs` expires a pending lock at its first frame.
+- ~~Tuning sheet~~ — built in F6 (§7.1). Changes apply on the next Start.
+- **Re-lock limits (M4c, updated by F5):** the colour signature cannot tell two people in similar clothes apart (then the
+  ring does not come back, by design). The judge window is 10 frames with a readable torso (cap 30 frames in all);
+  a signature bucket needs 3 samples; `relockMaxDistance` 0.40 and `relockMinMargin` 0.10 are unchanged. Tune
+  them from `d=`, `min=`, `src=` and `sig=` of the `lock:` lines. A video paused for more than `relockMemoryMs`
+  expires a pending lock at its first frame.
+- **Display lead (F4):** abrupt-stop overshoot is 0.191 h against the 0.20 limit; do not raise the limit. A moving dot
+  jitters about 1.07 × raw with the lead (limit 1.2); the lead can be turned down in the tuning sheet.
+- **Not run on a device (F1, F7):** GPU load of 960x448, rotation switch time, two GPU models during the 320 swap.
 - Lock keep-alive by position (re-lock without colours): not built; the colour signature replaces it (§6.6).
 
 ## 14. Build environment (summary; details in BUILD_PLAN.md)

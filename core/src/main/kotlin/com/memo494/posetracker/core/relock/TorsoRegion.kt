@@ -18,10 +18,18 @@ import kotlin.math.min
  * shoulders. It never reaches the head (shoulders are below it, the box rows start under it), which is where the lock
  * ring is drawn. A torso that clipping to the image cut is marked [TorsoRect.clipped].
  *
+ * For a box-only (detect-only) model ([boxOnly], decided by the loaded model, never from keypoint scores) the keypoints
+ * are never read: the torso is the fixed part of a whole-body box and nothing else (a box that is not a whole body gives
+ * none, so such a person is "unsampled" and fail-closed in the re-lock judge). This is the same rule, with the same
+ * `relock*` numbers, that a pose model uses when its shoulders and hips are not confident.
+ *
  * Allocation-free after construction; the four working floats are fields, so one instance belongs to one thread.
+ *
+ * @param boxOnly `true` for a model without keypoints; may be changed when the session's model changes.
  */
 class TorsoRegion(
     private val config: TrackerConfig,
+    var boxOnly: Boolean = false,
 ) {
     private var leftImg = 0f
     private var topImg = 0f
@@ -46,7 +54,10 @@ class TorsoRegion(
         out.clear()
         if (widthImg <= 0 || heightImg <= 0) return false
         val found =
-            if (hasFourKeypoints(detection)) {
+            if (boxOnly) {
+                source = TorsoRect.SOURCE_BOX
+                fromBox(detection)
+            } else if (hasFourKeypoints(detection)) {
                 source = TorsoRect.SOURCE_KEYPOINTS
                 fromKeypoints(detection)
             } else if (fromBox(detection)) {

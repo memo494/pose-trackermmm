@@ -59,6 +59,16 @@ package com.memo494.posetracker.core
  * @property thermalSampleIntervalMs shortest time between two reads of the device's thermal status and headroom,
  *   in milliseconds, in [[MIN_THERMAL_SAMPLE_INTERVAL_MS], [MAX_THERMAL_SAMPLE_INTERVAL_MS]]; the platform
  *   answers `NaN` to a headroom request that comes too often.
+ * @property thermalHotHeadroom thermal headroom (unitless, 1.0 = throttling) at or above which the device counts as hot
+ *   (with a platform status of `MODERATE` or worse), in [[MIN_THERMAL_HEADROOM], [MAX_THERMAL_HEADROOM]]; the
+ *   thermal step-down (ARCHITECTURE §7.2) then runs the small model.
+ * @property thermalCoolHeadroom headroom at or below which the device counts as cool again (with a status of `LIGHT`
+ *   or better), in [[MIN_THERMAL_HEADROOM], [MAX_THERMAL_HEADROOM]] and strictly below [thermalHotHeadroom]: the gap
+ *   is the hysteresis that keeps the model from flapping.
+ * @property thermalHotConfirmMs how long the hot reading must last, in milliseconds, before the step-down starts,
+ *   in [[MIN_THERMAL_HOT_CONFIRM_MS], [MAX_THERMAL_HOT_CONFIRM_MS]].
+ * @property thermalCoolDownMs how long the cool reading must last, in milliseconds, before the normal model comes
+ *   back, in [[MIN_THERMAL_COOL_DOWN_MS], [MAX_THERMAL_COOL_DOWN_MS]].
  * @property minBoxHeightImg lowest person box height, Img pixels, that gives a head point, in
  *   [[MIN_MIN_BOX_HEIGHT_IMG], [MAX_MIN_BOX_HEIGHT_IMG]]; a lower box is unusable (no head point, ignored by the
  *   tracker). Head offsets are learned in units of the box height, so a box far below a pixel would make them explode.
@@ -230,6 +240,16 @@ package com.memo494.posetracker.core
  * @property relockJudgeFrames how many of its first matched frames, count, a new track is compared with a pending lock
  *   (each frame is judged until one is accepted), in [[MIN_RELOCK_JUDGE_FRAMES], [MAX_RELOCK_JUDGE_FRAMES]]; one reject
  *   is counted and logged when the window ends without an acceptance.
+ * @property relockJudgeMaxFrames how many matched frames, count, a new track may be looked at for a re-lock in all,
+ *   frames with no readable torso included (those do not count toward [relockJudgeFrames]); a track that has not been
+ *   accepted or judged on [relockJudgeFrames] readable frames after that many is rejected once, in
+ *   [[relockJudgeFrames], [MAX_RELOCK_JUDGE_MAX_FRAMES]].
+ * @property relockMinSourceSamples fewest frames, count, a signature bucket (whole torso or upper body) must hold
+ *   before candidates are compared with it: one frame may be a bad one (an occluder, a stranger), so a bucket below this
+ *   is "not comparable" (never a match), in [[MIN_RELOCK_MIN_SOURCE_SAMPLES], [MAX_RELOCK_MIN_SOURCE_SAMPLES]].
+ * @property relockOccluderMaxOverlap largest share, unitless, of the locked person's torso rectangle that another
+ *   detected person's box may cover for the frame to still be added to the signature (the pixels would be that
+ *   person's clothes), in [[MIN_RELOCK_OCCLUDER_MAX_OVERLAP], 1].
  * @property relockUpperTorsoRatio height of the upper-body torso, as a multiple of the horizontal distance between the
  *   shoulders, below the lower shoulder, used when the hips are not confident, the box is not a whole body and both
  *   shoulders are, unitless, in [[MIN_RELOCK_UPPER_TORSO_RATIO], [MAX_RELOCK_UPPER_TORSO_RATIO]].
@@ -268,6 +288,10 @@ data class TrackerConfig(
     val removeAllConfirmMs: Long = DEFAULT_REMOVE_ALL_CONFIRM_MS,
     val timingWindowFrames: Int = DEFAULT_TIMING_WINDOW_FRAMES,
     val thermalSampleIntervalMs: Long = DEFAULT_THERMAL_SAMPLE_INTERVAL_MS,
+    val thermalHotHeadroom: Float = DEFAULT_THERMAL_HOT_HEADROOM,
+    val thermalCoolHeadroom: Float = DEFAULT_THERMAL_COOL_HEADROOM,
+    val thermalHotConfirmMs: Long = DEFAULT_THERMAL_HOT_CONFIRM_MS,
+    val thermalCoolDownMs: Long = DEFAULT_THERMAL_COOL_DOWN_MS,
     val headKeypointEnterScore: Float = DEFAULT_HEAD_KEYPOINT_ENTER_SCORE,
     val headKeypointLeaveScore: Float = DEFAULT_HEAD_KEYPOINT_LEAVE_SCORE,
     val headOffsetAlpha: Float = DEFAULT_HEAD_OFFSET_ALPHA,
@@ -343,6 +367,9 @@ data class TrackerConfig(
     val relockFullBodyMinAspect: Float = DEFAULT_RELOCK_FULL_BODY_ASPECT,
     val relockJudgeFrames: Int = DEFAULT_RELOCK_JUDGE_FRAMES,
     val relockUpperTorsoRatio: Float = DEFAULT_RELOCK_UPPER_TORSO_RATIO,
+    val relockJudgeMaxFrames: Int = DEFAULT_RELOCK_JUDGE_MAX_FRAMES,
+    val relockMinSourceSamples: Int = DEFAULT_RELOCK_MIN_SOURCE_SAMPLES,
+    val relockOccluderMaxOverlap: Float = DEFAULT_RELOCK_OCCLUDER_MAX_OVERLAP,
     val assocMissNearRatio: Float = DEFAULT_ASSOC_MISS_NEAR_RATIO,
     val assocMissLogPerMin: Int = DEFAULT_ASSOC_MISS_LOG_PER_MIN,
     val relockEarlyMaxHeadRatio: Float = DEFAULT_RELOCK_EARLY_MAX_HEAD_RATIO,
@@ -431,6 +458,21 @@ data class TrackerConfig(
         require(thermalSampleIntervalMs in MIN_THERMAL_SAMPLE_INTERVAL_MS..MAX_THERMAL_SAMPLE_INTERVAL_MS) {
             "thermalSampleIntervalMs $thermalSampleIntervalMs outside " +
                 "[$MIN_THERMAL_SAMPLE_INTERVAL_MS, $MAX_THERMAL_SAMPLE_INTERVAL_MS]"
+        }
+        require(thermalHotHeadroom in MIN_THERMAL_HEADROOM..MAX_THERMAL_HEADROOM) {
+            "thermalHotHeadroom $thermalHotHeadroom outside [$MIN_THERMAL_HEADROOM, $MAX_THERMAL_HEADROOM]"
+        }
+        require(thermalCoolHeadroom in MIN_THERMAL_HEADROOM..MAX_THERMAL_HEADROOM) {
+            "thermalCoolHeadroom $thermalCoolHeadroom outside [$MIN_THERMAL_HEADROOM, $MAX_THERMAL_HEADROOM]"
+        }
+        require(thermalCoolHeadroom < thermalHotHeadroom) {
+            "thermalCoolHeadroom $thermalCoolHeadroom must be below thermalHotHeadroom $thermalHotHeadroom"
+        }
+        require(thermalHotConfirmMs in MIN_THERMAL_HOT_CONFIRM_MS..MAX_THERMAL_HOT_CONFIRM_MS) {
+            "thermalHotConfirmMs $thermalHotConfirmMs outside [$MIN_THERMAL_HOT_CONFIRM_MS, $MAX_THERMAL_HOT_CONFIRM_MS]"
+        }
+        require(thermalCoolDownMs in MIN_THERMAL_COOL_DOWN_MS..MAX_THERMAL_COOL_DOWN_MS) {
+            "thermalCoolDownMs $thermalCoolDownMs outside [$MIN_THERMAL_COOL_DOWN_MS, $MAX_THERMAL_COOL_DOWN_MS]"
         }
         require(headKeypointEnterScore in MIN_HEAD_KEYPOINT_SCORE..MAX_HEAD_KEYPOINT_SCORE) {
             "headKeypointEnterScore $headKeypointEnterScore outside [$MIN_HEAD_KEYPOINT_SCORE, $MAX_HEAD_KEYPOINT_SCORE]"
@@ -671,6 +713,16 @@ data class TrackerConfig(
         require(relockJudgeFrames in MIN_RELOCK_JUDGE_FRAMES..MAX_RELOCK_JUDGE_FRAMES) {
             "relockJudgeFrames $relockJudgeFrames outside [$MIN_RELOCK_JUDGE_FRAMES, $MAX_RELOCK_JUDGE_FRAMES]"
         }
+        require(relockJudgeMaxFrames in relockJudgeFrames..MAX_RELOCK_JUDGE_MAX_FRAMES) {
+            "relockJudgeMaxFrames $relockJudgeMaxFrames outside [relockJudgeFrames $relockJudgeFrames, $MAX_RELOCK_JUDGE_MAX_FRAMES]"
+        }
+        require(relockMinSourceSamples in MIN_RELOCK_MIN_SOURCE_SAMPLES..MAX_RELOCK_MIN_SOURCE_SAMPLES) {
+            "relockMinSourceSamples $relockMinSourceSamples outside " +
+                "[$MIN_RELOCK_MIN_SOURCE_SAMPLES, $MAX_RELOCK_MIN_SOURCE_SAMPLES]"
+        }
+        require(relockOccluderMaxOverlap in MIN_RELOCK_OCCLUDER_MAX_OVERLAP..1f) {
+            "relockOccluderMaxOverlap $relockOccluderMaxOverlap outside [$MIN_RELOCK_OCCLUDER_MAX_OVERLAP, 1]"
+        }
         require(relockUpperTorsoRatio in MIN_RELOCK_UPPER_TORSO_RATIO..MAX_RELOCK_UPPER_TORSO_RATIO) {
             "relockUpperTorsoRatio $relockUpperTorsoRatio outside " +
                 "[$MIN_RELOCK_UPPER_TORSO_RATIO, $MAX_RELOCK_UPPER_TORSO_RATIO]"
@@ -694,6 +746,14 @@ data class TrackerConfig(
     /** Shortest time between two thermal reads, in nanoseconds (duration, not a timestamp). */
     val thermalSampleIntervalNs: Long
         get() = thermalSampleIntervalMs * NANOS_PER_MILLI
+
+    /** How long a hot reading must last before the step-down, in nanoseconds (a duration). */
+    val thermalHotConfirmNs: Long
+        get() = thermalHotConfirmMs * NANOS_PER_MILLI
+
+    /** How long a cool reading must last before the normal model comes back, in nanoseconds (a duration). */
+    val thermalCoolDownNs: Long
+        get() = thermalCoolDownMs * NANOS_PER_MILLI
 
     /** How long the overlay stays touchable after the lock handle was tapped, in nanoseconds (a duration). */
     val lockArmTimeoutNs: Long
@@ -1484,6 +1544,27 @@ data class TrackerConfig(
         /** Highest accepted [relockJudgeFrames]. */
         const val MAX_RELOCK_JUDGE_FRAMES = 100
 
+        /** Default [relockJudgeMaxFrames], count (owner log 2026-11-22: a person entering clipped needs well over 10 frames). */
+        const val DEFAULT_RELOCK_JUDGE_MAX_FRAMES = 30
+
+        /** Highest accepted [relockJudgeMaxFrames]. */
+        const val MAX_RELOCK_JUDGE_MAX_FRAMES = 1000
+
+        /** Default [relockMinSourceSamples], count. */
+        const val DEFAULT_RELOCK_MIN_SOURCE_SAMPLES = 3
+
+        /** Lowest accepted [relockMinSourceSamples]. */
+        const val MIN_RELOCK_MIN_SOURCE_SAMPLES = 1
+
+        /** Highest accepted [relockMinSourceSamples]. */
+        const val MAX_RELOCK_MIN_SOURCE_SAMPLES = 50
+
+        /** Default [relockOccluderMaxOverlap], unitless. */
+        const val DEFAULT_RELOCK_OCCLUDER_MAX_OVERLAP = 0.25f
+
+        /** Lowest accepted [relockOccluderMaxOverlap]. */
+        const val MIN_RELOCK_OCCLUDER_MAX_OVERLAP = 0.05f
+
         /** Default [relockUpperTorsoRatio], unitless. */
         const val DEFAULT_RELOCK_UPPER_TORSO_RATIO = 0.8f
 
@@ -1540,6 +1621,45 @@ data class TrackerConfig(
 
         /** COCO keypoint index of the right hip. */
         const val KEYPOINT_RIGHT_HIP = 12
+
+        /** Default [thermalHotHeadroom]. */
+        const val DEFAULT_THERMAL_HOT_HEADROOM = 0.9f
+
+        /** Default [thermalCoolHeadroom]. */
+        const val DEFAULT_THERMAL_COOL_HEADROOM = 0.75f
+
+        /** Lowest accepted [thermalHotHeadroom] and [thermalCoolHeadroom]. */
+        const val MIN_THERMAL_HEADROOM = 0.3f
+
+        /** Highest accepted [thermalHotHeadroom] and [thermalCoolHeadroom] (a forecast may exceed 1.0). */
+        const val MAX_THERMAL_HEADROOM = 1.5f
+
+        /** Default [thermalHotConfirmMs]: 3 s, in milliseconds. */
+        const val DEFAULT_THERMAL_HOT_CONFIRM_MS = 3_000L
+
+        /** Lowest accepted [thermalHotConfirmMs], in milliseconds. */
+        const val MIN_THERMAL_HOT_CONFIRM_MS = 1_000L
+
+        /** Highest accepted [thermalHotConfirmMs]: 1 minute, in milliseconds. */
+        const val MAX_THERMAL_HOT_CONFIRM_MS = 60_000L
+
+        /** Default [thermalCoolDownMs]: 60 s, in milliseconds. */
+        const val DEFAULT_THERMAL_COOL_DOWN_MS = 60_000L
+
+        /** Lowest accepted [thermalCoolDownMs], in milliseconds. */
+        const val MIN_THERMAL_COOL_DOWN_MS = 5_000L
+
+        /** Highest accepted [thermalCoolDownMs]: 10 minutes, in milliseconds. */
+        const val MAX_THERMAL_COOL_DOWN_MS = 600_000L
+
+        /** Platform thermal status (`PowerManager.THERMAL_STATUS_*`) from which the device counts as hot: `MODERATE`. */
+        const val THERMAL_STATUS_HOT_MIN = 2
+
+        /** Highest platform thermal status that counts as cool again: `LIGHT`. */
+        const val THERMAL_STATUS_COOL_MAX = 1
+
+        /** Highest value of the platform thermal status (`THERMAL_STATUS_SHUTDOWN`). */
+        const val THERMAL_STATUS_MAX = 6
 
         /** How far ahead, in seconds, the thermal headroom is forecast; 0 = the current headroom. */
         const val THERMAL_HEADROOM_FORECAST_SECONDS = 0

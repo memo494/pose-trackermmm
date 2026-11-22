@@ -22,6 +22,7 @@ object HudFormatter {
     private const val WARNING_NOT_VISIBLE = "Content not visible: dots hidden"
     private const val WARNING_BUILT_IN_FAILED = "Built-in model failed: "
     private const val WARNING_IMPORTED_NOT_USED = "Imported model not used: built-in model"
+    private const val NOTE_THERMAL_STEPPED_DOWN = "Hot: smaller model (320)"
     private const val HINT_TAP_A_PERSON = "tap a person"
     private const val TRACKS_PREFIX = " trk "
     private const val MODEL_SIZE_PREFIX = " in "
@@ -93,7 +94,7 @@ object HudFormatter {
     /**
      * Writes the warning line into [out], by priority: a missing detector, a capture that is not display-sized,
      * content that is not visible, then the note that the built-in model failed (with the input size of the fallback that
-     * runs), then the note that an imported model is not used, and last, while [armed] (the
+     * runs), then the note that an imported model is not used, then the thermal note `Hot: smaller model (320)`, and last, while [armed] (the
      * overlay waits for the tap that locks a person), the hint `tap a person`. Returns the number of characters
      * written; 0 = nothing to show.
      */
@@ -109,6 +110,7 @@ object HudFormatter {
             return ModelInputText.write(state.modelInputWidth, state.modelInputHeight, out, putText(out, 0, WARNING_BUILT_IN_FAILED))
         }
         if (state.warning == OverlayWarning.IMPORTED_MODEL_NOT_USED) return putText(out, 0, WARNING_IMPORTED_NOT_USED)
+        if (state.warning == OverlayWarning.THERMAL_STEPPED_DOWN) return putText(out, 0, NOTE_THERMAL_STEPPED_DOWN)
         if (armed) return putText(out, 0, HINT_TAP_A_PERSON)
         return 0
     }

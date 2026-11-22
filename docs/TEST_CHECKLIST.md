@@ -453,8 +453,8 @@ wait.
 ### 5. The numbers for tuning
 1. After blocks 1 to 3, press **Save diagnostics** (or Share).
 
-**Pass:** the log has the lines `lock: set`, `lock: pending`, `lock: relocked id=… d=… next=…` and, for people who were
-not accepted, `lock: candidate id=… d=… rejected (…)`; `summary.txt` has `locks`, `lockRelocks`, `lockRelockRejects` and
+**Pass:** the log has the lines `lock: set`, `lock: pending`, `lock: relocked id=… d=… next=… min=… src=… sig=…` and, for people who were
+not accepted, `lock: candidate id=… d=… min=… rejected (…) src=… sig=…`; `summary.txt` has `locks`, `lockRelocks`, `lockRelockRejects` and
 `lockExpired`. Send the zip even when everything passed: the `d=` and `next=` numbers tune the colour limits.
 
 ## M4e — why a person gets a new id (numbers only, nothing changes on the screen)
@@ -497,7 +497,7 @@ go. Use a video or the camera app with **one or two people** for about **three m
 **Pass:** the ring stays on the same person more often than in M4e (`assocMissGate` in `summary.txt` clearly lower, at
 least half, and fewer births per minute); the ring never goes to a different person. When the person comes back the
 double ring may return **before** the old ring has faded: the log then has `lock: relocked id=… -> … d=… next=…
-early`. `lockRelocks` counts those too.
+early min=… src=… sig=…`. `lockRelocks` counts those too.
 **If it fails:** the double ring jumps to **another person** (say how similar the clothes were), the ring is lost where
 it was not before, or the app crashes: Share diagnostics and say what happened.
 
@@ -574,8 +574,10 @@ These checks need a cable and `adb`, or the benchmark screen of M1b, and are not
 - `summary.txt` lock fields (M4c), after `trackRemovals` and before the model fields: `locks` (locks set), `lockRelocks`
   (a pending lock moved to a returning person), `lockRelockRejects` (candidates whose 10-frame judge window ended
   without acceptance), `lockExpired` (memory ran out), cumulative since Start. The log lines are `lock: set id=N`,
-  `pending id=N frames=K` (K = frames that filled the signature), `relocked id=N -> M d=… next=…`, `candidate id=M d=… rejected (too far | ambiguous, next=… | no
-  torso)`, `expired` and `cleared (handle | reset | stop | replaced | no signature)`. Read `d` (distance of the
+  `pending id=N frames=K` (K = frames that filled the signature), `relocked id=N -> M d=… next=… min=… src=… sig=…`, `candidate id=M d=… min=… rejected (too far | ambiguous, next=… | no
+  torso | no comparable torso) src=… sig=…` (a candidate that had readable frames and later becomes not comparable ends
+  with its last too-far / ambiguous reason when the cap `relockJudgeMaxFrames` is reached; a bystander of another
+  torso kind than the candidate, whole torso against upper body, makes the candidate ambiguous, `next=unsampled`), `expired` and `cleared (handle | reset | stop | replaced | no signature)`. Read `d` (distance of the
   returning person to the remembered colours; smaller is closer, accepted up to `relockMaxDistance` 0.40) and `next`
   (distance of the nearest other person; `none` = nobody else, `unsampled` = somebody could not be sampled) to tune
   `relockMaxDistance` and `relockMinMargin`.

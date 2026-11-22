@@ -171,4 +171,26 @@ class ThermalSamplerTest {
 
         assertThat(sampler.status).isEqualTo("n/a")
     }
+
+    @Test
+    fun sample_saysWhetherItReadAndKeepsTheStatusCode() {
+        val sampler = sampler(FakeReader(status = 2, headroom = 0.5f))
+
+        assertThat(sampler.statusCode).isEqualTo(ThermalReader.UNAVAILABLE)
+        assertThat(sampler.sample(START_NS)).isTrue()
+        assertThat(sampler.statusCode).isEqualTo(2)
+        assertThat(sampler.sample(START_NS + 1)).isFalse()
+        assertThat(sampler.sample(START_NS + INTERVAL_NS)).isTrue()
+    }
+
+    @Test
+    fun aStatusThatCannotBeRead_hasTheUnavailableCode() {
+        val sampler = sampler(FakeReader(status = ThermalReader.UNAVAILABLE))
+        sampler.sample(START_NS)
+        assertThat(sampler.statusCode).isEqualTo(ThermalReader.UNAVAILABLE)
+
+        val failing = sampler(FakeReader(failure = IllegalStateException("boom")))
+        failing.sample(START_NS)
+        assertThat(failing.statusCode).isEqualTo(ThermalReader.UNAVAILABLE)
+    }
 }

@@ -87,6 +87,7 @@ internal class FramePipeline(
     private var modelImported: Boolean = modelImported
     private var importedModelNotUsed: Boolean = importedModelNotUsed
     private var builtInModelFailed: Boolean = builtInModelFailed
+    private var thermalStepDown: Boolean = false
 
     private val captureFrame = CaptureFrame()
     private val fpsMeter = FpsMeter()
@@ -333,15 +334,19 @@ internal class FramePipeline(
      * @param imported whether [newDetector] runs an imported model (the HUD mark `imp`).
      * @param notUsed whether an imported model is expected but the built-in one runs (the lowest-priority warning).
      * @param builtInFailed whether the square fallback model runs because the orientation's bundled model could not.
+     * @param thermalStepDown whether [newDetector] is the small model of the thermal step-down (the note
+     *   [OverlayWarning.THERMAL_STEPPED_DOWN], below the other notes).
      */
     fun onModelChanged(
         newDetector: PoseDetector?,
         imported: Boolean,
         notUsed: Boolean,
         builtInFailed: Boolean = false,
+        thermalStepDown: Boolean = false,
     ) {
         try {
             detector = newDetector
+            this.thermalStepDown = thermalStepDown
             modelImported = imported
             importedModelNotUsed = notUsed
             builtInModelFailed = builtInFailed
@@ -624,7 +629,7 @@ internal class FramePipeline(
 
     /**
      * The warning for the current flags: a missing detector wins over a wrong capture size, which wins over the
-     * note that an imported model is not used (that one does not hide the detections).
+     * note that an imported model is not used, then the thermal step-down note (neither hides the detections).
      */
     private fun currentWarning(): OverlayWarning? =
         when {
@@ -632,6 +637,7 @@ internal class FramePipeline(
             !displaySized -> OverlayWarning.CAPTURE_NOT_DISPLAY_SIZED
             builtInModelFailed -> OverlayWarning.BUILT_IN_MODEL_FAILED
             importedModelNotUsed -> OverlayWarning.IMPORTED_MODEL_NOT_USED
+            thermalStepDown -> OverlayWarning.THERMAL_STEPPED_DOWN
             else -> null
         }
 

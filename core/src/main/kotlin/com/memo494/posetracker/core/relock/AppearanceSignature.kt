@@ -13,11 +13,12 @@ import kotlin.math.sqrt
  * add up to 1 once the signature has data. It holds no image and no face, only these numbers.
  *
  * [set] and [blend] read the pixels of a [TorsoRect] on a grid of at most `relockMaxSamplePixels` points;
- * [blend] mixes the new histogram into the stored one as an exponential average (weight `relockSignatureAlpha`), so
- * one bad frame does not replace it. [distanceTo] is the Bhattacharyya distance between two signatures: 0 for the
- * same colours, 1 for nothing in common, and 1 (fail closed) when either one has no data.
+ * [blend] mixes the new histogram into the stored one of the same torso source (a running mean at first, then an
+ * exponential average of weight `relockSignatureAlpha`), so one bad frame does not replace it; histograms of
+ * different sources are kept apart and never compared. [distanceTo] is the Bhattacharyya distance between two signatures: 0 for the
+ * same colours, 1 for nothing in common, and NaN (not comparable) when either one has no data.
  *
- * Allocation-free after construction (two float arrays). One instance belongs to one thread.
+ * Allocation-free after construction (a few float arrays). One instance belongs to one thread.
  *
  * @param config the bin counts, thresholds, sample limit and the averaging weight.
  */
@@ -25,8 +26,12 @@ class AppearanceSignature(
     private val config: TrackerConfig,
 ) {
     private val colourBins = config.relockHueBins * config.relockSatBins
-    private val bins = FloatArray(colourBins + config.relockGreyBins)
-    private val scratch = FloatArray(bins.size)
+    private val binCount = colourBins + config.relockGreyBins
+
+    /** One histogram per torso bucket ([TorsoRect.bucket]) and how many samples it holds; a bucket never mixes with another. */
+    private val bins = Array(TorsoRect.BUCKET_COUNT) { FloatArray(binCount) }
+    private val samples = IntArray(TorsoRect.BUCKET_COUNT)
+    private val scratch = FloatArray(binCount)
 
     /** True once a sample was taken and until [clear]. */
     var hasData: Boolean = false
@@ -36,18 +41,36 @@ class AppearanceSignature(
     var lastSampleCount: Int = 0
         private set
 
+    /** Source of the newest successful [set] or [blend] ([TorsoRect.SOURCE_NONE] before any); for logs. */
+    var lastSource: Int = TorsoRect.SOURCE_NONE
+        private set
+
+    /** Bucket of the newest successful [set] or [blend] ([TorsoRect.BUCKET_WHOLE] before any). */
+    var lastBucket: Int = TorsoRect.BUCKET_WHOLE
+        private set
+
     /** Forgets everything, the working histogram too. */
     fun clear() {
-        bins.fill(0f)
+        for (perSource in bins) perSource.fill(0f)
+        samples.fill(0)
         scratch.fill(0f)
         hasData = false
         lastSampleCount = 0
+        lastSource = TorsoRect.SOURCE_NONE
+        lastBucket = TorsoRect.BUCKET_WHOLE
     }
 
     /**
-     * Replaces the signature with the histogram of [rect] in [rgba] (RGBA_8888, [widthImg] x [heightImg]). Returns
-     * false and changes nothing when the pixels cannot be read (wrong array size) or [rect], clipped to the image,
-     * holds fewer than `relockMinSamplePixels` sample points (too small to tell colours).
+     * True when the bucket [bucket] holds at least `relockMinSourceSamples` samples: one sample may be a bad frame and
+     * must not be the only reference, so below that the bucket is not comparable (callers treat it as unsampled, never as far).
+     */
+    fun hasDataFor(bucket: Int): Boolean = bucket in samples.indices && samples[bucket] >= config.relockMinSourceSamples
+
+    /**
+     * Replaces the signature with the histogram of [rect] in [rgba] (RGBA_8888, [widthImg] x [heightImg]), as the only
+     * data, of the bucket of [rect]. Returns false and changes nothing when the pixels cannot be read (wrong array
+     * size) or [rect], clipped to the image, holds fewer than `relockMinSamplePixels` sample points (too small to
+     * tell colours).
      */
     fun set(
         rgba: ByteArray,
@@ -56,14 +79,17 @@ class AppearanceSignature(
         rect: TorsoRect,
     ): Boolean {
         if (!histogram(rgba, widthImg, heightImg, rect)) return false
-        scratch.copyInto(bins)
-        hasData = true
+        for (perSource in bins) perSource.fill(0f)
+        samples.fill(0)
+        store(rect)
         return true
     }
 
     /**
-     * Mixes the histogram of [rect] into the signature (`(1 - alpha) * old + alpha * new`), or sets it when there is
-     * no data yet. Returns false and changes nothing when the pixels cannot be read, like [set].
+     * Mixes the histogram of [rect] into the histogram of its bucket: a running mean while the source holds few
+     * samples, then the exponential average `(1 - alpha) * old + alpha * new` with `alpha = max(1 / n, relockSignatureAlpha)`
+     * for the n-th sample, so one bad frame does not replace it and the first frames are not outweighed by a stale
+     * first one. A bucket with no data yet is set. Returns false and changes nothing when the pixels cannot be read, like [set].
      */
     fun blend(
         rgba: ByteArray,
@@ -71,22 +97,51 @@ class AppearanceSignature(
         heightImg: Int,
         rect: TorsoRect,
     ): Boolean {
-        if (!hasData) return set(rgba, widthImg, heightImg, rect)
         if (!histogram(rgba, widthImg, heightImg, rect)) return false
-        val alpha = config.relockSignatureAlpha
-        for (i in bins.indices) bins[i] = (1f - alpha) * bins[i] + alpha * scratch[i]
+        val bucket = rect.bucket
+        if (samples[bucket] == 0) {
+            store(rect)
+            return true
+        }
+        val count = if (samples[bucket] < Int.MAX_VALUE) samples[bucket] + 1 else samples[bucket]
+        val alpha = max(1f / count, config.relockSignatureAlpha)
+        val mean = bins[bucket]
+        for (i in mean.indices) mean[i] = (1f - alpha) * mean[i] + alpha * scratch[i]
+        samples[bucket] = count
+        lastSource = rect.source
+        lastBucket = bucket
         return true
     }
 
     /**
-     * Bhattacharyya distance to [other], `sqrt(1 - sum(sqrt(p * q)))`, in 0..1; 1 when either signature has no data
-     * or the two have different bin counts.
+     * Bhattacharyya distance between this signature's histogram of [bucket] and the one of [other] for the same bucket,
+     * `sqrt(1 - sum(sqrt(p * q)))`, in 0..1; [Float.NaN] (not comparable, never "far") when either has no sample of that
+     * bucket or the two have different bin counts. Histograms of different buckets are never compared. Callers
+     * treat NaN as not comparable (fail closed) and still check [hasDataFor] on the reference, which also asks
+     * for `relockMinSourceSamples` frames.
      */
-    fun distanceTo(other: AppearanceSignature): Float {
-        if (!hasData || !other.hasData || bins.size != other.bins.size) return MAX_DISTANCE
+    fun distanceTo(
+        other: AppearanceSignature,
+        bucket: Int = lastBucket,
+    ): Float {
+        if (bucket !in samples.indices || samples[bucket] == 0 || other.samples[bucket] == 0 || binCount != other.binCount) {
+            return Float.NaN
+        }
+        val mine = bins[bucket]
+        val theirs = other.bins[bucket]
         var coefficient = 0f
-        for (i in bins.indices) coefficient += sqrt(bins[i] * other.bins[i])
+        for (i in mine.indices) coefficient += sqrt(mine[i] * theirs[i])
         return sqrt(max(0f, 1f - min(coefficient, 1f)))
+    }
+
+    /** Copies [scratch] in as the first sample of the bucket of [rect]. */
+    private fun store(rect: TorsoRect) {
+        val bucket = rect.bucket
+        scratch.copyInto(bins[bucket])
+        samples[bucket] = 1
+        lastSource = rect.source
+        lastBucket = bucket
+        hasData = true
     }
 
     /** Fills [scratch] with the normalised histogram of [rect]; false when too little could be read. */
@@ -96,7 +151,7 @@ class AppearanceSignature(
         heightImg: Int,
         rect: TorsoRect,
     ): Boolean {
-        if (widthImg <= 0 || heightImg <= 0) return false
+        if (widthImg <= 0 || heightImg <= 0 || rect.source !in 0 until TorsoRect.SOURCE_COUNT) return false
         if (rgba.size.toLong() != widthImg.toLong() * heightImg * TrackerConfig.RGBA_BYTES_PER_PIXEL) return false
         val left = max(rect.leftImg, 0)
         val top = max(rect.topImg, 0)
@@ -173,9 +228,6 @@ class AppearanceSignature(
     }
 
     private companion object {
-        /** Distance of two signatures with nothing in common (and of an unknown one). */
-        const val MAX_DISTANCE = 1f
-
         /** Mask that turns a signed byte into 0..255. */
         const val BYTE_MASK = 0xFF
 

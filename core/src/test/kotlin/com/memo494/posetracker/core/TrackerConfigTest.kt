@@ -279,11 +279,53 @@ class TrackerConfigTest {
     }
 
     @Test
+    fun thermalStepDown_hasTheDocumentedDefaults() {
+        val config = TrackerConfig()
+
+        assertThat(config.thermalHotHeadroom).isEqualTo(0.9f)
+        assertThat(config.thermalCoolHeadroom).isEqualTo(0.75f)
+        assertThat(config.thermalHotConfirmMs).isEqualTo(3_000L)
+        assertThat(config.thermalHotConfirmNs).isEqualTo(3_000_000_000L)
+        assertThat(config.thermalCoolDownMs).isEqualTo(60_000L)
+        assertThat(config.thermalCoolDownNs).isEqualTo(60_000_000_000L)
+        assertThat(TrackerConfig.THERMAL_STATUS_HOT_MIN).isEqualTo(2)
+        assertThat(TrackerConfig.THERMAL_STATUS_COOL_MAX).isEqualTo(1)
+    }
+
+    @Test
+    fun thermalStepDown_atItsBounds_isAccepted() {
+        TrackerConfig(thermalHotHeadroom = TrackerConfig.MAX_THERMAL_HEADROOM, thermalCoolHeadroom = TrackerConfig.MIN_THERMAL_HEADROOM)
+        TrackerConfig(thermalHotConfirmMs = TrackerConfig.MIN_THERMAL_HOT_CONFIRM_MS)
+        TrackerConfig(thermalHotConfirmMs = TrackerConfig.MAX_THERMAL_HOT_CONFIRM_MS)
+        TrackerConfig(thermalCoolDownMs = TrackerConfig.MIN_THERMAL_COOL_DOWN_MS)
+        TrackerConfig(thermalCoolDownMs = TrackerConfig.MAX_THERMAL_COOL_DOWN_MS)
+    }
+
+    @Test
+    fun thermalStepDown_outsideItsBounds_isRejected() {
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(thermalHotHeadroom = 1.51f) }
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(thermalCoolHeadroom = 0.29f) }
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(thermalHotHeadroom = Float.NaN) }
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(thermalHotConfirmMs = 999L) }
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(thermalHotConfirmMs = 60_001L) }
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(thermalCoolDownMs = 4_999L) }
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(thermalCoolDownMs = 600_001L) }
+    }
+
+    @Test
+    fun thermalCoolHeadroom_notBelowTheHotHeadroom_isRejected() {
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(thermalHotHeadroom = 0.8f, thermalCoolHeadroom = 0.8f) }
+        assertThrows(IllegalArgumentException::class.java) { TrackerConfig(thermalHotHeadroom = 0.8f, thermalCoolHeadroom = 0.9f) }
+    }
+
+    @Test
     fun toString_listsTheTimingAndThermalFields_forConfigTxt() {
         val text = TrackerConfig().toString()
 
         assertThat(text).contains("timingWindowFrames=512")
         assertThat(text).contains("thermalSampleIntervalMs=2000")
+        assertThat(text).contains("thermalHotHeadroom=0.9")
+        assertThat(text).contains("thermalCoolDownMs=60000")
     }
 
     @Test
@@ -975,6 +1017,9 @@ class TrackerConfigTest {
         assertThat(config.relockFullBodyMinAspect).isEqualTo(1.8f)
         assertThat(config.relockJudgeFrames).isEqualTo(10)
         assertThat(config.relockUpperTorsoRatio).isEqualTo(0.8f)
+        assertThat(config.relockJudgeMaxFrames).isEqualTo(30)
+        assertThat(config.relockMinSourceSamples).isEqualTo(3)
+        assertThat(config.relockOccluderMaxOverlap).isEqualTo(0.25f)
     }
 
     @Test
@@ -1005,6 +1050,9 @@ class TrackerConfigTest {
             relockFullBodyMinAspect = TrackerConfig.MIN_RELOCK_FULL_BODY_ASPECT,
             relockJudgeFrames = TrackerConfig.MIN_RELOCK_JUDGE_FRAMES,
             relockUpperTorsoRatio = TrackerConfig.MIN_RELOCK_UPPER_TORSO_RATIO,
+            relockJudgeMaxFrames = TrackerConfig.MIN_RELOCK_JUDGE_FRAMES,
+            relockMinSourceSamples = TrackerConfig.MIN_RELOCK_MIN_SOURCE_SAMPLES,
+            relockOccluderMaxOverlap = TrackerConfig.MIN_RELOCK_OCCLUDER_MAX_OVERLAP,
         )
         TrackerConfig(
             relockHueBins = TrackerConfig.MAX_RELOCK_HUE_BINS,
@@ -1026,6 +1074,9 @@ class TrackerConfigTest {
             relockFullBodyMinAspect = TrackerConfig.MAX_RELOCK_FULL_BODY_ASPECT,
             relockJudgeFrames = TrackerConfig.MAX_RELOCK_JUDGE_FRAMES,
             relockUpperTorsoRatio = TrackerConfig.MAX_RELOCK_UPPER_TORSO_RATIO,
+            relockJudgeMaxFrames = TrackerConfig.MAX_RELOCK_JUDGE_MAX_FRAMES,
+            relockMinSourceSamples = TrackerConfig.MAX_RELOCK_MIN_SOURCE_SAMPLES,
+            relockOccluderMaxOverlap = 1f,
         )
     }
 
@@ -1072,6 +1123,14 @@ class TrackerConfigTest {
                 { TrackerConfig(relockFullBodyMinAspect = TrackerConfig.MAX_RELOCK_FULL_BODY_ASPECT + 0.1f) },
                 { TrackerConfig(relockJudgeFrames = 0) },
                 { TrackerConfig(relockJudgeFrames = TrackerConfig.MAX_RELOCK_JUDGE_FRAMES + 1) },
+                { TrackerConfig(relockJudgeMaxFrames = 0) },
+                { TrackerConfig(relockJudgeFrames = 20, relockJudgeMaxFrames = 19) },
+                { TrackerConfig(relockMinSourceSamples = 0) },
+                { TrackerConfig(relockMinSourceSamples = TrackerConfig.MAX_RELOCK_MIN_SOURCE_SAMPLES + 1) },
+                { TrackerConfig(relockJudgeMaxFrames = TrackerConfig.MAX_RELOCK_JUDGE_MAX_FRAMES + 1) },
+                { TrackerConfig(relockOccluderMaxOverlap = TrackerConfig.MIN_RELOCK_OCCLUDER_MAX_OVERLAP / 2f) },
+                { TrackerConfig(relockOccluderMaxOverlap = 1.01f) },
+                { TrackerConfig(relockOccluderMaxOverlap = Float.NaN) },
                 { TrackerConfig(relockUpperTorsoRatio = TrackerConfig.MIN_RELOCK_UPPER_TORSO_RATIO / 2f) },
                 { TrackerConfig(relockUpperTorsoRatio = TrackerConfig.MAX_RELOCK_UPPER_TORSO_RATIO + 0.1f) },
             )

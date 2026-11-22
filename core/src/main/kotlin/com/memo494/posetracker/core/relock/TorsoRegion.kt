@@ -27,6 +27,7 @@ class TorsoRegion(
     private var topImg = 0f
     private var rightImg = 0f
     private var bottomImg = 0f
+    private var source = TorsoRect.SOURCE_NONE
 
     /**
      * Writes the torso of [detection] into [out] and returns true, or clears [out] and returns false (fail closed)
@@ -46,9 +47,14 @@ class TorsoRegion(
         if (widthImg <= 0 || heightImg <= 0) return false
         val found =
             if (hasFourKeypoints(detection)) {
+                source = TorsoRect.SOURCE_KEYPOINTS
                 fromKeypoints(detection)
+            } else if (fromBox(detection)) {
+                source = TorsoRect.SOURCE_BOX
+                true
             } else {
-                fromBox(detection) || fromUpperBody(detection)
+                source = TorsoRect.SOURCE_UPPER_BODY
+                fromUpperBody(detection)
             }
         if (!found) return false
         val cutXImg = (rightImg - leftImg) * config.relockTorsoShrink
@@ -64,7 +70,7 @@ class TorsoRegion(
         val top = floor(wholeTopImg.coerceIn(0f, heightLimit)).toInt()
         val right = ceil(wholeRightImg.coerceIn(0f, widthLimit)).toInt()
         val bottom = ceil(wholeBottomImg.coerceIn(0f, heightLimit)).toInt()
-        out.set(left, top, right, bottom, clipped)
+        out.set(left, top, right, bottom, clipped, source)
         if (out.isEmpty) {
             out.clear()
             return false

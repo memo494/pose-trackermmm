@@ -151,7 +151,7 @@ class ImportedModelRulesTest {
 
     @Test
     fun nonFloat32Input_isRejectedAsInputType() {
-        for (type in listOf("uint8", "int8", "float16", "int32", "float64", "FLOAT32", "float32 ", "")) {
+        for (type in listOf("float16", "int32", "float64", "FLOAT32", "float32 ", "")) {
             val result = check(tensor(1, 3, 640, 640, type = type))
 
             assertRejected(result, ImportRejection.INPUT_TYPE)
@@ -160,7 +160,7 @@ class ImportedModelRulesTest {
 
     @Test
     fun inputType_isCheckedBeforeTheLayout() {
-        val result = check(tensor(1, 640, 640, 3, type = "uint8"))
+        val result = check(tensor(1, 640, 640, 3, type = "float16"))
 
         assertRejected(result, ImportRejection.INPUT_TYPE)
     }
@@ -328,22 +328,22 @@ class ImportedModelRulesTest {
 
     @Test
     fun nonFloat32Output_isRejectedAsOutputType() {
-        for (type in listOf("uint8", "int8", "float16", "int32", "Float32")) {
+        for (type in listOf("float16", "int32", "Float32")) {
             assertRejected(check(tensor(1, 3, 640, 640), tensor(1, 300, 57, type = type)), ImportRejection.OUTPUT_TYPE)
         }
     }
 
     @Test
     fun classicHead_isRecognisedByName() {
-        val result = check(tensor(1, 3, 640, 640), tensor(1, 56, 8400))
+        val result = check(tensor(1, 3, 640, 640), tensor(1, 84, 8400))
 
         val rejected = assertRejected(result, ImportRejection.OUTPUT_CLASSIC_HEAD)
-        assertThat(rejected.details).isEqualTo("input [1,3,640,640] float32; output [1,56,8400] float32")
+        assertThat(rejected.details).isEqualTo("input [1,3,640,640] float32; output [1,84,8400] float32")
     }
 
     @Test
     fun anyChannelsFirstHead_isRecognisedAsClassic() {
-        for (shape in listOf(intArrayOf(1, 56, 8400), intArrayOf(1, 84, 8400), intArrayOf(1, 56, 300), intArrayOf(1, 5, 8400))) {
+        for (shape in listOf(intArrayOf(1, 84, 8400), intArrayOf(1, 116, 8400), intArrayOf(1, 59, 300), intArrayOf(1, 68, 8400))) {
             val result = check(tensor(1, 3, 640, 640), TensorDescription(shape.toList(), "float32"))
 
             assertRejected(result, ImportRejection.OUTPUT_CLASSIC_HEAD)
@@ -352,13 +352,13 @@ class ImportedModelRulesTest {
 
     @Test
     fun wrongColumnCountWithRowsFirst_isRejectedAsOutputShape() {
-        for (columns in listOf(51, 56, 58, 6)) {
+        for (columns in listOf(58, 68, 84)) {
             assertRejected(check(tensor(1, 3, 640, 640), tensor(1, 300, columns)), ImportRejection.OUTPUT_SHAPE)
         }
     }
 
     @Test
-    fun outputRowsJustAbove300_areRejectedAsOutputRows() {
+    fun endToEndOutputRowsJustAbove300_areRejectedAsOutputRows() {
         val rejected = assertRejected(check(tensor(1, 3, 640, 640), tensor(1, 301, 57)), ImportRejection.OUTPUT_ROWS)
 
         assertThat(rejected.details).isEqualTo("input [1,3,640,640] float32; output [1,301,57] float32")
@@ -393,23 +393,23 @@ class ImportedModelRulesTest {
 
     @Test
     fun outputShapeDetails_nameTheShapeFound() {
-        val rejected = assertRejected(check(tensor(1, 3, 640, 640), tensor(1, 300, 56)), ImportRejection.OUTPUT_SHAPE)
+        val rejected = assertRejected(check(tensor(1, 3, 640, 640), tensor(1, 300, 58)), ImportRejection.OUTPUT_SHAPE)
 
-        assertThat(rejected.details).isEqualTo("input [1,3,640,640] float32; output [1,300,56] float32")
+        assertThat(rejected.details).isEqualTo("input [1,3,640,640] float32; output [1,300,58] float32")
     }
 
     // ---- order and robustness ----
 
     @Test
     fun inputRules_comeBeforeOutputRules() {
-        val result = check(tensor(1, 640, 640, 3), tensor(1, 56, 8400, type = "uint8"))
+        val result = check(tensor(1, 640, 640, 3), tensor(1, 56, 8400, type = "float16"))
 
         assertRejected(result, ImportRejection.INPUT_NHWC)
     }
 
     @Test
     fun countRules_comeBeforeTypeAndShapeRules() {
-        val result = ImportedModelRules.check(listOf(tensor(1, 3, 640, 640, type = "uint8")), emptyList(), config)
+        val result = ImportedModelRules.check(listOf(tensor(1, 3, 640, 640, type = "float16")), emptyList(), config)
 
         assertRejected(result, ImportRejection.OUTPUT_COUNT)
     }
@@ -440,6 +440,7 @@ class ImportedModelRulesTest {
         assertThat(keys).containsExactly(
             "input_count",
             "input_type",
+            "quantized_io",
             "input_not_nchw",
             "input_nhwc",
             "input_aspect",
@@ -448,6 +449,7 @@ class ImportedModelRulesTest {
             "output_count",
             "output_type",
             "output_classic_head",
+            "output_detect_only",
             "output_rows",
             "output_shape",
         )
@@ -456,5 +458,111 @@ class ImportedModelRulesTest {
     @Test
     fun poseColumns_are57() {
         assertThat(TrackerConfig.POSE_OUTPUT_COLUMNS).isEqualTo(57)
+    }
+
+    // ---- raw pose output (M_final F2) ----
+
+    private fun checkRaw(
+        output: TensorDescription,
+        input: TensorDescription = tensor(1, 3, 640, 640),
+    ) = ImportedModelRules.check(listOf(input), listOf(output), config)
+
+    @Test
+    fun rawChannelsFirst_isAcceptedWithItsLayout() {
+        assertThat(checkRaw(tensor(1, 56, 8400))).isEqualTo(
+            ImportCheck.Accepted(640, 640, 8400, PoseOutputLayout.RAW_CHANNELS_FIRST),
+        )
+    }
+
+    @Test
+    fun rawChannelsLast_isAcceptedWithItsLayout() {
+        assertThat(checkRaw(tensor(1, 8400, 56))).isEqualTo(
+            ImportCheck.Accepted(640, 640, 8400, PoseOutputLayout.RAW_CHANNELS_LAST),
+        )
+    }
+
+    @Test
+    fun rawOutputWithFewRows_isAccepted() {
+        assertThat(checkRaw(tensor(1, 56, 300))).isEqualTo(ImportCheck.Accepted(640, 640, 300, PoseOutputLayout.RAW_CHANNELS_FIRST))
+        assertThat(checkRaw(tensor(1, 300, 56))).isEqualTo(ImportCheck.Accepted(640, 640, 300, PoseOutputLayout.RAW_CHANNELS_LAST))
+    }
+
+    @Test
+    fun endToEndOutput_staysEndToEnd() {
+        assertThat(check(tensor(1, 3, 640, 640)).let { (it as ImportCheck.Accepted).outputLayout })
+            .isEqualTo(PoseOutputLayout.END_TO_END)
+    }
+
+    @Test
+    fun rawRows_areCappedAtTheRawLimit() {
+        val atCap = TrackerConfig.IMPORT_MAX_RAW_OUTPUT_ROWS
+        assertThat(checkRaw(tensor(1, 56, atCap))).isInstanceOf(ImportCheck.Accepted::class.java)
+        assertRejected(checkRaw(tensor(1, 56, atCap + 1)), ImportRejection.OUTPUT_ROWS)
+        assertRejected(checkRaw(tensor(1, atCap + 1, 56)), ImportRejection.OUTPUT_ROWS)
+    }
+
+    @Test
+    fun theDefaultMaximumInput_fitsTheRawRowCap() {
+        // 1280 x 1280: 160*160 + 80*80 + 40*40 = 33600 candidate rows.
+        val result = checkRaw(tensor(1, 56, 33_600), tensor(1, 3, 1280, 1280))
+
+        assertThat(result).isEqualTo(ImportCheck.Accepted(1280, 1280, 33_600, PoseOutputLayout.RAW_CHANNELS_FIRST))
+    }
+
+    @Test
+    fun squareOutputWithBothAxes56_isAmbiguousAndRejected() {
+        assertRejected(checkRaw(tensor(1, 56, 56)), ImportRejection.OUTPUT_SHAPE)
+    }
+
+    @Test
+    fun rawOutputWithOtherRankBatchOrDynamicRows_isRejectedAsOutputShape() {
+        for (shape in listOf(
+            intArrayOf(2, 56, 8400),
+            intArrayOf(1, 56, 8400, 1),
+            intArrayOf(1, 56, -1),
+            intArrayOf(1, 56, 0),
+            intArrayOf(1, -1, 56),
+        )) {
+            assertRejected(checkRaw(TensorDescription(shape.toList(), "float32")), ImportRejection.OUTPUT_SHAPE)
+        }
+    }
+
+    @Test
+    fun detectOnlyOutput_isRejectedAsDetectOnly() {
+        val shapes =
+            listOf(
+                intArrayOf(1, 6, 2100),
+                intArrayOf(1, 5, 8400),
+                intArrayOf(1, 55, 8400),
+                intArrayOf(1, 2100, 6),
+                intArrayOf(1, 300, 6),
+                intArrayOf(1, 300, 51),
+            )
+
+        for (shape in shapes) {
+            val rejected = assertRejected(checkRaw(TensorDescription(shape.toList(), "float32")), ImportRejection.OUTPUT_DETECT_ONLY)
+            assertThat(rejected.details).contains(shape.joinToString(",", "[", "]"))
+        }
+    }
+
+    @Test
+    fun quantizedInput_isRejectedAsQuantizedIo() {
+        for (type in listOf("int8", "uint8")) {
+            assertRejected(check(tensor(1, 3, 640, 640, type = type)), ImportRejection.QUANTIZED_IO)
+        }
+    }
+
+    @Test
+    fun quantizedOutput_isRejectedAsQuantizedIo() {
+        for (type in listOf("int8", "uint8")) {
+            assertRejected(checkRaw(tensor(1, 56, 8400, type = type)), ImportRejection.QUANTIZED_IO)
+            assertRejected(checkRaw(tensor(1, 300, 57, type = type)), ImportRejection.QUANTIZED_IO)
+        }
+    }
+
+    @Test
+    fun otherNonFloat32Types_keepTheirGenericReasons() {
+        assertRejected(check(tensor(1, 3, 640, 640, type = "float16")), ImportRejection.INPUT_TYPE)
+        assertRejected(checkRaw(tensor(1, 56, 8400, type = "float16")), ImportRejection.OUTPUT_TYPE)
     }
 }

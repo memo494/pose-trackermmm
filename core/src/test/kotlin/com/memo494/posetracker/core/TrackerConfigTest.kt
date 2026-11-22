@@ -1454,4 +1454,14 @@ class TrackerConfigTest {
             )
         for (value in bad) assertThrows(IllegalArgumentException::class.java) { TrackerConfig(rawNmsIou = value) }
     }
+
+    @Test
+    fun detectPersonClass_defaultsToZero_andStaysInsideTheClassRange() {
+        assertThat(TrackerConfig().detectPersonClass).isEqualTo(0)
+        val last = TrackerConfig.DETECT_MAX_CLASSES - 1
+        assertThat(TrackerConfig(detectPersonClass = last).detectPersonClass).isEqualTo(last)
+        for (value in listOf(-1, TrackerConfig.DETECT_MAX_CLASSES, Int.MAX_VALUE)) {
+            assertThrows(IllegalArgumentException::class.java) { TrackerConfig(detectPersonClass = value) }
+        }
+    }
 }

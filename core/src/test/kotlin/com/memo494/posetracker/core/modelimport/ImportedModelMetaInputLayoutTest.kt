@@ -76,7 +76,7 @@ class ImportedModelMetaInputLayoutTest {
 
     @Test
     fun nhwcMeta_roundTrips_forEveryOutputLayout() {
-        for (layout in PoseOutputLayout.entries) {
+        for (layout in PoseOutputLayout.entries.filter { !it.isDetectOnly }) {
             val rows = if (layout.isRaw) 8400 else 300
             val meta = nhwc.copy(outputRows = rows, outputLayout = layout)
 

@@ -247,9 +247,9 @@ class ImportedModelRulesTest {
 
     @Test
     fun nhwcInput_withAnOutputThatDoesNotFit_isRefusedForTheOutput() {
-        val rejected = assertRejected(check(tensor(1, 640, 640, 3), tensor(1, 84, 8400)), ImportRejection.OUTPUT_CLASSIC_HEAD)
+        val rejected = assertRejected(check(tensor(1, 640, 640, 3), tensor(1, 85, 8400)), ImportRejection.OUTPUT_CLASSIC_HEAD)
 
-        assertThat(rejected.details).isEqualTo("input [1,640,640,3] float32; output [1,84,8400] float32")
+        assertThat(rejected.details).isEqualTo("input [1,640,640,3] float32; output [1,85,8400] float32")
     }
 
     @Test
@@ -412,15 +412,15 @@ class ImportedModelRulesTest {
 
     @Test
     fun classicHead_isRecognisedByName() {
-        val result = check(tensor(1, 3, 640, 640), tensor(1, 84, 8400))
+        val result = check(tensor(1, 3, 640, 640), tensor(1, 85, 8400))
 
         val rejected = assertRejected(result, ImportRejection.OUTPUT_CLASSIC_HEAD)
-        assertThat(rejected.details).isEqualTo("input [1,3,640,640] float32; output [1,84,8400] float32")
+        assertThat(rejected.details).isEqualTo("input [1,3,640,640] float32; output [1,85,8400] float32")
     }
 
     @Test
     fun anyChannelsFirstHead_isRecognisedAsClassic() {
-        for (shape in listOf(intArrayOf(1, 84, 8400), intArrayOf(1, 116, 8400), intArrayOf(1, 59, 300), intArrayOf(1, 68, 8400))) {
+        for (shape in listOf(intArrayOf(1, 85, 8400), intArrayOf(1, 116, 8400), intArrayOf(1, 59, 300), intArrayOf(1, 68, 8400))) {
             val result = check(tensor(1, 3, 640, 640), TensorDescription(shape.toList(), "float32"))
 
             assertRejected(result, ImportRejection.OUTPUT_CLASSIC_HEAD)
@@ -606,16 +606,10 @@ class ImportedModelRulesTest {
     }
 
     @Test
-    fun detectOnlyOutput_isRejectedAsDetectOnly() {
-        val shapes =
-            listOf(
-                intArrayOf(1, 6, 2100),
-                intArrayOf(1, 5, 8400),
-                intArrayOf(1, 55, 8400),
-                intArrayOf(1, 2100, 6),
-                intArrayOf(1, 300, 6),
-                intArrayOf(1, 300, 51),
-            )
+    fun detectOnlyOutput_stillRefusedShapes_areRejectedAsDetectOnly() {
+        // Detect-like but not decodable: 300 rows with 51 channels is neither a raw head (rows not above the channels
+        // rule for channels-last) nor an end-to-end `[1, N, 6]`; `[1, 5, 6]` is ambiguous between the two.
+        val shapes = listOf(intArrayOf(1, 300, 51), intArrayOf(1, 5, 6), intArrayOf(1, 6, 5))
 
         for (shape in shapes) {
             val rejected = assertRejected(checkRaw(TensorDescription(shape.toList(), "float32")), ImportRejection.OUTPUT_DETECT_ONLY)
@@ -645,10 +639,17 @@ class ImportedModelRulesTest {
     }
 
     @Test
-    fun smallRawLookingShapes_withA56Axis_areNeverDetectOnly() {
-        for (shape in listOf(intArrayOf(1, 56, 21), intArrayOf(1, 21, 56), intArrayOf(1, 56, 6), intArrayOf(1, 5, 56))) {
+    fun smallRawLookingShapes_withA56Channel_areNeverDetectOnly() {
+        for (shape in listOf(intArrayOf(1, 56, 21), intArrayOf(1, 56, 7), intArrayOf(1, 57, 60))) {
             assertRejected(checkRaw(TensorDescription(shape.toList(), "float32")), ImportRejection.OUTPUT_SHAPE)
         }
+    }
+
+    @Test
+    fun smallShapesWithAnAxisOf56_areDetectHeadsWhenTheyFitTheDetectRules() {
+        assertThat(accepted(tensor(1, 21, 56)).outputLayout).isEqualTo(PoseOutputLayout.DETECT_RAW_CHANNELS_FIRST)
+        assertThat(accepted(tensor(1, 5, 56)).outputLayout).isEqualTo(PoseOutputLayout.DETECT_RAW_CHANNELS_FIRST)
+        assertThat(accepted(tensor(1, 56, 6)).outputLayout).isEqualTo(PoseOutputLayout.DETECT_END_TO_END)
     }
 
     @Test
@@ -663,11 +664,6 @@ class ImportedModelRulesTest {
     }
 
     @Test
-    fun singleClassDetect_with5Channels_isStillDetectOnly() {
-        assertRejected(checkRaw(tensor(1, 5, 8400)), ImportRejection.OUTPUT_DETECT_ONLY)
-    }
-
-    @Test
     fun rawLayoutOfShape_isOneSharedRuleForListsAndArrays() {
         assertThat(PoseOutputLayout.rawOf(intArrayOf(1, 56, 8400))).isEqualTo(PoseOutputLayout.RAW_CHANNELS_FIRST)
         assertThat(PoseOutputLayout.rawOf(listOf(1, 8400, 56))).isEqualTo(PoseOutputLayout.RAW_CHANNELS_LAST)
@@ -675,5 +671,164 @@ class ImportedModelRulesTest {
         assertThat(PoseOutputLayout.rawOf(intArrayOf(1, 56, 56))).isNull()
         assertThat(PoseOutputLayout.rawOf(intArrayOf(1, 300, 57))).isNull()
         assertThat(PoseOutputLayout.rawOf(intArrayOf(1, 56, 8400, 1))).isNull()
+    }
+
+    // ---- detect-only output (M-legacy T2) ----
+
+    private fun accepted(output: TensorDescription) = checkRaw(output) as ImportCheck.Accepted
+
+    @Test
+    fun ownersModel_channelsFirstWithTwoClasses_isAccepted() {
+        assertThat(checkRaw(tensor(1, 6, 2100), tensor(1, 3, 320, 320))).isEqualTo(
+            ImportCheck.Accepted(320, 320, 2100, PoseOutputLayout.DETECT_RAW_CHANNELS_FIRST, classes = 2),
+        )
+    }
+
+    @Test
+    fun rawDetectChannelsFirst_acceptsOneToEightyClasses() {
+        for (classes in listOf(1, 2, 3, 80)) {
+            val result = accepted(tensor(1, 4 + classes, 8400))
+
+            assertThat(result.outputLayout).isEqualTo(PoseOutputLayout.DETECT_RAW_CHANNELS_FIRST)
+            assertThat(result.classes).isEqualTo(classes)
+            assertThat(result.outputRows).isEqualTo(8400)
+        }
+    }
+
+    @Test
+    fun rawDetectChannelsLast_needsMoreRowsThanTheEndToEndLimit() {
+        val result = accepted(tensor(1, 2100, 6))
+
+        assertThat(result.outputLayout).isEqualTo(PoseOutputLayout.DETECT_RAW_CHANNELS_LAST)
+        assertThat(result.classes).isEqualTo(2)
+        assertThat(result.outputRows).isEqualTo(2100)
+        assertThat(accepted(tensor(1, 8400, 84)).classes).isEqualTo(80)
+        assertThat(accepted(tensor(1, TrackerConfig.IMPORT_MAX_OUTPUT_ROWS + 1, 5)).outputLayout)
+            .isEqualTo(PoseOutputLayout.DETECT_RAW_CHANNELS_LAST)
+    }
+
+    @Test
+    fun endToEndDetect_isSixColumnsWithUpToThreeHundredRows() {
+        assertThat(checkRaw(tensor(1, 300, 6))).isEqualTo(
+            ImportCheck.Accepted(640, 640, 300, PoseOutputLayout.DETECT_END_TO_END),
+        )
+        assertThat(accepted(tensor(1, 1, 6)).outputLayout).isEqualTo(PoseOutputLayout.DETECT_END_TO_END)
+        assertThat(accepted(tensor(1, 100, 6)).outputRows).isEqualTo(100)
+    }
+
+    @Test
+    fun yoloV8DetectAnd84Channels_areAccepted() {
+        assertThat(checkRaw(tensor(1, 84, 8400))).isEqualTo(
+            ImportCheck.Accepted(640, 640, 8400, PoseOutputLayout.DETECT_RAW_CHANNELS_FIRST, classes = 80),
+        )
+        assertThat(checkRaw(tensor(1, 5, 8400))).isEqualTo(
+            ImportCheck.Accepted(640, 640, 8400, PoseOutputLayout.DETECT_RAW_CHANNELS_FIRST, classes = 1),
+        )
+    }
+
+    @Test
+    fun detectHeads_keepTheInputLayout() {
+        val input = TensorDescription(listOf(1, 320, 320, 3), "float32")
+
+        val result = checkRaw(tensor(1, 6, 2100), input) as ImportCheck.Accepted
+
+        assertThat(result.inputLayout).isEqualTo(InputLayout.NHWC)
+        assertThat(result.outputLayout).isEqualTo(PoseOutputLayout.DETECT_RAW_CHANNELS_FIRST)
+    }
+
+    @Test
+    fun keypointCountChannels_stayRefusedAsKeypointCount() {
+        // 4 + C = 8 (C = 4), 11, 14 ... are 5 + 3k: unchanged precedence over detect heads.
+        for (channels in listOf(8, 11, 14, 41, 53)) {
+            for (shape in listOf(intArrayOf(1, channels, 8400), intArrayOf(1, 8400, channels))) {
+                assertRejected(checkRaw(TensorDescription(shape.toList(), "float32")), ImportRejection.OUTPUT_KEYPOINT_COUNT)
+            }
+        }
+    }
+
+    @Test
+    fun objectnessAndTooManyClassChannels_stayRefused() {
+        assertRejected(checkRaw(tensor(1, 85, 8400)), ImportRejection.OUTPUT_CLASSIC_HEAD)
+        assertRejected(checkRaw(tensor(1, 86, 8400)), ImportRejection.OUTPUT_CLASSIC_HEAD)
+        assertRejected(checkRaw(tensor(1, 100, 8400)), ImportRejection.OUTPUT_CLASSIC_HEAD)
+        assertRejected(checkRaw(tensor(1, 8400, 85)), ImportRejection.OUTPUT_SHAPE)
+    }
+
+    @Test
+    fun boxOnlyChannelCount4_isNotADetector() {
+        assertRejected(checkRaw(tensor(1, 4, 2100)), ImportRejection.OUTPUT_CLASSIC_HEAD)
+        assertRejected(checkRaw(tensor(1, 2100, 4)), ImportRejection.OUTPUT_SHAPE)
+    }
+
+    @Test
+    fun poseChannelCounts56And57_areNeverTakenForDetectHeads() {
+        assertThat(accepted(tensor(1, 56, 8400)).outputLayout).isEqualTo(PoseOutputLayout.RAW_CHANNELS_FIRST)
+        assertThat(accepted(tensor(1, 8400, 56)).outputLayout).isEqualTo(PoseOutputLayout.RAW_CHANNELS_LAST)
+        assertThat(accepted(tensor(1, 300, 57)).outputLayout).isEqualTo(PoseOutputLayout.END_TO_END)
+        assertRejected(checkRaw(tensor(1, 57, 8400)), ImportRejection.OUTPUT_SHAPE)
+        assertRejected(checkRaw(tensor(1, 8400, 57)), ImportRejection.OUTPUT_ROWS)
+    }
+
+    @Test
+    fun poseAcceptedShapes_haveNoClasses() {
+        assertThat(accepted(tensor(1, 300, 57)).classes).isEqualTo(0)
+        assertThat(accepted(tensor(1, 56, 8400)).classes).isEqualTo(0)
+        assertThat(accepted(tensor(1, 300, 6)).classes).isEqualTo(0)
+    }
+
+    @Test
+    fun detectRows_areCappedAtTheRawLimit() {
+        val atCap = TrackerConfig.IMPORT_MAX_RAW_OUTPUT_ROWS
+        assertThat(checkRaw(tensor(1, 6, atCap))).isInstanceOf(ImportCheck.Accepted::class.java)
+        assertThat(checkRaw(tensor(1, atCap, 6))).isInstanceOf(ImportCheck.Accepted::class.java)
+        assertRejected(checkRaw(tensor(1, 6, atCap + 1)), ImportRejection.OUTPUT_ROWS)
+        assertRejected(checkRaw(tensor(1, atCap + 1, 6)), ImportRejection.OUTPUT_ROWS)
+    }
+
+    @Test
+    fun detectShapes_withOtherBatchRankOrDynamicRows_areRejected() {
+        for (shape in listOf(
+            intArrayOf(2, 6, 2100),
+            intArrayOf(1, 6, 2100, 1),
+            intArrayOf(1, 6, -1),
+            intArrayOf(1, 6, 0),
+            intArrayOf(1, -1, 6),
+            intArrayOf(1, 0, 6),
+        )) {
+            assertThat(checkRaw(TensorDescription(shape.toList(), "float32"))).isInstanceOf(ImportCheck.Rejected::class.java)
+        }
+    }
+
+    @Test
+    fun detectLayoutOfShape_isOneSharedRuleForListsAndArrays() {
+        assertThat(PoseOutputLayout.detectOf(intArrayOf(1, 6, 2100))).isEqualTo(PoseOutputLayout.DETECT_RAW_CHANNELS_FIRST)
+        assertThat(PoseOutputLayout.detectOf(listOf(1, 2100, 6))).isEqualTo(PoseOutputLayout.DETECT_RAW_CHANNELS_LAST)
+        assertThat(PoseOutputLayout.detectOf(intArrayOf(1, 300, 6))).isEqualTo(PoseOutputLayout.DETECT_END_TO_END)
+        assertThat(PoseOutputLayout.detectOf(intArrayOf(1, 56, 8400))).isNull()
+        assertThat(PoseOutputLayout.detectOf(intArrayOf(1, 300, 57))).isNull()
+        assertThat(PoseOutputLayout.detectOf(intArrayOf(1, 5, 6))).isNull()
+        assertThat(PoseOutputLayout.detectOf(intArrayOf(2, 6, 2100))).isNull()
+        assertThat(PoseOutputLayout.detectOf(intArrayOf(1, 6, 2100, 1))).isNull()
+    }
+
+    @Test
+    fun detectClassCount_isTheScoreColumnsOfARawHead() {
+        assertThat(PoseOutputLayout.detectClassesOf(intArrayOf(1, 6, 2100))).isEqualTo(2)
+        assertThat(PoseOutputLayout.detectClassesOf(intArrayOf(1, 2100, 84))).isEqualTo(80)
+        assertThat(PoseOutputLayout.detectClassesOf(intArrayOf(1, 300, 6))).isEqualTo(0)
+        assertThat(PoseOutputLayout.detectClassesOf(intArrayOf(1, 56, 8400))).isEqualTo(0)
+    }
+
+    @Test
+    fun layoutKinds_separatePoseRawFromDetect() {
+        assertThat(PoseOutputLayout.entries.filter { it.isRaw }).containsExactly(
+            PoseOutputLayout.RAW_CHANNELS_FIRST,
+            PoseOutputLayout.RAW_CHANNELS_LAST,
+        )
+        assertThat(PoseOutputLayout.entries.filter { it.isDetectOnly }).containsExactly(
+            PoseOutputLayout.DETECT_RAW_CHANNELS_FIRST,
+            PoseOutputLayout.DETECT_RAW_CHANNELS_LAST,
+            PoseOutputLayout.DETECT_END_TO_END,
+        )
     }
 }

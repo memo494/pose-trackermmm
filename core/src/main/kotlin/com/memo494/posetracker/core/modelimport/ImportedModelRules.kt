@@ -63,8 +63,10 @@ enum class ImportRejection(
 
     /**
      * The output has channels `C` with `5 <= C < 56` (`[1, C, N]` or `[1, N, C]`): 4 box values and classes, too few
-     * for 17 keypoints, so it is a detection model without body keypoints (for example `[1, 6, 2100]`); except
-     * channel counts of a pose head with another keypoint count, see [OUTPUT_KEYPOINT_COUNT].
+     * for 17 keypoints, so it is a detection model without body keypoints; except channel counts of a pose head with
+     * another keypoint count, see [OUTPUT_KEYPOINT_COUNT]. Since M-legacy T2 the detect-only shapes the app can decode
+     * (`[1, 4 + C, N]`, `[1, N, 4 + C]`, `[1, N, 6]`, see [PoseOutputLayout.detectOf]) are accepted; this is still
+     * returned for a detect-like shape it cannot decode (for example `[1, 300, 51]` or the ambiguous `[1, 5, 6]`).
      */
     OUTPUT_DETECT_ONLY("output_detect_only"),
 
@@ -98,6 +100,8 @@ sealed interface ImportCheck {
      * @property outputRows rows `N` of the output (candidate detections per frame), unitless.
      * @property outputLayout how the output is laid out.
      * @property inputLayout how the input tensor is laid out (channels first or last).
+     * @property classes class score columns `C` of a raw detect-only output (`[1, 4 + C, N]` or `[1, N, 4 + C]`), count;
+     *   0 for a pose output and for the end-to-end detect-only output (its class is a value of the row).
      */
     data class Accepted(
         val inputWidth: Int,
@@ -105,6 +109,7 @@ sealed interface ImportCheck {
         val outputRows: Int,
         val outputLayout: PoseOutputLayout = PoseOutputLayout.END_TO_END,
         val inputLayout: InputLayout = InputLayout.NCHW,
+        val classes: Int = 0,
     ) : ImportCheck
 
     /**
@@ -154,7 +159,11 @@ object ImportedModelRules {
      *   to its `END_TO_END_MAX_ROWS`, so a larger `N` is refused as [ImportRejection.OUTPUT_ROWS]);
      * - `[1, 56, N]` or `[1, N, 56]` ([TrackerConfig.POSE_RAW_CHANNELS], [PoseOutputLayout.RAW_CHANNELS_FIRST] /
      *   [PoseOutputLayout.RAW_CHANNELS_LAST]) with `56 < N <=` [TrackerConfig.IMPORT_MAX_RAW_OUTPUT_ROWS]. A shape
-     *   with 56 on both axes is ambiguous and refused as [ImportRejection.OUTPUT_SHAPE].
+     *   with 56 on both axes is ambiguous and refused as [ImportRejection.OUTPUT_SHAPE];
+     * - a detect-only output ([PoseOutputLayout.detectOf]): `[1, 4 + C, N]` or `[1, N, 4 + C]` with `1 <= C <= 80`
+     *   (raw, `N <=` [TrackerConfig.IMPORT_MAX_RAW_OUTPUT_ROWS], the class count is returned as
+     *   [ImportCheck.Accepted.classes]) or `[1, N, 6]` with `0 < N <= 300` (end-to-end). Channel counts `5 + 3k` and 57
+     *   stay refused as before, so does 85 (YOLOv5 objectness).
      */
     fun check(
         inputs: List<TensorDescription>,
@@ -205,6 +214,19 @@ object ImportedModelRules {
                 outputRows = rows,
                 outputLayout = rawLayout,
                 inputLayout = inputLayout,
+            )
+        }
+        val detectLayout = PoseOutputLayout.detectOf(outputShape)
+        if (detectLayout != null) {
+            val rows = if (detectLayout == PoseOutputLayout.DETECT_RAW_CHANNELS_FIRST) outputShape[AXIS_2] else outputShape[AXIS_1]
+            if (rows > TrackerConfig.IMPORT_MAX_RAW_OUTPUT_ROWS) return reject(ImportRejection.OUTPUT_ROWS)
+            return ImportCheck.Accepted(
+                inputWidth = width,
+                inputHeight = height,
+                outputRows = rows,
+                outputLayout = detectLayout,
+                inputLayout = inputLayout,
+                classes = PoseOutputLayout.detectClassesOf(outputShape),
             )
         }
         return reject(

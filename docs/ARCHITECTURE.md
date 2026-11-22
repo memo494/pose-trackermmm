@@ -356,8 +356,11 @@ tracks, index loops); deterministic.
   `trackMaxDtMs` once, to the Kalman step and to the lifecycle clocks); nothing ages during the gap itself.
 - **Detections:** at most `MAX_DETECTIONS_PER_FRAME` (30); dedupe first (IoU ≥ `dedupeIou` 0.7 drops the lower
   score); scores below `scoreThreshold` and unusable boxes are ignored.
-- **Association** (ByteTrack two-stage): stage 1 = all tracks × detections with score ≥ `trackHighScore` (0.5);
-  stage 2 = the still unmatched tracks × the low ones (down to `scoreThreshold`). Cost
+- **Association** (ByteTrack two-stage): stage 1 = CONFIRMED and LOST tracks × detections with score ≥
+  `trackHighScore` (0.5); stage 2 = the still unmatched ones × the low ones (down to `scoreThreshold`). **Then (F3/A2)
+  the TENTATIVE tracks get the same two stages on the detections left over**, so a newborn track next to an older one
+  can no longer take that person's detection (before, all tracks were in one Hungarian and the newborn, whose box
+  equals the latest detection, won after 3 hits and the old, often locked, track went LOST and was removed). Cost
   `assocIouWeight·(1 − IoU) + assocHeadWeight·min(1, d_head / (assocHeadScaleRatio·h))` (0.5, 0.5, 0.5);
   Mahalanobis gate `trackGateChi2` (9.21) on the head innovation, where (M4f) each axis variance is `max(P + R,
   (trackGateMinSigmaRatio × h)²)` with `trackGateMinSigmaRatio` 0.2 (0..1, 0 = off, the M3 gate): the filter's

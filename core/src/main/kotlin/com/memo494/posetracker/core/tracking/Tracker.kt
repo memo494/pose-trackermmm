@@ -16,7 +16,8 @@ import kotlin.math.sqrt
  * 2. every track is predicted (head x and y, and the box height, as constant-velocity Kalman filters);
  * 3. detections: at most [TrackerConfig.MAX_DETECTIONS_PER_FRAME], duplicates dropped, scores below
  *    `scoreThreshold` and unusable boxes ignored; "high" means a score of at least `trackHighScore`;
- * 4. stage 1 assigns all tracks to the high detections, stage 2 the unmatched tracks to the low ones, each
+ * 4. stage 1 assigns the confirmed and lost tracks to the high detections, stage 2 the unmatched ones to the low
+ *    ones; then the tentative tracks get the same two stages on the detections that are left over, each stage
  *    with a cost limit (`AssociationCost`, `HungarianAssigner`);
  * 5. a matched track is updated and counted a hit (a tentative one is confirmed after `trackConfirmHits`);
  * 6. an unmatched tentative track coasts (its velocity decays, it stays tentative and hidden, `lostMs` stays 0)
@@ -103,6 +104,8 @@ class Tracker(
     private val keep = IntArray(TrackerConfig.MAX_DETECTIONS_PER_FRAME)
     private val high = IntArray(TrackerConfig.MAX_DETECTIONS_PER_FRAME)
     private val low = IntArray(TrackerConfig.MAX_DETECTIONS_PER_FRAME)
+    private val freeHigh = IntArray(TrackerConfig.MAX_DETECTIONS_PER_FRAME)
+    private val freeLow = IntArray(TrackerConfig.MAX_DETECTIONS_PER_FRAME)
     private val detUsed = BooleanArray(TrackerConfig.MAX_DETECTIONS_PER_FRAME)
     private val heads = Array(TrackerConfig.MAX_DETECTIONS_PER_FRAME) { HeadPoint() }
     private val point = HeadPoint()
@@ -310,15 +313,48 @@ class Tracker(
         detUsed.fill(false)
     }
 
+    /**
+     * ByteTrack order (F3/A2): confirmed and lost tracks are matched first (high detections, then low), tentative
+     * tracks only against the detections that are left over, so a newborn cannot take the person of an older track.
+     */
     private fun matchTracks(detections: List<PoseDetection>) {
         trackDet.fill(-1, 0, activeCount)
-        for (pos in 0 until activeCount) stageTracks[pos] = pos
-        runStage(detections, activeCount, high, highCount, config.trackMatchMaxCost)
-        var unmatched = 0
+        matchGroup(detections, tentative = false)
+        matchGroup(detections, tentative = true)
+    }
+
+    /** Two stages (high, then low detections not yet used) for the tracks whose tentative state equals [tentative]. */
+    private fun matchGroup(
+        detections: List<PoseDetection>,
+        tentative: Boolean,
+    ) {
+        var count = 0
         for (pos in 0 until activeCount) {
+            if ((tracks[order[pos]].state == TrackState.TENTATIVE) == tentative) stageTracks[count++] = pos
+        }
+        if (count == 0) return
+        val freeHighCount = collectUnused(high, highCount, freeHigh)
+        runStage(detections, count, freeHigh, freeHighCount, config.trackMatchMaxCost)
+        var unmatched = 0
+        for (row in 0 until count) {
+            val pos = stageTracks[row]
             if (trackDet[pos] < 0) stageTracks[unmatched++] = pos
         }
-        runStage(detections, unmatched, low, lowCount, config.trackLowMatchMaxCost)
+        val freeLowCount = collectUnused(low, lowCount, freeLow)
+        runStage(detections, unmatched, freeLow, freeLowCount, config.trackLowMatchMaxCost)
+    }
+
+    /** Copies the detection indices of `source[0 until count]` that no track has taken to `target`; returns how many. */
+    private fun collectUnused(
+        source: IntArray,
+        count: Int,
+        target: IntArray,
+    ): Int {
+        var free = 0
+        for (k in 0 until count) {
+            if (!detUsed[source[k]]) target[free++] = source[k]
+        }
+        return free
     }
 
     /** Assigns the tracks `stageTracks[0 until trackCount]` to the detections `candidates[0 until candidateCount]`. */

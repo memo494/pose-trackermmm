@@ -776,6 +776,33 @@ data class TrackerConfig(
         get() = hudRateHz + HUD_IDLE_FPS_MARGIN
 
     companion object {
+        /** Highest [relockMaxDistance] the tuning sheet offers (the config accepts up to [MAX_RELOCK_MAX_DISTANCE]): a safety number. */
+        const val TUNING_MAX_RELOCK_MAX_DISTANCE = 0.6f
+
+        /** Lowest [relockMinMargin] the tuning sheet offers (the config accepts down to [MIN_RELOCK_MIN_MARGIN]): a safety number. */
+        const val TUNING_MIN_RELOCK_MIN_MARGIN = 0.05f
+
+        /** Lowest [smoothMinCutoffHz] the tuning sheet offers, in hertz. */
+        const val TUNING_MIN_SMOOTH_MIN_CUTOFF_HZ = 0.05f
+
+        /** Highest [smoothMinCutoffHz] the tuning sheet offers, in hertz. */
+        const val TUNING_MAX_SMOOTH_MIN_CUTOFF_HZ = 5f
+
+        /** Lowest [smoothBeta] the tuning sheet offers. */
+        const val TUNING_MIN_SMOOTH_BETA = 0f
+
+        /** Highest [smoothBeta] the tuning sheet offers. */
+        const val TUNING_MAX_SMOOTH_BETA = 20f
+
+        /** Lowest [trackMaxLostMs] the tuning sheet offers, in milliseconds. */
+        const val TUNING_MIN_TRACK_MAX_LOST_MS = 100f
+
+        /** Highest [trackMaxLostMs] the tuning sheet offers, in milliseconds. */
+        const val TUNING_MAX_TRACK_MAX_LOST_MS = 3000f
+
+        /** Longest time, in milliseconds, a read of the tuning file waits for a save that is still being written. */
+        const val TUNING_SAVE_WAIT_MS = 2000L
+
         /** Slider step of the tuning sheet for [scoreThreshold], unitless. */
         const val TUNING_STEP_SCORE = 0.01f
 

@@ -2,10 +2,14 @@ package com.memo494.posetracker.core.tuning
 
 import com.memo494.posetracker.core.TrackerConfig
 
-/** What [TuningOverrides.applyTo] made: the [config] and how many overrides it holds ([applied]). */
+/**
+ * What [TuningOverrides.applyTo] made: the [config], how many overrides it applied ([applied]) and the keys the config
+ * refused, which stay at their defaults ([skipped]; empty for values inside the sheet bounds).
+ */
 data class TuningResult(
     val config: TrackerConfig,
     val applied: Int,
+    val skipped: List<TuningKey> = emptyList(),
 )
 
 /**
@@ -49,15 +53,17 @@ class TuningOverrides private constructor(
     fun applyTo(base: TrackerConfig = TrackerConfig()): TuningResult {
         var config = base
         var applied = 0
+        val skipped = mutableListOf<TuningKey>()
         for ((key, value) in values) {
             try {
                 config = key.write(config, value)
                 applied++
             } catch (ignored: IllegalArgumentException) {
                 // Fail closed: this knob stays at its default.
+                skipped += key
             }
         }
-        return TuningResult(config, applied)
+        return TuningResult(config, applied, skipped)
     }
 
     /** The saved text. */

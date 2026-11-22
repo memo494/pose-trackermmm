@@ -19,22 +19,22 @@ class TuningOverridesTest {
     }
 
     @Test
-    fun keys_areBoundedByTheTrackerConfigConstants() {
+    fun keys_areBoundedByTheTrackerConfigConstantsAndTheSheetBounds() {
         assertThat(TuningKey.SCORE_THRESHOLD.min).isEqualTo(TrackerConfig.MIN_SCORE_THRESHOLD)
         assertThat(TuningKey.SCORE_THRESHOLD.max).isEqualTo(TrackerConfig.MAX_SCORE_THRESHOLD)
-        assertThat(TuningKey.SMOOTH_MIN_CUTOFF_HZ.min).isEqualTo(TrackerConfig.MIN_SMOOTH_MIN_CUTOFF_HZ)
-        assertThat(TuningKey.SMOOTH_MIN_CUTOFF_HZ.max).isEqualTo(TrackerConfig.MAX_SMOOTH_MIN_CUTOFF_HZ)
-        assertThat(TuningKey.SMOOTH_BETA.min).isEqualTo(TrackerConfig.MIN_SMOOTH_BETA)
-        assertThat(TuningKey.SMOOTH_BETA.max).isEqualTo(TrackerConfig.MAX_SMOOTH_BETA)
-        assertThat(TuningKey.TRACK_MAX_LOST_MS.min).isEqualTo(TrackerConfig.MIN_TRACK_DURATION_MS)
-        assertThat(TuningKey.TRACK_MAX_LOST_MS.max).isEqualTo(TrackerConfig.MAX_TRACK_DURATION_MS)
+        assertThat(TuningKey.SMOOTH_MIN_CUTOFF_HZ.min).isEqualTo(TrackerConfig.TUNING_MIN_SMOOTH_MIN_CUTOFF_HZ)
+        assertThat(TuningKey.SMOOTH_MIN_CUTOFF_HZ.max).isEqualTo(TrackerConfig.TUNING_MAX_SMOOTH_MIN_CUTOFF_HZ)
+        assertThat(TuningKey.SMOOTH_BETA.min).isEqualTo(TrackerConfig.TUNING_MIN_SMOOTH_BETA)
+        assertThat(TuningKey.SMOOTH_BETA.max).isEqualTo(TrackerConfig.TUNING_MAX_SMOOTH_BETA)
+        assertThat(TuningKey.TRACK_MAX_LOST_MS.min).isEqualTo(TrackerConfig.TUNING_MIN_TRACK_MAX_LOST_MS)
+        assertThat(TuningKey.TRACK_MAX_LOST_MS.max).isEqualTo(TrackerConfig.TUNING_MAX_TRACK_MAX_LOST_MS)
         assertThat(TuningKey.TRACK_MATCH_MAX_COST.min).isEqualTo(TrackerConfig.MIN_TRACK_MATCH_MAX_COST)
         assertThat(TuningKey.TRACK_MATCH_MAX_COST.max).isEqualTo(TrackerConfig.MAX_TRACK_MATCH_MAX_COST)
         assertThat(TuningKey.TRACK_LOW_MATCH_MAX_COST.min).isEqualTo(TrackerConfig.MIN_TRACK_MATCH_MAX_COST)
         assertThat(TuningKey.TRACK_LOW_MATCH_MAX_COST.max).isEqualTo(TrackerConfig.MAX_TRACK_MATCH_MAX_COST)
         assertThat(TuningKey.RELOCK_MAX_DISTANCE.min).isEqualTo(TrackerConfig.MIN_RELOCK_MAX_DISTANCE)
-        assertThat(TuningKey.RELOCK_MAX_DISTANCE.max).isEqualTo(TrackerConfig.MAX_RELOCK_MAX_DISTANCE)
-        assertThat(TuningKey.RELOCK_MIN_MARGIN.min).isEqualTo(TrackerConfig.MIN_RELOCK_MIN_MARGIN)
+        assertThat(TuningKey.RELOCK_MAX_DISTANCE.max).isEqualTo(TrackerConfig.TUNING_MAX_RELOCK_MAX_DISTANCE)
+        assertThat(TuningKey.RELOCK_MIN_MARGIN.min).isEqualTo(TrackerConfig.TUNING_MIN_RELOCK_MIN_MARGIN)
         assertThat(TuningKey.RELOCK_MIN_MARGIN.max).isEqualTo(TrackerConfig.MAX_RELOCK_MIN_MARGIN)
         assertThat(TuningKey.RELOCK_JUDGE_FRAMES.min).isEqualTo(TrackerConfig.MIN_RELOCK_JUDGE_FRAMES.toFloat())
         assertThat(TuningKey.RELOCK_JUDGE_FRAMES.max).isEqualTo(TrackerConfig.MAX_RELOCK_JUDGE_FRAMES.toFloat())
@@ -323,6 +323,45 @@ class TuningOverridesTest {
         assertThat(TuningOverrides.decode(overrides.encode())).isEqualTo(overrides)
         val decoded = TuningOverrides.decode(HEADER + "\ndisplayLeadMaxMs=5000\ndisplayLeadEnabled=2\n")
         assertThat(decoded).isEqualTo(TuningOverrides.NONE)
+    }
+
+    @Test
+    fun sheetBounds_areInsideTheRangeTheConfigAccepts() {
+        assertThat(TrackerConfig.TUNING_MAX_RELOCK_MAX_DISTANCE).isAtMost(TrackerConfig.MAX_RELOCK_MAX_DISTANCE)
+        assertThat(TrackerConfig.TUNING_MIN_RELOCK_MIN_MARGIN).isAtLeast(TrackerConfig.MIN_RELOCK_MIN_MARGIN)
+        assertThat(TrackerConfig.TUNING_MIN_SMOOTH_MIN_CUTOFF_HZ).isAtLeast(TrackerConfig.MIN_SMOOTH_MIN_CUTOFF_HZ)
+        assertThat(TrackerConfig.TUNING_MAX_SMOOTH_MIN_CUTOFF_HZ).isAtMost(TrackerConfig.MAX_SMOOTH_MIN_CUTOFF_HZ)
+        assertThat(TrackerConfig.TUNING_MIN_SMOOTH_BETA).isAtLeast(TrackerConfig.MIN_SMOOTH_BETA)
+        assertThat(TrackerConfig.TUNING_MAX_SMOOTH_BETA).isAtMost(TrackerConfig.MAX_SMOOTH_BETA)
+        assertThat(TrackerConfig.TUNING_MIN_TRACK_MAX_LOST_MS).isAtLeast(TrackerConfig.MIN_TRACK_DURATION_MS)
+        assertThat(TrackerConfig.TUNING_MAX_TRACK_MAX_LOST_MS).isAtMost(TrackerConfig.MAX_TRACK_DURATION_MS)
+    }
+
+    @Test
+    fun decode_aValueInsideTheConfigRangeButOutsideTheSheetIsIgnored() {
+        val text = HEADER + "\nrelockMaxDistance=0.9\nrelockMinMargin=0.01\ntrackMaxLostMs=5000\nsmoothBeta=50\nsmoothMinCutoffHz=20\n"
+
+        assertThat(TuningOverrides.decode(text)).isEqualTo(TuningOverrides.NONE)
+    }
+
+    @Test
+    fun applyTo_everyKeyAtItsSheetMinimumAndMaximumTogether_appliesAllInEitherOrder() {
+        val orders = listOf(TuningKey.entries, TuningKey.entries.reversed())
+        for (order in orders) {
+            for (pick in listOf<(TuningKey) -> Float>({ it.min }, { it.max })) {
+                val overrides = order.fold(TuningOverrides.NONE) { acc, key -> acc.with(key, pick(key)) }
+
+                val result = overrides.applyTo(TrackerConfig())
+
+                assertThat(result.skipped).isEmpty()
+                assertThat(result.applied).isEqualTo(overrides.count)
+            }
+        }
+    }
+
+    @Test
+    fun keys_aSwitchKeyIsOnlyTheLeadSwitchAndTheRestAreSliders() {
+        assertThat(TuningKey.entries.filter { it.kind == TuningKind.SWITCH }).containsExactly(TuningKey.DISPLAY_LEAD_ENABLED)
     }
 
     @Test

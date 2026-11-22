@@ -2,6 +2,12 @@ package com.memo494.posetracker.core.tuning
 
 import com.memo494.posetracker.core.TrackerConfig
 
+/** How the sheet draws a [TuningKey]: a slider over its range, or an on/off switch (the values `min` = off and `max` = on). */
+enum class TuningKind {
+    SLIDER,
+    SWITCH,
+}
+
 /** Where a [TuningKey] is shown on the tuning sheet. */
 enum class TuningGroup {
     DETECTION,
@@ -13,7 +19,7 @@ enum class TuningGroup {
 
 /**
  * One slider of the tuning sheet (ARCHITECTURE §7.1): the number it changes in [TrackerConfig], its bounds (the
- * `MIN_*` / `MAX_*` constants of [TrackerConfig], so the sheet can never ask for a value the config refuses), its
+ * `MIN_*` / `MAX_*` or the sheet-only `TUNING_*` constants of [TrackerConfig], inside what the config accepts), its
  * step, and how to read and write it. A write may move a coupled number with it (`relockJudgeFrames` 1..100 raises
  * `relockJudgeMaxFrames`; `displayLeadSpeedLowHps` raises `displayLeadSpeedHighHps`) so the config's own rules hold. **Adding a slider is adding one entry here** (and, for a new [group], its title
  * in the strings).
@@ -21,6 +27,7 @@ enum class TuningGroup {
  * @property id the key in the saved file; never reused for another meaning (an old file may still hold it).
  * @property label the English name shown on the sheet.
  * @property unit the unit shown after the value (empty = unitless).
+ * @property kind how the sheet draws it ([TuningKind.SWITCH]: off at `min`, on at `max`).
  * @property integer `true` for a whole-number setting (count): the value is rounded to a whole number.
  */
 enum class TuningKey(
@@ -34,6 +41,7 @@ enum class TuningKey(
     val integer: Boolean,
     private val read: (TrackerConfig) -> Float,
     internal val write: (TrackerConfig, Float) -> TrackerConfig,
+    val kind: TuningKind = TuningKind.SLIDER,
 ) {
     SCORE_THRESHOLD(
         "scoreThreshold",
@@ -52,8 +60,8 @@ enum class TuningKey(
         TuningGroup.SMOOTHING,
         "Smoothing at rest (min cutoff)",
         "Hz",
-        TrackerConfig.MIN_SMOOTH_MIN_CUTOFF_HZ,
-        TrackerConfig.MAX_SMOOTH_MIN_CUTOFF_HZ,
+        TrackerConfig.TUNING_MIN_SMOOTH_MIN_CUTOFF_HZ,
+        TrackerConfig.TUNING_MAX_SMOOTH_MIN_CUTOFF_HZ,
         TrackerConfig.TUNING_STEP_CUTOFF_HZ,
         false,
         { it.smoothMinCutoffHz },
@@ -64,8 +72,8 @@ enum class TuningKey(
         TuningGroup.SMOOTHING,
         "Smoothing speed gain (beta)",
         "",
-        TrackerConfig.MIN_SMOOTH_BETA,
-        TrackerConfig.MAX_SMOOTH_BETA,
+        TrackerConfig.TUNING_MIN_SMOOTH_BETA,
+        TrackerConfig.TUNING_MAX_SMOOTH_BETA,
         TrackerConfig.TUNING_STEP_BETA,
         false,
         { it.smoothBeta },
@@ -76,8 +84,8 @@ enum class TuningKey(
         TuningGroup.TRACKING,
         "Longest time a person may be lost",
         "ms",
-        TrackerConfig.MIN_TRACK_DURATION_MS,
-        TrackerConfig.MAX_TRACK_DURATION_MS,
+        TrackerConfig.TUNING_MIN_TRACK_MAX_LOST_MS,
+        TrackerConfig.TUNING_MAX_TRACK_MAX_LOST_MS,
         TrackerConfig.TUNING_STEP_LOST_MS,
         false,
         { it.trackMaxLostMs },
@@ -113,7 +121,7 @@ enum class TuningKey(
         "Re-lock colour distance limit",
         "",
         TrackerConfig.MIN_RELOCK_MAX_DISTANCE,
-        TrackerConfig.MAX_RELOCK_MAX_DISTANCE,
+        TrackerConfig.TUNING_MAX_RELOCK_MAX_DISTANCE,
         TrackerConfig.TUNING_STEP_RELOCK,
         false,
         { it.relockMaxDistance },
@@ -124,7 +132,7 @@ enum class TuningKey(
         TuningGroup.LOCK,
         "Re-lock margin over other people",
         "",
-        TrackerConfig.MIN_RELOCK_MIN_MARGIN,
+        TrackerConfig.TUNING_MIN_RELOCK_MIN_MARGIN,
         TrackerConfig.MAX_RELOCK_MIN_MARGIN,
         TrackerConfig.TUNING_STEP_RELOCK,
         false,
@@ -150,7 +158,7 @@ enum class TuningKey(
     DISPLAY_LEAD_ENABLED(
         "displayLeadEnabled",
         TuningGroup.LEAD,
-        "Ring lead (0 = off, 1 = on)",
+        "Ring lead",
         "",
         TrackerConfig.TUNING_SWITCH_OFF,
         TrackerConfig.TUNING_SWITCH_ON,
@@ -158,6 +166,7 @@ enum class TuningKey(
         true,
         { if (it.displayLeadEnabled) TrackerConfig.TUNING_SWITCH_ON else TrackerConfig.TUNING_SWITCH_OFF },
         { c, v -> c.copy(displayLeadEnabled = v >= TrackerConfig.TUNING_SWITCH_ON) },
+        kind = TuningKind.SWITCH,
     ),
     DISPLAY_LEAD_MAX_MS(
         "displayLeadMaxMs",
@@ -199,7 +208,7 @@ enum class TuningKey(
     ;
 
     /** The value [TrackerConfig] has without any override. */
-    val defaultValue: Float get() = read(TrackerConfig())
+    val defaultValue: Float = read(TrackerConfig())
 
     /** [value] limited to [min]..[max] (and rounded for an [integer] key). NaN and infinities are not valid: check [isValid] first. */
     fun clamp(value: Float): Float {

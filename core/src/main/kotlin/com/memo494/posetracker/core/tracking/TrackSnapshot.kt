@@ -14,7 +14,7 @@ import com.memo494.posetracker.core.TrackerConfig
  * `IndexOutOfBoundsException` for an index outside `0 until count`. Non-finite values are copied as they are
  * (the tracker already removes tracks that are not healthy).
  *
- * Layout: `ids[i]`; `flags[2 * i]` = lost, `flags[2 * i + 1]` = head estimated; `values[6 * i ..]` = head x, head y,
+ * Layout: `ids[i]`; `flags[2 * i]` = lost, `flags[2 * i + 1]` = head estimated; `values[9 * i ..]` = head x, head y,
  * box left, top, right, bottom, lost time in ms (0 unless lost), lead time in ms (0 when no lead was applied), filtered
  * speed in track heights per second (0 unless smoothed).
  */

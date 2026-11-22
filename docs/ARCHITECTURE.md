@@ -339,7 +339,8 @@ below is a `TrackerConfig` field. Capture thread only; allocation-free after con
 tracks, index loops); deterministic.
 - **Kalman:** three independent position/velocity filters per track (`KalmanAxis`): head x, head y, box height
   `h`. Discrete white-noise acceleration, noise scaled by `h`: σ_accel `trackAccelSigmaRatio`·h (8 h/s²) for the
-  head (times `max((trackAccelRefDtMs / dt)², trackAccelMinScale)` for a step longer than 50 ms, F4: still-head jitter at
+  head (σ times `max((trackAccelRefDtMs / interval)², trackAccelMinScale)` from a moving average of the frame interval
+  (`trackAccelIntervalTauMs`), only for a track that continues a match, not LOST or after a miss, F4: still-head jitter at
   12 fps), `trackHeightAccelSigmaRatio`·h (2 h/s²) for the height; height noise `trackHeightNoiseRatio` 0.05; the
   head's measurement noise comes from §6.2. A new track starts with velocity σ `trackInitVelocitySigmaRatio`·h
   (2 h/s) on all three.
@@ -456,12 +457,16 @@ tracks, index loops); deterministic.
 - **Display lead (M-final F4; supersedes the M4b "no forward prediction", whose `pred.py` baseline scored without latency).**
   After the smoother, in `TrackSnapshot.ofSmoothed` only: `lead = gSpeed · gStop · v · L`, `|lead| ≤ displayLeadMaxRatio · h`
   (0.25), `v` the tracker's velocity, `L = min(resultAge + displayLeadExtraMs + ½ · interval, displayLeadMaxMs)`
-  (15 ms, 130 ms). `gSpeed` ramps 0 → 1 between `displayLeadSpeedLowHps` 0.5 and `…HighHps` 1.0 on the smoother's filtered
-  speed; `gStop` = measured head step along `v` ÷ `|v|`, 0..1 (`TrackList.measuredVelocity…`), so a stop or turn drops the lead
-  one frame before the filters know. Lead 0 for LOST, estimated heads, first samples and unconfirmed tracks.
-  Tracker, association and `LockKeeper` never see it; the idle republish does not apply it. A still head has speed
-  far below 0.5 h/s, so the tremble of M4a does not return (shown point bit-identical on/off). Tests: `DisplayLeadScenarioTest`
-  (walker error ≤ 0.5× and ≤ 0.08 h; stop overshoot ≤ 0.20 h); diagnostics `leadMsP50`, `leadAppliedFraction`, `speedHpsP50/P99`.
+  (10 ms, 130 ms). `gSpeed` ramps 0 → 1 between `displayLeadSpeedLowHps` 0.5 and `…HighHps` 1.0 on the smoother's filtered
+  speed; `gStop` = measured head step along `v` ÷ `|v|`, full from `displayLeadStopFullRatio` (0.8, so step noise does not
+  tremble the dot), 0 for a stop or turn (`TrackList.measuredVelocity…`): the lead drops one frame before the filters know.
+  Lead 0 (gates) for LOST, estimated heads, first samples and unconfirmed tracks; a gate fades the lead on screen out
+  with `displayLeadFadeMs` (80) instead of cutting it (no step back on a missed frame), a stop does not fade. The lead is
+  kept per id in the smoother, so the idle republish draws the same point. Off when `smoothEnabled` is false (needs its
+  speed). Tracker, association and `LockKeeper` never see it. A still head has speed far below 0.5 h/s, so the tremble of M4a
+  does not return (shown point bit-identical on/off). Tests: `DisplayLeadScenarioTest` (walker error ≤ 0.5× and ≤ 0.08 h;
+  stop overshoot ≤ 0.20 h; backward step ≤ 0.02 h with misses; jitter ≤ 1.2× raw); diagnostics `leadMsP50`,
+  `leadAppliedFraction`, `speedHpsP50/P99`.
 - Lost tracks are drawn faded (§6.5). Removed tracks do not fade out separately: a track is removed only after the
   fade has ended.
 - Any redraw this needs between frames obeys the invalidate rules in §6.5 (it may only run while a dot actually
@@ -652,7 +657,9 @@ uses no accessibility service.
   closing the old detector to the new one ready). One log line per load: `model: <name> for portrait|landscape
   (start Nms)` at Start, `(switch Nms)` after a change (`built-in` for the built-in model). `ModelStatus` is
   published again after each switch, so the `modelSource/modelFile/...` fields describe the model loaded now.
-- **Timing in `summary.txt` (M1a).** After the model fields, in this order: `timingSamples`, then `copyMsP50`,
+- **Timing in `summary.txt` (M1a).** After the model fields, in this order: the display-lead lines `leadMsP50`, `leadAppliedFraction`, `speedHpsP50`,
+  `speedHpsP99` (F4; `leadAppliedFraction` counts since Start or the last model change, the others use the timing
+  window; `n/a` without a sample), then `timingSamples`, then `copyMsP50`,
   `copyMsP95`, `preMsP50`, `preMsP95`, `inferMsP50`, `inferMsP95`, `postMsP50`, `postMsP95`, `frameMsP50`,
   `frameMsP95`, `resultAgeMsP50`, `resultAgeMsP95` (twelve keys, milliseconds with one decimal), then
   `thermalStatus` and `thermalHeadroom`.
@@ -713,9 +720,10 @@ default 0.1) and the lock group (`lockHandleSizeDp` 16..96, 40; `lockMaxTapDista
 `relockMaxSamplePixels` / `RELOCK_SAMPLE_GRID_SLACK` (4); M4e adds the diagnostics `assocMissNearRatio` (0.1..5,
 default 1.0) and `assocMissLogPerMin` (0..600, default 30), which change no track; M4f adds `trackGateMinSigmaRatio`
 (0..1, default 0.2; 0 = no floor on the gate's sigma) and `relockEarlyMaxHeadRatio` (0.1..3, default 0.6). F4 adds the display-lead group
-(`displayLeadEnabled` true, `displayLeadMaxMs` 0..400, 130; `displayLeadExtraMs` 0..100, 15; `displayLeadSpeedLowHps` /
+(`displayLeadEnabled` true, `displayLeadMaxMs` 0..400, 130; `displayLeadExtraMs` 0..100, 10; `displayLeadStopFullRatio`
+0.1..1, 0.8; `displayLeadFadeMs` 0..1000, 80; `displayLeadSpeedLowHps` /
 `…HighHps` 0..10, 0.5 / 1.0; `displayLeadMaxRatio` 0..1, 0.25) and `trackAccelRefDtMs` (10..200, 50) with
-`trackAccelMinScale` (0.05..1, 0.5), §6.3 and §6.4.
+`trackAccelMinScale` (0.05..1, 0.5) and `trackAccelIntervalTauMs` (100..10000, 1000), §6.3 and §6.4.
 
 ### 7.2 Thermal policy (M5)
 If thermal status ≥ `MODERATE` or headroom forecast > 0.9: step down the analysis fps cap 60 → 30; then 416 → 320;

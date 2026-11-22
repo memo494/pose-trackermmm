@@ -171,7 +171,14 @@ class HeadSmoother(
         val slot = lastSlot
         if (slot >= 0) {
             val fadeMs = config.displayLeadFadeMs
-            val decay = if (!fade) 0.0 else if (fadeMs > 0f) exp(-outIntervalMs.toDouble() / fadeMs) else 0.0
+            val decay =
+                if (!fade) {
+                    0.0
+                } else if (fadeMs > 0f) {
+                    exp(-outIntervalMs.toDouble() / fadeMs)
+                } else {
+                    0.0
+                }
             val fadedX = leadXImg[slot] * decay
             val fadedY = leadYImg[slot] * decay
             if (fadedX * fadedX + fadedY * fadedY > x * x + y * y) {

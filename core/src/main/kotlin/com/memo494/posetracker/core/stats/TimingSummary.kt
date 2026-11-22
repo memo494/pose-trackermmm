@@ -29,7 +29,8 @@ data class Percentiles(
  * The display lead of the shown tracks over the timing window (F4); NaN = no sample, so unknown.
  *
  * @property leadMsP50 median lead time in milliseconds over the samples that had a lead (`gSpeed * gStop * L`).
- * @property appliedFraction share, in [0, 1], of the shown-track samples that had a lead.
+ * @property appliedFraction share, in [0, 1], of the shown-track samples that had a lead, counted since Start or the
+ *   last model change (not over the rolling window).
  * @property speedHpsP50 median filtered speed of the shown tracks, in track heights per second.
  * @property speedHpsP99 99th percentile of that speed.
  */

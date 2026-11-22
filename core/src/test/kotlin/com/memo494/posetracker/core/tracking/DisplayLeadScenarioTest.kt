@@ -127,8 +127,9 @@ class DisplayLeadScenarioTest {
                     val on = largestBackwardStepInH(runDisplayed(scene, withLead))
                     val off = largestBackwardStepInH(runDisplayed(scene, withoutLead))
                     val where = "walker $heightsPerS h/s, ${(missProbability * PERCENT).roundToInt()} % misses, ${rate.label}, seed $seed"
-                    assertWithMessage("$where: backward step with lead $on h, without $off h, limit <= $off + ${MetricsThresholds.F4_MAX_BACKWARD_STEP_H}")
-                        .that(on <= off + MetricsThresholds.F4_MAX_BACKWARD_STEP_H)
+                    assertWithMessage(
+                        "$where: backward step with lead $on h, without $off h, limit <= $off + ${MetricsThresholds.F4_MAX_BACKWARD_STEP_H}",
+                    ).that(on <= off + MetricsThresholds.F4_MAX_BACKWARD_STEP_H)
                         .isTrue()
                 }
             }
@@ -143,12 +144,17 @@ class DisplayLeadScenarioTest {
                 val person = ScenePerson(1, listOf(pt(0.0, WALK_START_X), pt(seconds, WALK_END_X)))
                 val scene = scene(listOf(person), seconds, rate, seed)
                 val frames = scene.frames.filter { it.timeS > JITTER_FROM_S }
-                val raw = hypot(secondDifferenceRms(frames.map { it.truth[0].measuredHeadXImg }), secondDifferenceRms(frames.map { it.truth[0].measuredHeadYImg }))
+                val raw =
+                    hypot(
+                        secondDifferenceRms(frames.map { it.truth[0].measuredHeadXImg }),
+                        secondDifferenceRms(frames.map { it.truth[0].measuredHeadYImg }),
+                    )
                 val on = drawnJitter(runDisplayed(scene, withLead))
                 val off = drawnJitter(runDisplayed(scene, withoutLead))
                 val where = "walker $heightsPerS h/s with noise, ${rate.label}, seed $seed"
-                assertWithMessage("$where: jitter / raw jitter is ${on / raw} with the lead (${off / raw} without), limit <= ${MetricsThresholds.F4_MAX_MOVING_JITTER_RATIO}")
-                    .that(on / raw <= MetricsThresholds.F4_MAX_MOVING_JITTER_RATIO)
+                assertWithMessage(
+                    "$where: jitter / raw jitter is ${on / raw} with the lead (${off / raw} without), limit <= ${MetricsThresholds.F4_MAX_MOVING_JITTER_RATIO}",
+                ).that(on / raw <= MetricsThresholds.F4_MAX_MOVING_JITTER_RATIO)
                     .isTrue()
             }
         }
@@ -163,6 +169,7 @@ class DisplayLeadScenarioTest {
         val seconds = (WALK_END_X - WALK_START_X) / (heightsPerS * HEIGHT)
         // The frame times of a scene with noise depend on what is emitted, so a jittered scene is noise free (as S13).
         val noise = if (rate.jitter > 0.0) 0.0 else NOISE_RATIO
+
         fun build(dropouts: List<TimeInterval>) =
             SyntheticScene(
                 people = listOf(ScenePerson(1, listOf(pt(0.0, WALK_START_X), pt(seconds, WALK_END_X)), dropouts = dropouts)),
@@ -180,7 +187,13 @@ class DisplayLeadScenarioTest {
                 .filter { it >= MISS_FROM_FRAME && random.nextDouble() < missProbability }
                 .map { TimeInterval(times[it] - TIME_EPS_S, times[it] + TIME_EPS_S) }
         val scene = build(misses)
-        assertWithMessage("frame times stay those of the scene without people").that(scene.frames.map { it.timeS }.take(times.size)).isEqualTo(times.take(scene.frames.size))
+        assertWithMessage("frame times stay those of the scene without people")
+            .that(
+                scene.frames
+                    .map {
+                        it.timeS
+                    }.take(times.size),
+            ).isEqualTo(times.take(scene.frames.size))
         return scene
     }
 
@@ -190,7 +203,11 @@ class DisplayLeadScenarioTest {
         var previous: DisplayedTrack? = null
         for (frame in run.frames) {
             val track = frame.tracks.firstOrNull()
-            if (track != null && previous != null && frame.timeS > BACKWARD_FROM_S) worst = max(worst, (previous.xImg - track.xImg) / HEIGHT)
+            if (track != null && previous != null &&
+                frame.timeS > BACKWARD_FROM_S
+            ) {
+                worst = max(worst, (previous.xImg - track.xImg) / HEIGHT)
+            }
             previous = track
         }
         return worst

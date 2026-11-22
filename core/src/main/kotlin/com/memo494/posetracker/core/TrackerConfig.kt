@@ -116,8 +116,9 @@ package com.memo494.posetracker.core
  * @property trackAccelSigmaRatio standard deviation of the head's acceleration (process noise) as a multiple of the
  *   track height per second squared (h/s²), in [[MIN_TRACK_ACCEL_SIGMA_RATIO], [MAX_TRACK_ACCEL_SIGMA_RATIO]].
  * @property trackAccelRefDtMs frame interval in milliseconds at and below which [trackAccelSigmaRatio] applies as it is;
- *   for a longer step (a lower frame rate) the head's process noise is scaled by `(ref / dt)^2`, no lower than
- *   [trackAccelMinScale], so the filter's smoothing of a still head stays near its 20 fps level (S3 at 12 fps, F4); in
+ *   for a lower frame rate the head's acceleration sigma (so the noise variance by the square of it) is scaled by
+ *   `(ref / interval)^2`, no lower than [trackAccelMinScale], with `interval` a moving average of the frame interval
+ *   (see [trackAccelIntervalTauMs]); a track that coasts (LOST, or after a miss) is not scaled, so the filter's smoothing of a still head stays near its 20 fps level (S3 at 12 fps, F4); in
  *   [[MIN_TRACK_ACCEL_REF_DT_MS], [MAX_TRACK_ACCEL_REF_DT_MS]]. A gap step (longer than [trackMaxDtMs]) is not scaled.
  * @property trackAccelIntervalTauMs time constant in milliseconds of the moving average of the frame interval that
  *   the scaling reads (so one slow frame does not change the scale), in [[MIN_TRACK_ACCEL_INTERVAL_TAU_MS],

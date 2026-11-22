@@ -15,8 +15,8 @@ import kotlin.math.sin
  * duplicate box). The Python functions in `docs/plans/M3_sim/scenarios.py` define S1 to S15; every number they
  * assert is in [MetricsThresholds]. S16 keeps its two numbers local (one id, coverage 0.95): they are the strict
  * values (not weaker than the S12 ones), and the protected thresholds file stays untouched.
- * Each scenario runs at 12 fps (also +-30 %), 20, 30 and 60 fps and at 30 fps +-30 %, with seeds 1, 2 and 3; S3
- * skips the 12 fps rates until F4. A failure message names the scenario, the rate, the seed and the quantity.
+ * Each scenario runs at 12 fps (also +-30 %), 20, 30 and 60 fps and at 30 fps +-30 %, with seeds 1, 2 and 3 (S3 at 12 fps uses the
+ * 20 fps limit, which F4 meets by lowering the process noise at low rates). A failure message names the scenario, the rate, the seed and the quantity.
  */
 class TrackerScenarioTest {
     private class Rate(
@@ -56,7 +56,7 @@ class TrackerScenarioTest {
 
     @Test
     fun s3_stillPerson_jitterIsBelowTheRawJitter() =
-        forEachRun("S3 still", rates = RATES_WITHOUT_12_FPS) { c ->
+        forEachRun("S3 still") { c ->
             val person = ScenePerson(1, listOf(pt(0.0, 600.0), pt(20.0, 600.0)))
             val run = runScene(scene(listOf(person), 20.0, c))
             val from = c.rate.fps.roundToInt()
@@ -484,9 +484,6 @@ class TrackerScenarioTest {
                 Rate(30.0, JITTER_FRACTION),
             )
 
-        // 12 fps: measured 0.698 vs 0.60 on unchanged code (main 6b4b105); smoothing at low fps is fixed in F4,
-        // which re-enables S3 at 12 fps with the existing 0.60 limit.
-        private val RATES_WITHOUT_12_FPS = RATES.filter { it.fps >= LOW_FPS }
         private val SEEDS = listOf(1L, 2L, 3L)
         private val IDLE_MS_AFTER_LAST_FRAME = listOf(500L, 1000L, 4000L)
 

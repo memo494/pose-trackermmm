@@ -708,6 +708,38 @@ class TrackerConfigTest {
     }
 
     @Test
+    fun trackAccelLowRateFields_haveTheDocumentedDefaults_andLieInsideTheirBounds() {
+        val config = TrackerConfig()
+
+        assertThat(config.trackAccelRefDtMs).isEqualTo(50f)
+        assertThat(config.trackAccelMinScale).isEqualTo(0.5f)
+        assertWithin(config.trackAccelRefDtMs, TrackerConfig.MIN_TRACK_ACCEL_REF_DT_MS, TrackerConfig.MAX_TRACK_ACCEL_REF_DT_MS)
+        assertWithin(config.trackAccelMinScale, TrackerConfig.MIN_TRACK_ACCEL_MIN_SCALE, TrackerConfig.MAX_TRACK_ACCEL_MIN_SCALE)
+        TrackerConfig(
+            trackAccelRefDtMs = TrackerConfig.MIN_TRACK_ACCEL_REF_DT_MS,
+            trackAccelMinScale = TrackerConfig.MIN_TRACK_ACCEL_MIN_SCALE,
+        )
+        TrackerConfig(
+            trackAccelRefDtMs = TrackerConfig.MAX_TRACK_ACCEL_REF_DT_MS,
+            trackAccelMinScale = TrackerConfig.MAX_TRACK_ACCEL_MIN_SCALE,
+        )
+    }
+
+    @Test
+    fun trackAccelLowRateFields_outsideTheirBounds_areRejected() {
+        val rejected: List<() -> TrackerConfig> =
+            listOf(
+                { TrackerConfig(trackAccelRefDtMs = TrackerConfig.MIN_TRACK_ACCEL_REF_DT_MS / 2f) },
+                { TrackerConfig(trackAccelRefDtMs = TrackerConfig.MAX_TRACK_ACCEL_REF_DT_MS * 2f) },
+                { TrackerConfig(trackAccelRefDtMs = Float.NaN) },
+                { TrackerConfig(trackAccelMinScale = TrackerConfig.MIN_TRACK_ACCEL_MIN_SCALE / 2f) },
+                { TrackerConfig(trackAccelMinScale = TrackerConfig.MAX_TRACK_ACCEL_MIN_SCALE * 2f) },
+                { TrackerConfig(trackAccelMinScale = Float.NaN) },
+            )
+        for (build in rejected) assertThrows(IllegalArgumentException::class.java) { build() }
+    }
+
+    @Test
     fun displayLeadFields_haveTheDocumentedDefaults() {
         val config = TrackerConfig()
 
@@ -727,8 +759,14 @@ class TrackerConfigTest {
         assertWithin(config.displayLeadSpeedLowHps, TrackerConfig.MIN_DISPLAY_LEAD_SPEED_HPS, TrackerConfig.MAX_DISPLAY_LEAD_SPEED_HPS)
         assertWithin(config.displayLeadSpeedHighHps, TrackerConfig.MIN_DISPLAY_LEAD_SPEED_HPS, TrackerConfig.MAX_DISPLAY_LEAD_SPEED_HPS)
         assertWithin(config.displayLeadMaxRatio, TrackerConfig.MIN_DISPLAY_LEAD_MAX_RATIO, TrackerConfig.MAX_DISPLAY_LEAD_MAX_RATIO)
-        TrackerConfig(displayLeadMaxMs = TrackerConfig.MIN_DISPLAY_LEAD_MAX_MS, displayLeadMaxRatio = TrackerConfig.MIN_DISPLAY_LEAD_MAX_RATIO)
-        TrackerConfig(displayLeadMaxMs = TrackerConfig.MAX_DISPLAY_LEAD_MAX_MS, displayLeadMaxRatio = TrackerConfig.MAX_DISPLAY_LEAD_MAX_RATIO)
+        TrackerConfig(
+            displayLeadMaxMs = TrackerConfig.MIN_DISPLAY_LEAD_MAX_MS,
+            displayLeadMaxRatio = TrackerConfig.MIN_DISPLAY_LEAD_MAX_RATIO,
+        )
+        TrackerConfig(
+            displayLeadMaxMs = TrackerConfig.MAX_DISPLAY_LEAD_MAX_MS,
+            displayLeadMaxRatio = TrackerConfig.MAX_DISPLAY_LEAD_MAX_RATIO,
+        )
         TrackerConfig(displayLeadExtraMs = TrackerConfig.MIN_DISPLAY_LEAD_EXTRA_MS)
         TrackerConfig(displayLeadExtraMs = TrackerConfig.MAX_DISPLAY_LEAD_EXTRA_MS)
         TrackerConfig(displayLeadSpeedLowHps = 1.0f, displayLeadSpeedHighHps = 1.0f)

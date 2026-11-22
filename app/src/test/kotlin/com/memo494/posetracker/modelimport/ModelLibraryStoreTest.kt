@@ -1,6 +1,7 @@
 package com.memo494.posetracker.modelimport
 
 import com.google.common.truth.Truth.assertThat
+import com.google.common.truth.Truth.assertWithMessage
 import com.memo494.posetracker.core.TrackerConfig
 import com.memo494.posetracker.core.modelimport.ImportGuardState
 import com.memo494.posetracker.core.modelimport.ImportStage
@@ -812,6 +813,86 @@ class ModelLibraryStoreTest {
 
         assertThat(outcome).isEqualTo(ImportOutcome.Failed(FailureKind.LIBRARY_FULL))
         assertThat(library.state().entries).hasSize(1)
+    }
+
+    // ---- the owner's import flow with the production wiring (a new store per call, as MainActivity does) ----
+
+    /**
+     * Stands in for the process-wide "app-start step applied" flag of the production store (a fresh one per test,
+     * so no test sees another's state).
+     */
+    private val processFlag = AtomicBoolean(false)
+
+    /**
+     * Like MainActivity: a new store per call. It uses the production defaults (in-flight check, File::renameTo,
+     * the process flag above) except the thread check and the log, which the test supplies.
+     */
+    private fun productionLibrary() =
+        ModelLibraryStore(
+            ImportedModelStore(directory, prefs, processFlag, thread::check),
+            TrackerConfig(),
+            thread::check,
+            File::renameTo,
+        ) { message, _ -> logs.add(message) }
+
+    private fun productionImport(
+        bytes: ByteArray,
+        name: String,
+    ): ImportOutcome = importBytes(importerFor(productionLibrary()), bytes, name)
+
+    /** Every path under the store and the logged lines: the failure message shows what is on disk. */
+    private fun tree(): String = directory.walkTopDown().joinToString("\n") { it.relativeTo(tmp.root).path } + "\nlogs=" + logs
+
+    /** Asserts the library holds exactly [expected] (display name to imported bytes), each file present and byte-identical. */
+    private fun assertLibraryHolds(expected: Map<String, ByteArray>) {
+        val library = productionLibrary()
+        val entries = library.state().entries
+        assertWithMessage(tree()).that(entries.map { it.meta.displayName }).containsExactlyElementsIn(expected.keys)
+        assertWithMessage(tree()).that(entries.map { it.fileExists }).doesNotContain(false)
+        for (entry in entries) {
+            assertWithMessage(tree() + "\nentry=" + entry.meta.displayName)
+                .that(library.modelFileFor(entry.meta).readBytes())
+                .isEqualTo(expected.getValue(entry.meta.displayName))
+        }
+    }
+
+    @Test
+    fun importer_twoModels_aNewStorePerCall_bothStayInTheLibrary() {
+        val one = tfliteBytes(500, 1)
+        val two = tfliteBytes(600, 2)
+        productionLibrary().state()
+        assertThat(productionImport(one, "one.tflite")).isInstanceOf(ImportOutcome.Accepted::class.java)
+        productionLibrary().state()
+        assertThat(productionImport(two, "two.tflite")).isInstanceOf(ImportOutcome.Accepted::class.java)
+
+        val names = productionLibrary().state().entries.map { it.meta.displayName }
+        assertWithMessage(tree()).that(names).containsExactly("one.tflite", "two.tflite").inOrder()
+        assertLibraryHolds(mapOf("one.tflite" to one, "two.tflite" to two))
+    }
+
+    @Test
+    fun importer_afterTheMigration_withTheProductionWiring_keepsTheMigratedModel() {
+        val two = tfliteBytes(600, 2)
+        storeLegacyModel(metaA, bytesA)
+        productionLibrary().state()
+        assertThat(productionImport(two, "two.tflite")).isInstanceOf(ImportOutcome.Accepted::class.java)
+
+        val names = productionLibrary().state().entries.map { it.meta.displayName }
+        assertWithMessage(tree()).that(names).containsExactly("a.tflite", "two.tflite").inOrder()
+        assertLibraryHolds(mapOf("a.tflite" to bytesA, "two.tflite" to two))
+    }
+
+    @Test
+    fun importer_whenTheMigrationRunsInsideTheImport_keepsTheMigratedModel() {
+        val two = tfliteBytes(600, 2)
+        val three = tfliteBytes(700, 3)
+        storeLegacyModel(metaA, bytesA)
+        assertThat(productionImport(two, "two.tflite")).isInstanceOf(ImportOutcome.Accepted::class.java)
+        assertThat(productionImport(three, "three.tflite")).isInstanceOf(ImportOutcome.Accepted::class.java)
+
+        val names = productionLibrary().state().entries.map { it.meta.displayName }
+        assertWithMessage(tree()).that(names).containsExactly("a.tflite", "three.tflite", "two.tflite").inOrder()
+        assertLibraryHolds(mapOf("a.tflite" to bytesA, "two.tflite" to two, "three.tflite" to three))
     }
 
     // ---- threads ----

@@ -279,8 +279,17 @@ class TuningOverridesTest {
     @Test
     fun leadSwitch_clampsToZeroOrOneAndIsOnByDefault() {
         assertThat(TuningOverrides.NONE.with(TuningKey.DISPLAY_LEAD_ENABLED, 7f).count).isEqualTo(0)
-        assertThat(TuningOverrides.NONE.with(TuningKey.DISPLAY_LEAD_ENABLED, -3f).applyTo().config.displayLeadEnabled).isFalse()
-        assertThat(TuningOverrides.NONE.applyTo().config.displayLeadEnabled).isTrue()
+        assertThat(
+            TuningOverrides.NONE
+                .with(TuningKey.DISPLAY_LEAD_ENABLED, -3f)
+                .applyTo()
+                .config.displayLeadEnabled,
+        ).isFalse()
+        assertThat(
+            TuningOverrides.NONE
+                .applyTo()
+                .config.displayLeadEnabled,
+        ).isTrue()
     }
 
     @Test
@@ -293,7 +302,11 @@ class TuningOverridesTest {
 
     @Test
     fun leadSpeedLow_aboveTheHighSpeedRaisesTheHighSpeed() {
-        val config = TuningOverrides.NONE.with(TuningKey.DISPLAY_LEAD_SPEED_LOW_HPS, 3f).applyTo().config
+        val config =
+            TuningOverrides.NONE
+                .with(TuningKey.DISPLAY_LEAD_SPEED_LOW_HPS, 3f)
+                .applyTo()
+                .config
 
         assertThat(config.displayLeadSpeedLowHps).isEqualTo(3f)
         assertThat(config.displayLeadSpeedHighHps).isEqualTo(3f)

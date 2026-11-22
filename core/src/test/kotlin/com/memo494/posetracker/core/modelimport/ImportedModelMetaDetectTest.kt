@@ -105,14 +105,24 @@ class ImportedModelMetaDetectTest {
     }
 
     @Test
-    fun detectRows_goUpToTheRawCap_butEndToEndRowsStayAt300() {
-        val atCap = TrackerConfig.IMPORT_MAX_RAW_OUTPUT_ROWS
-        assertThat(ImportedModelMeta.decode(v5(rows = "$atCap"))).isNotNull()
-        assertThat(ImportedModelMeta.decode(v5(rows = "${atCap + 1}"))).isNull()
+    fun rawDetectRows_mustEqualTheAnchorCountOfTheStoredInput_butEndToEndRowsStayAt300() {
+        assertThat(ImportedModelMeta.decode(v5(rows = "2100"))).isNotNull()
+        assertThat(ImportedModelMeta.decode(v5(rows = "2101"))).isNull()
+        assertThat(ImportedModelMeta.decode(v5(rows = "6300"))).isNull() // YOLOv5: three anchors per cell
+        assertThat(ImportedModelMeta.decode(v5(rows = "${TrackerConfig.IMPORT_MAX_RAW_OUTPUT_ROWS}"))).isNull()
         assertThat(ImportedModelMeta.decode(v5(rows = "0"))).isNull()
+        assertThat(ImportedModelMeta.decode(v5(layout = "outputLayout=detect_raw_channels_last", rows = "6300"))).isNull()
+        assertThat(ImportedModelMeta.decode(v5(layout = "outputLayout=detect_raw_channels_last", rows = "2100"))).isNotNull()
         val endToEnd = v5(layout = "outputLayout=detect_end_to_end", classes = "classes=0")
         assertThat(ImportedModelMeta.decode(endToEnd.replace("outputRows=2100", "outputRows=300"))).isNotNull()
         assertThat(ImportedModelMeta.decode(endToEnd.replace("outputRows=2100", "outputRows=301"))).isNull()
+    }
+
+    @Test
+    fun rawDetectRows_followTheStoredWidthAndHeight() {
+        // 640 x 320: (80 x 40) + (40 x 20) + (20 x 10) = 4200 rows.
+        assertThat(ImportedModelMeta.decode(v5(rows = "4200", width = "640"))?.outputRows).isEqualTo(4200)
+        assertThat(ImportedModelMeta.decode(v5(rows = "2100", width = "640"))).isNull()
     }
 
     @Test

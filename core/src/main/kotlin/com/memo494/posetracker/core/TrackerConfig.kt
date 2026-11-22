@@ -1920,6 +1920,15 @@ data class TrackerConfig(
         /** Most class score columns of a raw detect-only head: the 80 COCO classes (`[1, 84, N]`). */
         const val DETECT_MAX_CLASSES = 80
 
+        /** Strides of the three detection scales of a raw detect-only head (YOLO: 8, 16, 32); its rows are the cells of all three. */
+        const val DETECT_STRIDE_FINE = 8
+
+        /** See [DETECT_STRIDE_FINE]. */
+        const val DETECT_STRIDE_MEDIUM = 16
+
+        /** See [DETECT_STRIDE_FINE]. */
+        const val DETECT_STRIDE_COARSE = 32
+
         /** Columns per row of an end-to-end detect-only output: x1, y1, x2, y2, score, class (`[1, N, 6]`). */
         const val DETECT_END_TO_END_COLUMNS = 6
 

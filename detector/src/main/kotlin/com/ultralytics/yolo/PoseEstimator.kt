@@ -32,6 +32,8 @@ class PoseEstimator(
         private const val BOX_CONF_FEATURES = 5 // Normal pose prefix: box x/y/w/h plus confidence.
         private const val KEYPOINT_FEATURES = 3 // One keypoint triplet: x, y, and confidence.
         private const val END_TO_END_MAX_ROWS = 300 // Ultralytics default max_det for capped end-to-end outputs.
+        private const val END_TO_END_CLASS_FEATURE = 5 // Class value column of an end-to-end detect row (x1, y1, x2, y2, score, class).
+        private const val CLASS_HALF = 0.5f // Half a class step: a class value is a whole number written as a float.
     }
 
     // Reusable float input for the CompiledModel input buffer.
@@ -60,6 +62,8 @@ class PoseEstimator(
         private set
     // Feature index of the person score for the diagnostics scan: the person class column of a raw detect head, else 4.
     private var scoreFeature = BOX_CONF_FEATURES - 1
+    // End-to-end detect head only: the class value (column 5) whose rows the diagnostics scan counts; -1 = every row.
+    private var scanClassValue = -1
     // One shared, never-changing keypoint list for every detection of a detect-only model (the lists are only read).
     private val noKeypointsXy: List<Pair<Float, Float>> = List(TrackerConfig.POSE_KEYPOINT_COUNT) { 0f to 0f }
     private val noKeypointsConf: List<Float> = List(TrackerConfig.POSE_KEYPOINT_COUNT) { 0f }
@@ -83,31 +87,36 @@ class PoseEstimator(
 
         rtModel = InferenceModel.create(context, modelPath, useGpu, "PoseEstimator")
 
-        val inDims = rtModel.inputDims
-        val inHeight = if (inDims.size >= 4) inDims[1] else 640
-        val inWidth = if (inDims.size >= 4) inDims[2] else 640
-        inputSize = com.ultralytics.yolo.Size(inWidth, inHeight)
-        modelInputSize = Pair(inWidth, inHeight)
+        try { // pose-tracker: any failure below (an Error such as OOM included) must not leak the model
+            val inDims = rtModel.inputDims
+            val inHeight = if (inDims.size >= 4) inDims[1] else 640
+            val inWidth = if (inDims.size >= 4) inDims[2] else 640
+            inputSize = com.ultralytics.yolo.Size(inWidth, inHeight)
+            modelInputSize = Pair(inWidth, inHeight)
 
-        val outputShape = rtModel.outputDims.getOrNull(0) ?: IntArray(0)
-        require(outputShape.size >= 3) {
-            "Unexpected pose output shape. Expected [batch, features, anchors] or [batch, anchors, features], Actual=${outputShape.contentToString()}"
+            val outputShape = rtModel.outputDims.getOrNull(0) ?: IntArray(0)
+            require(outputShape.size >= 3) {
+                "Unexpected pose output shape. Expected [batch, features, anchors] or [batch, anchors, features], Actual=${outputShape.contentToString()}"
+            }
+
+            batchSize = outputShape[0]
+            val rawLayout = PoseOutputLayout.rawOf(outputShape) // pose-tracker: same rule as the import check
+            detectLayout = if (rawLayout == null) PoseOutputLayout.detectOf(outputShape, inWidth, inHeight) else null
+            val detect = detectLayout
+            if (detect != null) {
+                detectClasses = PoseOutputLayout.detectClassesOf(outputShape, inWidth, inHeight)
+                initDetectOnly(detect, outputShape, inWidth, inHeight, personClass, rawNmsIou)
+            } else {
+                initPose(outputShape, rawLayout, inWidth, inHeight, rawNmsIou)
+            }
+
+            floatInput = FloatArray(inWidth * inHeight * 3)
+            inputBitmap = Bitmap.createBitmap(inWidth, inHeight, Bitmap.Config.ARGB_8888)
+            intValues = IntArray(inWidth * inHeight)
+        } catch (e: Throwable) {
+            rtModel.close()
+            throw e
         }
-
-        batchSize = outputShape[0]
-        val rawLayout = PoseOutputLayout.rawOf(outputShape) // pose-tracker: same rule as the import check
-        detectLayout = if (rawLayout == null) PoseOutputLayout.detectOf(outputShape) else null
-        val detect = detectLayout
-        if (detect != null) {
-            detectClasses = PoseOutputLayout.detectClassesOf(outputShape)
-            initDetectOnly(detect, outputShape, inWidth, inHeight, personClass, rawNmsIou)
-        } else {
-            initPose(outputShape, rawLayout, inWidth, inHeight, rawNmsIou)
-        }
-
-        floatInput = FloatArray(inWidth * inHeight * 3)
-        inputBitmap = Bitmap.createBitmap(inWidth, inHeight, Bitmap.Config.ARGB_8888)
-        intValues = IntArray(inWidth * inHeight)
     }
 
     /**
@@ -129,21 +138,18 @@ class PoseEstimator(
         keypointCount = TrackerConfig.POSE_KEYPOINT_COUNT
         if (detect != PoseOutputLayout.DETECT_END_TO_END) {
             scoreFeature = TrackerConfig.POSE_BOX_VALUES + personClass
+        } else {
+            scanClassValue = personClass
         }
-        try {
-            detectDecoder = RawDetectDecoder(
-                detect,
-                numAnchors,
-                detectClasses,
-                personClass,
-                inWidth,
-                inHeight,
-                TrackerConfig(rawNmsIou = rawNmsIou)
-            )
-        } catch (e: IllegalArgumentException) {
-            rtModel.close() // the constructor throws, so nobody else can close the model
-            throw e
-        }
+        detectDecoder = RawDetectDecoder(
+            detect,
+            numAnchors,
+            detectClasses,
+            personClass,
+            inWidth,
+            inHeight,
+            TrackerConfig(rawNmsIou = rawNmsIou)
+        )
     }
 
     private fun initPose(
@@ -480,6 +486,7 @@ class PoseEstimator(
         var above = 0
         var nanRows = 0
         for (j in 0 until numAnchors) {
+            if (scanClassValue >= 0 && !isScanClass(featureValue(flat, END_TO_END_CLASS_FEATURE, j))) continue
             val conf = featureValue(flat, scoreFeature, j)
             if (conf.isNaN()) {
                 nanRows++
@@ -492,6 +499,10 @@ class PoseEstimator(
         lastRawRowsAboveThreshold = above
         lastNanRawRows = nanRows
     }
+
+    /** `true` when the class value of an end-to-end detect row rounds to [scanClassValue]; a NaN is no class. */
+    private fun isScanClass(classValue: Float): Boolean =
+        classValue >= scanClassValue - CLASS_HALF && classValue < scanClassValue + CLASS_HALF
 
     private fun featureValue(
         flat: FloatArray,

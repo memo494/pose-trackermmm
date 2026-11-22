@@ -156,7 +156,10 @@ class RawDetectDecoder(
         const val COL_SCORE = 4
         const val COL_CLASS = 5
 
-        /** Half a class step: an end-to-end class value is a whole number written as a float. */
+        /**
+         * Half a class step: an end-to-end class value is a whole number written as a float. Also the structural
+         * centre-to-corner factor (a box corner is half a width or height from the centre); not a tunable.
+         */
         const val HALF = 0.5f
     }
 }

@@ -239,6 +239,8 @@ data class ImportedModelMeta(
                     classes in TrackerConfig.DETECT_MIN_CLASSES.toLong()..TrackerConfig.DETECT_MAX_CLASSES.toLong()
                 }
             if (!classesFit) return null
+            val isRawDetect = outputLayout != PoseOutputLayout.DETECT_END_TO_END
+            if (isRawDetect && rows != PoseOutputLayout.detectAnchorCount(width.toInt(), height.toInt()).toLong()) return null
             return build(lines, width, height, rows, outputLayout, config, inputLayout, classes.toInt())
         }
 

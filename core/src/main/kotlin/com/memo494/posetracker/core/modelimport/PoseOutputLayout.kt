@@ -18,7 +18,7 @@ enum class PoseOutputLayout {
     /** `[1, 4 + C, N]` of a detect-only model (no keypoints): cx, cy, w, h, then C class scores (already sigmoid, no objectness); not suppressed. */
     DETECT_RAW_CHANNELS_FIRST,
 
-    /** `[1, N, 4 + C]` with `N` above the end-to-end row limit: like [DETECT_RAW_CHANNELS_FIRST] with one row per candidate. */
+    /** `[1, N, 4 + C]` with `N` the anchor count of the input: like [DETECT_RAW_CHANNELS_FIRST] with one row per candidate. */
     DETECT_RAW_CHANNELS_LAST,
 
     /** `[1, N, 6]` with `0 < N <= 300` of a detect-only model: x1, y1, x2, y2, score, class; suppression is in the model. */
@@ -47,23 +47,64 @@ enum class PoseOutputLayout {
         fun rawOf(shape: IntArray): PoseOutputLayout? = if (shape.size == RANK) rawOf(shape[0], shape[1], shape[2]) else null
 
         /**
-         * The detect-only layout of an output [shape], else `null` (batch must be 1):
-         * - `[1, 4 + C, N]` with `1 <= C <= 80` and `4 + C < N`: [DETECT_RAW_CHANNELS_FIRST];
-         * - `[1, N, 4 + C]` with the same `C` and `N` above [TrackerConfig.IMPORT_MAX_OUTPUT_ROWS]: [DETECT_RAW_CHANNELS_LAST];
-         * - `[1, N, 6]` with `0 < N <=` [TrackerConfig.IMPORT_MAX_OUTPUT_ROWS]: [DETECT_END_TO_END].
-         * Channel counts of a pose head (`5 + 3k`, which includes 56, and 57) are never a detect head, and a shape that
-         * fits two layouts (`[1, 5, 6]`) is `null` (fail closed). The one rule the import check and the vendored decoder share.
+         * Rows `N` of a raw detect head for a model input of [inputWidth] x [inputHeight]: the cells of the three scales
+         * (strides [TrackerConfig.DETECT_STRIDE_FINE], [TrackerConfig.DETECT_STRIDE_MEDIUM], [TrackerConfig.DETECT_STRIDE_COARSE]),
+         * 2100 for 320 x 320, 8400 for 640 x 640; 0 when a side is not a positive multiple of the coarsest stride.
          */
-        fun detectOf(shape: List<Int>): PoseOutputLayout? = if (shape.size == RANK) detectOf(shape[0], shape[1], shape[2]) else null
+        fun detectAnchorCount(
+            inputWidth: Int,
+            inputHeight: Int,
+        ): Int {
+            if (inputWidth <= 0 || inputHeight <= 0) return 0
+            if (inputWidth % TrackerConfig.DETECT_STRIDE_COARSE != 0 || inputHeight % TrackerConfig.DETECT_STRIDE_COARSE != 0) return 0
+            return cells(inputWidth, inputHeight, TrackerConfig.DETECT_STRIDE_FINE) +
+                cells(inputWidth, inputHeight, TrackerConfig.DETECT_STRIDE_MEDIUM) +
+                cells(inputWidth, inputHeight, TrackerConfig.DETECT_STRIDE_COARSE)
+        }
+
+        private fun cells(
+            width: Int,
+            height: Int,
+            stride: Int,
+        ): Int = (width / stride) * (height / stride)
+
+        /**
+         * The detect-only layout of an output [shape] of a model with input [inputWidth] x [inputHeight], else `null`
+         * (batch must be 1). With `N` = [detectAnchorCount]:
+         * - `[1, 4 + C, N]` with `1 <= C <= 80`: [DETECT_RAW_CHANNELS_FIRST];
+         * - `[1, N, 4 + C]` with the same `C`: [DETECT_RAW_CHANNELS_LAST];
+         * - `[1, M, 6]` with `0 < M <=` [TrackerConfig.IMPORT_MAX_OUTPUT_ROWS]: [DETECT_END_TO_END].
+         * A raw head must have exactly the anchor count of the input, so a YOLOv5 head with an objectness column
+         * (`[1, 6300, 9]` at 320, three anchors per cell) is never read as a detect head. Channel counts of a pose head
+         * (`5 + 3k`, which includes 56, and 57) are never a detect head, and a shape that fits two layouts (`[1, 5, 6]`)
+         * is `null` (fail closed). The one rule the import check and the vendored decoder share.
+         */
+        fun detectOf(
+            shape: List<Int>,
+            inputWidth: Int,
+            inputHeight: Int,
+        ): PoseOutputLayout? = if (shape.size == RANK) detectOf(shape[0], shape[1], shape[2], inputWidth, inputHeight) else null
 
         /** Same as [detectOf] for an `IntArray` shape. */
-        fun detectOf(shape: IntArray): PoseOutputLayout? = if (shape.size == RANK) detectOf(shape[0], shape[1], shape[2]) else null
+        fun detectOf(
+            shape: IntArray,
+            inputWidth: Int,
+            inputHeight: Int,
+        ): PoseOutputLayout? = if (shape.size == RANK) detectOf(shape[0], shape[1], shape[2], inputWidth, inputHeight) else null
 
         /** Class score columns `C` of a raw detect head of [shape], 0 for an end-to-end head or no detect head. */
-        fun detectClassesOf(shape: List<Int>): Int = classesOf(detectOf(shape), shape.getOrElse(1) { 0 }, shape.getOrElse(2) { 0 })
+        fun detectClassesOf(
+            shape: List<Int>,
+            inputWidth: Int,
+            inputHeight: Int,
+        ): Int = classesOf(detectOf(shape, inputWidth, inputHeight), shape.getOrElse(1) { 0 }, shape.getOrElse(2) { 0 })
 
         /** Same as [detectClassesOf] for an `IntArray` shape. */
-        fun detectClassesOf(shape: IntArray): Int = classesOf(detectOf(shape), shape.getOrElse(1) { 0 }, shape.getOrElse(2) { 0 })
+        fun detectClassesOf(
+            shape: IntArray,
+            inputWidth: Int,
+            inputHeight: Int,
+        ): Int = classesOf(detectOf(shape, inputWidth, inputHeight), shape.getOrElse(1) { 0 }, shape.getOrElse(2) { 0 })
 
         private fun classesOf(
             layout: PoseOutputLayout?,
@@ -80,10 +121,13 @@ enum class PoseOutputLayout {
             batch: Int,
             axis1: Int,
             axis2: Int,
+            inputWidth: Int,
+            inputHeight: Int,
         ): PoseOutputLayout? {
             if (batch != BATCH) return null
-            val first = isDetectChannelCount(axis1) && axis2 > axis1
-            val last = isDetectChannelCount(axis2) && axis1 > TrackerConfig.IMPORT_MAX_OUTPUT_ROWS
+            val anchors = detectAnchorCount(inputWidth, inputHeight)
+            val first = anchors > 0 && isDetectChannelCount(axis1) && axis2 == anchors
+            val last = anchors > 0 && isDetectChannelCount(axis2) && axis1 == anchors
             val endToEnd = axis2 == TrackerConfig.DETECT_END_TO_END_COLUMNS && axis1 in 1..TrackerConfig.IMPORT_MAX_OUTPUT_ROWS
             return when {
                 first && !last && !endToEnd -> DETECT_RAW_CHANNELS_FIRST

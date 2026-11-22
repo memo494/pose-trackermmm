@@ -450,6 +450,7 @@ class ImportedModelRulesTest {
             "output_type",
             "output_classic_head",
             "output_detect_only",
+            "output_keypoint_count",
             "output_rows",
             "output_shape",
         )
@@ -564,5 +565,38 @@ class ImportedModelRulesTest {
     fun otherNonFloat32Types_keepTheirGenericReasons() {
         assertRejected(check(tensor(1, 3, 640, 640, type = "float16")), ImportRejection.INPUT_TYPE)
         assertRejected(checkRaw(tensor(1, 56, 8400, type = "float16")), ImportRejection.OUTPUT_TYPE)
+    }
+
+    @Test
+    fun smallRawLookingShapes_withA56Axis_areNeverDetectOnly() {
+        for (shape in listOf(intArrayOf(1, 56, 21), intArrayOf(1, 21, 56), intArrayOf(1, 56, 6), intArrayOf(1, 5, 56))) {
+            assertRejected(checkRaw(TensorDescription(shape.toList(), "float32")), ImportRejection.OUTPUT_SHAPE)
+        }
+    }
+
+    @Test
+    fun poseHeadsWithOtherKeypointCounts_areRejectedAsKeypointCount() {
+        // 5 + 3k channels (channels first or last): 8 = 1 keypoint, 41 = 12 keypoints, 53 = 16 keypoints.
+        for (channels in listOf(8, 41, 53)) {
+            for (shape in listOf(intArrayOf(1, channels, 8400), intArrayOf(1, 8400, channels))) {
+                val rejected = assertRejected(checkRaw(TensorDescription(shape.toList(), "float32")), ImportRejection.OUTPUT_KEYPOINT_COUNT)
+                assertThat(rejected.details).contains(shape.joinToString(",", "[", "]"))
+            }
+        }
+    }
+
+    @Test
+    fun singleClassDetect_with5Channels_isStillDetectOnly() {
+        assertRejected(checkRaw(tensor(1, 5, 8400)), ImportRejection.OUTPUT_DETECT_ONLY)
+    }
+
+    @Test
+    fun rawLayoutOfShape_isOneSharedRuleForListsAndArrays() {
+        assertThat(PoseOutputLayout.rawOf(intArrayOf(1, 56, 8400))).isEqualTo(PoseOutputLayout.RAW_CHANNELS_FIRST)
+        assertThat(PoseOutputLayout.rawOf(listOf(1, 8400, 56))).isEqualTo(PoseOutputLayout.RAW_CHANNELS_LAST)
+        assertThat(PoseOutputLayout.rawOf(intArrayOf(2, 56, 8400))).isNull()
+        assertThat(PoseOutputLayout.rawOf(intArrayOf(1, 56, 56))).isNull()
+        assertThat(PoseOutputLayout.rawOf(intArrayOf(1, 300, 57))).isNull()
+        assertThat(PoseOutputLayout.rawOf(intArrayOf(1, 56, 8400, 1))).isNull()
     }
 }

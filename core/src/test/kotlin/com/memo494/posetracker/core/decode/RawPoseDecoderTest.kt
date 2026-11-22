@@ -259,4 +259,83 @@ class RawPoseDecoderTest {
 
         assertThrows(IllegalArgumentException::class.java) { d.decode(FloatArray(10 * 56 - 1), 0.25f) }
     }
+
+    @Test
+    fun normalizedFrameWithOnePixelLookingRow_dropsTheOutlier_andKeepsEveryRealPerson() {
+        for (layout in raw) {
+            val rows =
+                List(5) { i -> Row(0.1f + i * 0.18f, 0.5f, 0.1f, 0.3f, 0.8f - i * 0.01f) } +
+                    Row(300f, 300f, 100f, 100f, 0.99f)
+            val d = decoder(layout, rows.size)
+
+            val count = d.decode(flat(layout, rows), 0.25f)
+
+            assertThat(count).isEqualTo(5)
+            for (i in 0 until count) {
+                assertThat(d.scoreOf(i)).isLessThan(0.9f)
+                assertThat(d.boxRightMdl(i) - d.boxLeftMdl(i)).isWithin(1e-2f).of(0.1f * 640f)
+            }
+        }
+    }
+
+    @Test
+    fun pixelFrameWithOneNormalizedLookingRow_decodesEveryRowAsPixels() {
+        for (layout in raw) {
+            val rows = List(5) { i -> person(60f + i * 120f, 300f, 0.8f - i * 0.01f) } + Row(0.5f, 0.5f, 0.2f, 0.2f, 0.99f)
+            val d = decoder(layout, rows.size)
+
+            val count = d.decode(flat(layout, rows), 0.25f)
+
+            assertThat(count).isEqualTo(6)
+            assertThat(d.scoreOf(0)).isEqualTo(0.99f)
+            assertThat(d.boxLeftMdl(0)).isWithin(1e-4f).of(0.4f)
+            assertThat(d.boxRightMdl(0)).isWithin(1e-4f).of(0.6f)
+            assertThat(d.boxRightMdl(1) - d.boxLeftMdl(1)).isEqualTo(100f)
+        }
+    }
+
+    @Test
+    fun aTieBetweenNormalizedAndPixelRows_isReadAsPixels() {
+        val layout = PoseOutputLayout.RAW_CHANNELS_FIRST
+        val rows = listOf(Row(0.5f, 0.5f, 0.2f, 0.2f, 0.9f), person(400f, 400f, 0.8f))
+        val d = decoder(layout, rows.size)
+
+        assertThat(d.decode(flat(layout, rows), 0.25f)).isEqualTo(2)
+
+        assertThat(d.boxLeftMdl(0)).isWithin(1e-4f).of(0.4f)
+        assertThat(d.boxLeftMdl(1)).isEqualTo(350f)
+    }
+
+    @Test
+    fun rowsBelowTheThreshold_doNotVoteOnTheCoordinateKind() {
+        val layout = PoseOutputLayout.RAW_CHANNELS_LAST
+        // Three pixel-looking rows are below the threshold; the one passing row is normalized.
+        val rows = listOf(person(100f, 100f, 0.1f), person(300f, 300f, 0.1f), person(500f, 500f, 0.1f), Row(0.5f, 0.5f, 0.2f, 0.4f, 0.9f))
+        val d = decoder(layout, rows.size, width = 320, height = 192)
+
+        assertThat(d.decode(flat(layout, rows), 0.25f)).isEqualTo(1)
+        assertThat(d.boxLeftMdl(0)).isWithin(1e-3f).of(0.4f * 320f)
+    }
+
+    @Test
+    fun nonFiniteKeypointValues_becomeAKeypointWithConfidenceZeroAndFiniteCoordinates() {
+        for (layout in raw) {
+            val keypoints = FloatArray(51) { 10f }
+            keypoints[3 * 3] = Float.NaN // keypoint 3 x
+            keypoints[4 * 3 + 1] = Float.POSITIVE_INFINITY // keypoint 4 y
+            keypoints[5 * 3 + 2] = Float.NaN // keypoint 5 conf
+            val rows = listOf(Row(300f, 300f, 100f, 200f, 0.8f, keypoints))
+            val d = decoder(layout, 1)
+
+            assertThat(d.decode(flat(layout, rows), 0.25f)).isEqualTo(1)
+
+            for (k in listOf(3, 4, 5)) {
+                assertThat(d.keypointScore(0, k)).isEqualTo(0f)
+                assertThat(d.keypointXMdl(0, k).isFinite()).isTrue()
+                assertThat(d.keypointYMdl(0, k).isFinite()).isTrue()
+            }
+            assertThat(d.keypointScore(0, 2)).isEqualTo(10f)
+            assertThat(d.keypointXMdl(0, 2)).isEqualTo(10f)
+        }
+    }
 }

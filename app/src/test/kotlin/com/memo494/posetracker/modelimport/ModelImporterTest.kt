@@ -303,6 +303,7 @@ class ModelImporterTest {
                 ImportRejection.OUTPUT_TYPE to (listOf(goodIn) to listOf(tensor(1, 300, 57, type = "float16"))),
                 ImportRejection.OUTPUT_CLASSIC_HEAD to (listOf(goodIn) to listOf(tensor(1, 84, 8400))),
                 ImportRejection.OUTPUT_DETECT_ONLY to (listOf(goodIn) to listOf(tensor(1, 6, 2100))),
+                ImportRejection.OUTPUT_KEYPOINT_COUNT to (listOf(goodIn) to listOf(tensor(1, 41, 8400))),
                 ImportRejection.OUTPUT_ROWS to (listOf(goodIn) to listOf(tensor(1, 301, 57))),
                 ImportRejection.OUTPUT_SHAPE to (listOf(goodIn) to listOf(tensor(1, 300, 58))),
             )

@@ -11,16 +11,23 @@ import com.memo494.posetracker.core.tracking.BoxOverlap
  * 17 keypoints of `x, y, conf`.
  *
  * Steps per frame: drop rows whose score is below the threshold (a NaN score never passes) and rows whose box is
- * not a finite positive rectangle; turn `cx, cy, w, h` into left, top, right, bottom; scale a row that is
- * normalized to the model input size (see below); suppress with class-agnostic greedy NMS (a lower-scored box with
+ * not a finite positive rectangle; turn `cx, cy, w, h` into left, top, right, bottom; scale a normalized frame to
+ * the model input size (see below); suppress with class-agnostic greedy NMS (a lower-scored box with
  * an IoU above [TrackerConfig.rawNmsIou] to a kept box is dropped); keep at most [TrackerConfig.RAW_MAX_DETECTIONS],
  * best score first.
  *
- * **Coordinates.** Current Ultralytics LiteRT exports write model pixels; some exports write 0..1. The decoder uses
- * the rule of the vendored end-to-end path ([TrackerConfig.RAW_NORMALIZED_MAX_COORDINATE]), per row: when no
- * coordinate of the row's box has an absolute value above 2, the row (box and keypoints) is normalized and is
- * multiplied by the input width and height; otherwise it is in model pixels. The results are always model pixels
- * (Mdl space); mapping to image space is the caller's job (letterbox), exactly as for the end-to-end path.
+ * **Coordinates.** Ultralytics TFLite / LiteRT exports write 0..1 coordinates (boxes and keypoints divided by the
+ * image size, or by grid x stride); some other exports write model pixels. The decoder handles both with the
+ * rule of the vendored end-to-end path ([TrackerConfig.RAW_NORMALIZED_MAX_COORDINATE]), decided once per frame:
+ * a candidate whose box has no coordinate with an absolute value above 2 "looks normalized". The frame is read as
+ * normalized when MORE candidates look normalized than look like pixels, otherwise as pixels (a tie, or no
+ * candidate, is pixels: a normalized row misread as pixels is a box of at most 2 px that later stages drop, whereas
+ * a pixel row misread as normalized would become a huge box). In a normalized frame the keypoints and boxes are
+ * multiplied by the input width and height, and a candidate that looks like pixels is dropped as an outlier; in a
+ * pixel frame every candidate is kept as it is. The results are always model pixels (Mdl space); mapping to image
+ * space is the caller's job (letterbox), exactly as for the end-to-end path.
+ *
+ * A keypoint with a non-finite x, y or confidence is returned with confidence 0 and coordinates 0.
  *
  * Allocation-free after construction: every buffer is sized once from [rows]. Not thread-safe; use it from the
  * one inference thread. Read the results with the accessors, valid until the next [decode].
@@ -54,7 +61,8 @@ class RawPoseDecoder(
     private val right = FloatArray(rows)
     private val bottom = FloatArray(rows)
     private val score = FloatArray(rows)
-    private val normalized = BooleanArray(rows)
+    private val looksNormalized = BooleanArray(rows)
+    private var frameNormalized = false
     private val heap = IntArray(rows)
     private var heapSize = 0
 
@@ -81,11 +89,17 @@ class RawPoseDecoder(
         }
         count = 0
         heapSize = 0
+        var normalizedVotes = 0
         for (row in 0 until rows) {
             val s = value(flat, CH_SCORE, row)
             if (!(s >= scoreThreshold)) continue
-            if (addCandidate(flat, row, s)) heap[heapSize++] = row
+            if (addCandidate(flat, row, s)) {
+                heap[heapSize++] = row
+                if (looksNormalized[row]) normalizedVotes++
+            }
         }
+        frameNormalized = normalizedVotes * 2 > heapSize
+        settleCoordinateKind()
         for (i in heapSize / 2 - 1 downTo 0) siftDown(i)
         while (heapSize > 0 && count < capacity) {
             val best = heap[0]
@@ -167,16 +181,32 @@ class RawPoseDecoder(
         val t = cy - h / 2f
         val r = cx + w / 2f
         val b = cy + h / 2f
-        val isNormalized = maxOf(maxOf(abs(l), abs(t)), maxOf(abs(r), abs(b))) <= TrackerConfig.RAW_NORMALIZED_MAX_COORDINATE
-        val sx = if (isNormalized) inputWidthMdl.toFloat() else 1f
-        val sy = if (isNormalized) inputHeightMdl.toFloat() else 1f
-        left[row] = l * sx
-        top[row] = t * sy
-        right[row] = r * sx
-        bottom[row] = b * sy
+        left[row] = l
+        top[row] = t
+        right[row] = r
+        bottom[row] = b
         score[row] = rowScore
-        normalized[row] = isNormalized
+        looksNormalized[row] = maxOf(maxOf(abs(l), abs(t)), maxOf(abs(r), abs(b))) <= TrackerConfig.RAW_NORMALIZED_MAX_COORDINATE
         return true
+    }
+
+    /**
+     * Applies the frame's coordinate kind to the candidates in [heap]: a normalized frame scales every candidate to
+     * model pixels and drops the ones that look like pixels; a pixel frame leaves them as they are.
+     */
+    private fun settleCoordinateKind() {
+        if (!frameNormalized) return
+        var kept = 0
+        for (i in 0 until heapSize) {
+            val row = heap[i]
+            if (!looksNormalized[row]) continue
+            left[row] *= inputWidthMdl.toFloat()
+            right[row] *= inputWidthMdl.toFloat()
+            top[row] *= inputHeightMdl.toFloat()
+            bottom[row] *= inputHeightMdl.toFloat()
+            heap[kept++] = row
+        }
+        heapSize = kept
     }
 
     private fun overlapsKept(row: Int): Boolean {
@@ -195,15 +225,19 @@ class RawPoseDecoder(
         flat: FloatArray,
         row: Int,
     ) {
-        val sx = if (normalized[row]) inputWidthMdl.toFloat() else 1f
-        val sy = if (normalized[row]) inputHeightMdl.toFloat() else 1f
+        val sx = if (frameNormalized) inputWidthMdl.toFloat() else 1f
+        val sy = if (frameNormalized) inputHeightMdl.toFloat() else 1f
         val base = count * KEYPOINT_FLOATS
         for (k in 0 until TrackerConfig.POSE_KEYPOINT_COUNT) {
             val channel = CH_KEYPOINTS + k * TrackerConfig.POSE_VALUES_PER_KEYPOINT
             val at = base + k * TrackerConfig.POSE_VALUES_PER_KEYPOINT
-            keptKeypoints[at] = value(flat, channel, row) * sx
-            keptKeypoints[at + 1] = value(flat, channel + 1, row) * sy
-            keptKeypoints[at + 2] = value(flat, channel + 2, row)
+            val x = value(flat, channel, row) * sx
+            val y = value(flat, channel + 1, row) * sy
+            val confidence = value(flat, channel + 2, row)
+            val usable = x.isFinite() && y.isFinite() && confidence.isFinite()
+            keptKeypoints[at] = if (usable) x else 0f
+            keptKeypoints[at + 1] = if (usable) y else 0f
+            keptKeypoints[at + 2] = if (usable) confidence else 0f
         }
         keptRow[count++] = row
     }

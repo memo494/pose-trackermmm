@@ -67,6 +67,60 @@
         }
       ],
       "golden": "golden/416.npz"
+    },
+    "448x960": {
+      "file": "yolo26n-pose_448x960.tflite",
+      "sha256": "35b62098e36ae7aaec59cc4f36ef88bb4ab00482a393abd6251c7f5f3781dd45",
+      "input": [
+        {
+          "name": "serving_default_args_0",
+          "shape": [
+            1,
+            3,
+            960,
+            448
+          ],
+          "dtype": "float32"
+        }
+      ],
+      "output": [
+        {
+          "name": "serving_default_output_0_output",
+          "shape": [
+            1,
+            300,
+            57
+          ],
+          "dtype": "float32"
+        }
+      ]
+    },
+    "960x448": {
+      "file": "yolo26n-pose_960x448.tflite",
+      "sha256": "e8e149af1314494bf633b30d76642ef281d1106bc629ded4368446a65a4c73ad",
+      "input": [
+        {
+          "name": "serving_default_args_0",
+          "shape": [
+            1,
+            3,
+            448,
+            960
+          ],
+          "dtype": "float32"
+        }
+      ],
+      "output": [
+        {
+          "name": "serving_default_output_0_output",
+          "shape": [
+            1,
+            300,
+            57
+          ],
+          "dtype": "float32"
+        }
+      ]
     }
   }
 }

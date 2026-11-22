@@ -28,10 +28,12 @@ class ModelInfoTest {
     private fun outputOf(shape: String): String = """[{"name":"o","shape":$shape}]"""
 
     @Test
-    fun parse_committedModelInfo_listsSizes320And416() {
+    fun parse_committedModelInfo_listsTheSquareAndTheRectangularModels() {
         val info = ModelInfo.parse(File("../model/${ModelInfo.ASSET_NAME}").readText())
 
-        assertThat(info.entries.map { it.inputSize }).containsExactly(320, 416).inOrder()
+        assertThat(info.entries.map { it.inputWidth to it.inputHeight })
+            .containsExactly(320 to 320, 416 to 416, 448 to 960, 960 to 448)
+            .inOrder()
         for (size in listOf(320, 416)) {
             val entry = info.entryFor(size)
             assertThat(entry.fileName).isEqualTo("yolo26n-pose_$size.tflite")
@@ -39,6 +41,61 @@ class ModelInfoTest {
             assertThat(entry.outputShape).containsExactly(1, 300, 57).inOrder()
             assertThat(entry.sha256).hasLength(64)
         }
+    }
+
+    @Test
+    fun parse_committedModelInfo_rectangularEntriesAreNchwWithHeightBeforeWidth() {
+        val info = ModelInfo.parse(File("../model/${ModelInfo.ASSET_NAME}").readText())
+
+        val portrait = info.entryFor(448, 960)
+        assertThat(portrait.fileName).isEqualTo("yolo26n-pose_448x960.tflite")
+        assertThat(portrait.sha256).isEqualTo("35b62098e36ae7aaec59cc4f36ef88bb4ab00482a393abd6251c7f5f3781dd45")
+        assertThat(portrait.inputShape).containsExactly(1, 3, 960, 448).inOrder()
+        assertThat(portrait.outputShape).containsExactly(1, 300, 57).inOrder()
+        val landscape = info.entryFor(960, 448)
+        assertThat(landscape.fileName).isEqualTo("yolo26n-pose_960x448.tflite")
+        assertThat(landscape.sha256).isEqualTo("e8e149af1314494bf633b30d76642ef281d1106bc629ded4368446a65a4c73ad")
+        assertThat(landscape.inputShape).containsExactly(1, 3, 448, 960).inOrder()
+        assertThat(landscape.outputShape).containsExactly(1, 300, 57).inOrder()
+    }
+
+    @Test
+    fun parse_rectangularKey_givesWidthAndHeightFromTheKey() {
+        val text = document(key = "448x960", file = "m.tflite", input = inputOf("[1,3,960,448]"))
+
+        val entry = ModelInfo.parse(text).entryFor(448, 960)
+
+        assertThat(entry.inputWidth).isEqualTo(448)
+        assertThat(entry.inputHeight).isEqualTo(960)
+    }
+
+    @Test
+    fun parse_rectangularKeyWithTheTransposedShape_isRejected() {
+        assertRejected(document(key = "448x960", input = inputOf("[1,3,448,960]")))
+        assertRejected(document(key = "448x960", input = inputOf("[1,3,448,448]")))
+        assertRejected(document(key = "448x960", input = inputOf("[1,3,960,960]")))
+    }
+
+    @Test
+    fun parse_keysThatAreNotAPositiveIntegerOrCanonicalWidthXHeight_areRejected() {
+        for (key in listOf("416x416", "448X960", "448x", "x960", "0x960", "448x0", "-448x960", "0448x960", "448x960x1", "448 x960", "448xabc")) {
+            assertRejected(document(key = key, input = inputOf("[1,3,960,448]")))
+        }
+    }
+
+    @Test
+    fun parse_aSquareAndARectangularModelWithTheSameSides_areDifferentEntries() {
+        val text =
+            """
+            {"sizes":{
+              "448x960":{"file":"m_p.tflite","sha256":"$goodSha","input":${inputOf("[1,3,960,448]")},"output":$goodOutput},
+              "960x448":{"file":"m_l.tflite","sha256":"$goodSha","input":${inputOf("[1,3,448,960]")},"output":$goodOutput}}}
+            """.trimIndent()
+
+        val info = ModelInfo.parse(text)
+
+        assertThat(info.entryFor(448, 960).fileName).isEqualTo("m_p.tflite")
+        assertThat(info.entryFor(960, 448).fileName).isEqualTo("m_l.tflite")
     }
 
     @Test
@@ -50,7 +107,8 @@ class ModelInfoTest {
     fun parse_validDocument_givesTheEntryFields() {
         val entry = ModelInfo.parse(document()).entryFor(416)
 
-        assertThat(entry.inputSize).isEqualTo(416)
+        assertThat(entry.inputWidth).isEqualTo(416)
+        assertThat(entry.inputHeight).isEqualTo(416)
         assertThat(entry.fileName).isEqualTo("m_416.tflite")
         assertThat(entry.sha256).isEqualTo(goodSha)
         assertThat(entry.inputShape).containsExactly(1, 3, 416, 416).inOrder()
@@ -69,7 +127,7 @@ class ModelInfoTest {
 
         val info = ModelInfo.parse(text)
 
-        assertThat(info.entries.map { it.inputSize }).containsExactly(320, 416).inOrder()
+        assertThat(info.entries.map { it.inputWidth }).containsExactly(320, 416).inOrder()
     }
 
     @Test

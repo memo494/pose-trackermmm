@@ -28,7 +28,7 @@
     <!-- Model block of the control screen (ControlScreen, ControlModelMapper). -->
     <string name="model_title">Model</string>
     <string name="model_now">In this orientation: %1$s</string>
-    <string name="model_active_built_in">Built-in (%1$d)</string>
+    <string name="model_active_built_in">Built-in (%1$s)</string>
     <string name="model_active_imported">%1$s (%2$s, imported)</string>
     <string name="model_import">Import model</string>
     <string name="model_use_built_in">Remove all imported models</string>
@@ -79,6 +79,8 @@
     <string name="model_notice_guard_not_stored">The imported model was not used because its safety marker could not be saved. The built-in model ran instead.</string>
     <string name="model_notice_load_failed">The imported model could not be loaded, so the built-in model ran instead.</string>
     <string name="model_notice_blocked_unreadable">The list of switched-off models could not be read, so every imported model is treated as switched off. Delete a model and import it again to use it.</string>
+    <string name="model_notice_built_in_failed">The built-in model could not run for this orientation, so a smaller square fallback model ran instead.</string>
+    <string name="model_notice_built_in_blocked">The built-in model stopped the app while loading earlier, so it is switched off and a smaller square fallback model runs instead. Remove all imported models to try it again.</string>
     <string name="model_notice_state_unreadable">What is stored about the imported model could not be read, so the built-in model ran instead.</string>
 
     <!-- Diagnostics (DiagnosticsSection). -->

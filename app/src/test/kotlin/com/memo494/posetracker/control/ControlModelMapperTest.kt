@@ -314,4 +314,40 @@ class ControlModelMapperTest {
             assertThat(event.notice).isNull()
         }
     }
+
+    @Test
+    fun loaded_theSquareFallbackRuns_saysTheBuiltInModelFailed() {
+        val last =
+            status(
+                ModelFallback.BUILT_IN_FAILED,
+                null,
+                "built-in model failed: IllegalStateException: bad",
+            ).copy(builtInFailed = true)
+
+        val event = ControlModelMapper.stateLoaded(stored(), last)
+
+        assertThat(event.active).isEqualTo(ActiveModel.BuiltIn)
+        assertThat(
+            event.notice,
+        ).isEqualTo(ModelNotice(ModelNoticeKind.BUILT_IN_FAILED, "built-in model failed: IllegalStateException: bad"))
+    }
+
+    @Test
+    fun loaded_builtInDidNotFail_showsNoSuchNotice() {
+        assertThat(ControlModelMapper.stateLoaded(stored(), status(null)).notice).isNull()
+    }
+
+    @Test
+    fun loaded_theBundledModelWasBlocked_saysHowToTryItAgain() {
+        val last =
+            status(
+                ModelFallback.BUILT_IN_FAILED,
+                null,
+                "built-in model skipped: it crashed earlier",
+            ).copy(builtInFailed = true, builtInBlocked = true)
+
+        val event = ControlModelMapper.stateLoaded(stored(), last)
+
+        assertThat(event.notice).isEqualTo(ModelNotice(ModelNoticeKind.BUILT_IN_BLOCKED, "built-in model skipped: it crashed earlier"))
+    }
 }

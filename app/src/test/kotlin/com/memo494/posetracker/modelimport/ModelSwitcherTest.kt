@@ -3,6 +3,7 @@ package com.memo494.posetracker.modelimport
 import com.google.common.truth.Truth.assertThat
 import com.memo494.posetracker.core.capture.CaptureFrame
 import com.memo494.posetracker.core.model.DetectionFrame
+import com.memo494.posetracker.core.modelimport.BuiltInModels
 import com.memo494.posetracker.core.modelimport.ImportGuardState
 import com.memo494.posetracker.core.modelimport.ImportStage
 import com.memo494.posetracker.core.modelimport.ImportedModelMeta
@@ -10,6 +11,7 @@ import com.memo494.posetracker.core.modelimport.ModelOrientation
 import com.memo494.posetracker.core.modelimport.OrientationSlots
 import com.memo494.posetracker.core.modelimport.SlotChoice
 import com.memo494.posetracker.detector.Accelerator
+import com.memo494.posetracker.detector.BundledDetector
 import com.memo494.posetracker.detector.PoseDetector
 import org.junit.Test
 
@@ -32,11 +34,14 @@ private class TestDetector(
 }
 
 class ModelSwitcherTest {
+    private val bundledSha = "c".repeat(64)
+
     private val metaA = ImportedModelMeta("a.tflite", "a".repeat(64), 1_000L, 640, 640, 300)
     private val metaB = ImportedModelMeta("b.tflite", "b".repeat(64), 1_000L, 832, 384, 300)
 
     private var slots = OrientationSlots()
     private var blocked = emptySet<String>()
+    private var blockedListUnreadable = false
     private var unreadable = emptySet<ModelOrientation>()
     private var readFailure: Throwable? = null
     private var now = 0L
@@ -46,6 +51,9 @@ class ModelSwitcherTest {
     private var builtInLoads = 0
     private var importedFailure: Throwable? = null
     private var builtInFailure: Throwable? = null
+    private var fallbackFailure: Throwable? = null
+    private var fallbackLoads = 0
+    private val builtInOrientations = mutableListOf<ModelOrientation>()
     private val detectors = mutableListOf<TestDetector>()
     private val logs = mutableListOf<String>()
     private var logFailure: Throwable? = null
@@ -61,7 +69,7 @@ class ModelSwitcherTest {
             slots = slots,
             slotsUnreadable = unreadable,
             blocked = blocked,
-            blockedUnreadable = false,
+            blockedUnreadable = blockedListUnreadable,
             guard = ImportGuardState.Idle,
             anyFileStored = true,
         )
@@ -88,11 +96,25 @@ class ModelSwitcherTest {
                 importedFailure?.let { throw it }
                 newDetector(meta.displayName, meta.inputWidth, meta.inputHeight)
             },
-            loadBuiltIn = {
+            builtInSha256 = { bundledSha },
+            loadBuiltIn = { orientation, guarded ->
                 now += loadNs
                 builtInLoads++
-                builtInFailure?.let { throw it }
-                newDetector("builtin", 416, 416)
+                builtInOrientations.add(orientation)
+                val width = BuiltInModels.widthFor(orientation)
+                val height = BuiltInModels.heightFor(orientation)
+                val detector =
+                    guarded {
+                        builtInFailure?.let { throw it }
+                        newDetector("builtin", width, height)
+                    }
+                BundledDetector(detector, "yolo26n-pose_${width}x$height.tflite", bundledSha)
+            },
+            loadFallbackBuiltIn = {
+                now += loadNs
+                fallbackLoads++
+                fallbackFailure?.let { throw it }
+                BundledDetector(newDetector("fallback", 416, 416), "yolo26n-pose_416.tflite", "d".repeat(64))
             },
             verifyStored = { false },
             nowNs = {
@@ -166,11 +188,161 @@ class ModelSwitcherTest {
     }
 
     @Test
-    fun rotation_withBothSlotsBuiltIn_changesNothing() {
+    fun builtIn_atStart_isTheModelOfTheOrientation() {
+        val portrait = switcher.select(ModelOrientation.PORTRAIT)!!.loaded.detector!!
+
+        assertThat(portrait.inputWidth).isEqualTo(448)
+        assertThat(portrait.inputHeight).isEqualTo(960)
+        assertThat(builtInOrientations).containsExactly(ModelOrientation.PORTRAIT)
+    }
+
+    @Test
+    fun builtIn_atStartInLandscape_isTheWideModel() {
+        val landscape = switcher.select(ModelOrientation.LANDSCAPE)!!.loaded.detector!!
+
+        assertThat(landscape.inputWidth).isEqualTo(960)
+        assertThat(landscape.inputHeight).isEqualTo(448)
+        assertThat(builtInOrientations).containsExactly(ModelOrientation.LANDSCAPE)
+    }
+
+    @Test
+    fun rotation_withBothSlotsBuiltIn_switchesToTheBuiltInModelOfTheNewOrientation() {
+        switcher.select(ModelOrientation.PORTRAIT)
+        val portrait = detectors.single()
+
+        val selection = switcher.select(ModelOrientation.LANDSCAPE)!!
+
+        assertThat(portrait.closeCount).isEqualTo(1)
+        assertThat(selection.isSwitch).isTrue()
+        assertThat(selection.loaded.detector!!.inputWidth).isEqualTo(960)
+        assertThat(selection.loaded.detector!!.inputHeight).isEqualTo(448)
+        assertThat(selection.loaded.status().builtInFile).isEqualTo("yolo26n-pose_960x448.tflite")
+        assertThat(builtInLoads).isEqualTo(2)
+        assertThat(switcher.switches).isEqualTo(1)
+    }
+
+    @Test
+    fun rotation_backToTheSameBuiltInOrientation_changesNothing() {
         switcher.select(ModelOrientation.PORTRAIT)
 
-        assertThat(switcher.select(ModelOrientation.LANDSCAPE)).isNull()
+        assertThat(switcher.select(ModelOrientation.PORTRAIT)).isNull()
         assertThat(builtInLoads).isEqualTo(1)
+    }
+
+    @Test
+    fun rotation_fromALibraryModelToTheBuiltInSlot_loadsTheBuiltInModelOfThatOrientation() {
+        choose(portrait = library(metaA))
+        switcher.select(ModelOrientation.PORTRAIT)
+
+        val selection = switcher.select(ModelOrientation.LANDSCAPE)!!
+
+        assertThat(selection.loaded.source).isEqualTo(ModelSource.BUILT_IN)
+        assertThat(selection.loaded.detector!!.inputWidth).isEqualTo(960)
+    }
+
+    @Test
+    fun rotation_withTheSameFailingModelInBothSlots_loadsTheBuiltInModelOfTheOtherOrientation() {
+        choose(portrait = library(metaA), landscape = library(metaA))
+        importedFailure = IllegalStateException("bad model")
+        val first = switcher.select(ModelOrientation.PORTRAIT)!!
+
+        val second = switcher.select(ModelOrientation.LANDSCAPE)
+
+        assertThat(first.loaded.detector!!.inputWidth).isEqualTo(448)
+        assertThat(second!!.loaded.detector!!.inputWidth).isEqualTo(960)
+        assertThat(second.loaded.detector!!.inputHeight).isEqualTo(448)
+        assertThat(detectors.first().closeCount).isEqualTo(1)
+    }
+
+    @Test
+    fun aFailingModelInTheSlot_isNotRetriedWhileTheOrientationStays() {
+        choose(portrait = library(metaA))
+        importedFailure = IllegalStateException("bad model")
+        switcher.select(ModelOrientation.PORTRAIT)
+
+        assertThat(switcher.select(ModelOrientation.PORTRAIT)).isNull()
+        assertThat(loadsImported).hasSize(1)
+    }
+
+    @Test
+    fun squareFallback_thenRotation_loadsTheBundledModelOfTheOtherOrientation() {
+        builtInFailure = IllegalStateException("portrait model broken")
+        val first = switcher.select(ModelOrientation.PORTRAIT)!!
+        builtInFailure = null
+
+        val second = switcher.select(ModelOrientation.LANDSCAPE)!!
+
+        assertThat(first.loaded.detector!!.inputWidth).isEqualTo(416)
+        assertThat(second.loaded.detector!!.inputWidth).isEqualTo(960)
+        assertThat(second.loaded.status().builtInFile).isEqualTo("yolo26n-pose_960x448.tflite")
+        assertThat(second.loaded.builtInFailed).isFalse()
+    }
+
+    @Test
+    fun squareFallback_isNotRetriedWhileTheOrientationStays() {
+        builtInFailure = IllegalStateException("portrait model broken")
+        switcher.select(ModelOrientation.PORTRAIT)
+
+        assertThat(switcher.select(ModelOrientation.PORTRAIT)).isNull()
+        assertThat(builtInLoads).isEqualTo(1)
+    }
+
+    @Test
+    fun bundledModelOnTheBlockedList_isSkipped_andTheSquareFallbackRuns() {
+        blocked = setOf(bundledSha)
+
+        val loaded = switcher.select(ModelOrientation.PORTRAIT)!!.loaded
+
+        assertThat(builtInLoads).isEqualTo(0)
+        assertThat(loaded.detector!!.inputWidth).isEqualTo(416)
+        assertThat(loaded.fallback).isEqualTo(ModelFallback.BUILT_IN_FAILED)
+    }
+
+    @Test
+    fun anUnreadableLibrary_failsClosedToTheSquareFallback() {
+        readFailure = IllegalStateException("cannot read")
+
+        val loaded = switcher.select(ModelOrientation.PORTRAIT)!!.loaded
+
+        assertThat(builtInLoads).isEqualTo(0)
+        assertThat(loaded.detector!!.inputWidth).isEqualTo(416)
+        // The message is already the state failure (STATE_UNREADABLE); the skip is logged with its own reason.
+        assertThat(logs).contains("built-in model skipped: crash record unreadable")
+        assertThat(loaded.builtInBlocked).isFalse()
+    }
+
+    @Test
+    fun anUnreadableBlockedList_failsClosedToTheSquareFallback_withoutSayingItCrashed() {
+        blockedListUnreadable = true
+
+        val loaded = switcher.select(ModelOrientation.PORTRAIT)!!.loaded
+
+        assertThat(builtInLoads).isEqualTo(0)
+        assertThat(loaded.detector!!.inputWidth).isEqualTo(416)
+        assertThat(loaded.message).isEqualTo("built-in model skipped: crash record unreadable")
+    }
+
+    @Test
+    fun aBlockedBundledModel_saysItCrashedEarlier() {
+        blocked = setOf(bundledSha)
+
+        val loaded = switcher.select(ModelOrientation.PORTRAIT)!!.loaded
+
+        assertThat(loaded.message).isEqualTo("built-in model skipped: it crashed earlier")
+        assertThat(loaded.builtInBlocked).isTrue()
+    }
+
+    @Test
+    fun builtInModelOfTheOrientationThatFails_runsThe416ModelWithoutStoppingTheSession() {
+        builtInFailure = IllegalStateException("corrupt bundled model")
+
+        val loaded = switcher.select(ModelOrientation.PORTRAIT)!!.loaded
+
+        assertThat(loaded.source).isEqualTo(ModelSource.BUILT_IN)
+        assertThat(loaded.detector!!.inputWidth).isEqualTo(416)
+        assertThat(loaded.status().builtInFile).isEqualTo("yolo26n-pose_416.tflite")
+        assertThat(fallbackLoads).isEqualTo(1)
+        assertThat(switcher.status()!!.inputWidth).isEqualTo(416)
     }
 
     @Test
@@ -273,8 +445,10 @@ class ModelSwitcherTest {
     @Test
     fun withoutAnyDetector_theNextSelectTriesAgain() {
         builtInFailure = IllegalStateException("no assets")
+        fallbackFailure = IllegalStateException("no assets")
         val first = switcher.select(ModelOrientation.PORTRAIT)!!
         builtInFailure = null
+        fallbackFailure = null
 
         val second = switcher.select(ModelOrientation.LANDSCAPE)
 

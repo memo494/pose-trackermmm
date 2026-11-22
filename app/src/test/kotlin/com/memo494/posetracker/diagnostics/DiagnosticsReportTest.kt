@@ -595,6 +595,23 @@ class DiagnosticsReportTest {
     }
 
     @Test
+    fun summary_bundledBuiltInModel_namesItsFileAndShortHash() {
+        val sha = "35b62098e36ae7aaec59cc4f36ef88bb4ab00482a393abd6251c7f5f3781dd45"
+        val status = builtInStatus(448, 960).copy(builtInFile = "yolo26n-pose_448x960.tflite", builtInSha256 = sha)
+
+        val lines = modelLines(status)
+
+        assertThat(lines)
+            .containsAtLeast(
+                "modelSource=builtin",
+                "modelFile=yolo26n-pose_448x960.tflite",
+                "modelSha256=35b62098e36a",
+                "modelInputSize=448x960",
+                "modelOutputRows=none",
+            ).inOrder()
+    }
+
+    @Test
     fun summary_importedModel_showsNameShortHashSizeAndRows() {
         val lines = modelLines(importedStatus(importedMeta, 640, 640))
 

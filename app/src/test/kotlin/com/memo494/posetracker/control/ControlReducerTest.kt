@@ -1,6 +1,7 @@
 package com.memo494.posetracker.control
 
 import com.google.common.truth.Truth.assertThat
+import com.memo494.posetracker.core.modelimport.ModelOrientation
 import org.junit.Test
 
 class ControlReducerTest {
@@ -867,5 +868,14 @@ class ControlReducerTest {
     fun otherSteps_carryNoDebugMarksValue() {
         assertThat(reduce(ready, ControlEvent.StartClicked).debugMarks).isNull()
         assertThat(reduce(ready.copy(awaitingConsent = true), ControlEvent.ConsentResult(false)).debugMarks).isNull()
+    }
+
+    @Test
+    fun modelStateLoaded_copiesTheOrientationTheBuiltInLineIsFor() {
+        val step = reduce(ready, ControlEvent.ModelStateLoaded(ActiveModel.BuiltIn, null, orientation = ModelOrientation.LANDSCAPE))
+
+        assertThat(step.state.activeOrientation).isEqualTo(ModelOrientation.LANDSCAPE)
+        assertThat(reduce(step.state, ControlEvent.ModelStateLoaded(ActiveModel.BuiltIn, null)).state.activeOrientation)
+            .isEqualTo(ModelOrientation.PORTRAIT)
     }
 }

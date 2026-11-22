@@ -3,6 +3,7 @@ package com.memo494.posetracker.detector
 import android.content.Context
 import com.memo494.posetracker.core.TrackerConfig
 import com.memo494.posetracker.core.modelimport.ImportedModelMeta
+import com.memo494.posetracker.core.modelpack.ModelEntry
 import com.memo494.posetracker.core.modelpack.ModelInfo
 import com.memo494.posetracker.core.modelpack.ModelIntegrityException
 import com.memo494.posetracker.core.modelpack.ModelStager
@@ -16,27 +17,46 @@ object PoseDetectors {
     private const val MODELS_DIRECTORY = "models"
 
     /**
-     * Creates the detector for the model size in [config]: reads `model_info.json` from the assets, stages the
-     * matching `.tflite` file into `noBackupFilesDir/models` (its SHA-256 is checked before LiteRT opens it by
-     * path), loads it GPU-first with a CPU fallback and checks that the model reports the configured square input size.
+     * The parsed `model_info.json` of the assets: the bundled models with their file names and sha256 values. The
+     * crash marker of a bundled load names the sha256. Read it once per session; small, but not for the main thread.
+     *
+     * @throws java.io.IOException when the asset cannot be read.
+     * @throws IllegalArgumentException when `model_info.json` is invalid.
+     */
+    fun bundledInfo(context: Context): ModelInfo {
+        val infoText =
+            context.applicationContext.assets
+                .open(ModelInfo.ASSET_NAME)
+                .use { it.readBytes().decodeToString() }
+        return ModelInfo.parse(infoText)
+    }
+
+    /**
+     * Creates the detector for the bundled model [entry] (the built-in model of an orientation, or the square
+     * fallback): stages its `.tflite` file into `noBackupFilesDir/models` (its SHA-256 is checked before LiteRT opens it
+     * by path), then creates the model GPU-first with a CPU fallback and checks that it reports the input size of
+     * [entry].
+     *
+     * Only the creation runs inside [guarded] (the crash marker, `SessionModelLoader`): staging is a plain copy and
+     * hash that LiteRT is not part of, so a kill during it must not block the model.
      *
      * Call on the thread that will own the detector (the capture thread) and use and close it there. Never call
      * it on the main thread: it reads and hashes several megabytes and compiles the model.
      *
+     * @param guarded runs the model creation it is given; the default just runs it.
      * @throws java.io.IOException when an asset cannot be read or the staging fails, including
      *   `ModelIntegrityException` when the file does not match its SHA-256.
-     * @throws IllegalArgumentException when `model_info.json` is invalid or has no entry for the size.
      * @throws IllegalStateException when the model is unusable (input layout not NCHW, unknown accelerator,
-     *   input size different from the configured square one).
+     *   input size different from [entry]'s).
      * @throws Exception LiteRT exceptions when the CPU attempt cannot load the model either.
      */
     fun fromAssets(
         context: Context,
         config: TrackerConfig,
-    ): PoseDetector {
+        entry: ModelEntry,
+        guarded: (() -> PoseDetector) -> PoseDetector = { create -> create() },
+    ): BundledDetector {
         val appContext = context.applicationContext
-        val infoText = appContext.assets.open(ModelInfo.ASSET_NAME).use { it.readBytes().decodeToString() }
-        val entry = ModelInfo.parse(infoText).entryFor(config.modelInputSize)
         val stager = ModelStager(File(appContext.noBackupFilesDir, MODELS_DIRECTORY))
         val modelFile = stager.stage(entry.fileName, entry.sha256) { appContext.assets.open(entry.fileName) }
         val factory =
@@ -44,7 +64,9 @@ object PoseDetectors {
                 val useGpu = accelerator == Accelerator.GPU
                 UltralyticsPoseEngine.create(appContext, modelFile, useGpu, config.scoreThreshold, config.rawNmsIou)
             }
-        return LiteRtPoseDetector.create(factory, config.scoreThreshold, config.modelInputSize, config.modelInputSize)
+        val detector =
+            guarded { LiteRtPoseDetector.create(factory, config.scoreThreshold, entry.inputWidth, entry.inputHeight) }
+        return BundledDetector(detector, entry.fileName, entry.sha256)
     }
 
     /**

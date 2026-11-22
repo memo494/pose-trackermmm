@@ -408,6 +408,22 @@ class ModelLibraryStoreTest {
     }
 
     @Test
+    fun aCrashWhileLoadingTheBundledModel_blocksItsShaEvenThoughNoLibraryModelHasIt_andClearAllLiftsIt() {
+        val library = newLibrary()
+        val bundledSha = "c".repeat(64)
+        library.setGuard(ImportGuardState.Pending(ImportStage.LOAD, bundledSha))
+
+        val restarted = newLibrary()
+        val state = restarted.state()
+
+        assertThat(state.blocked).containsExactly(bundledSha)
+        assertThat(state.isBlocked(bundledSha)).isTrue()
+        assertThat(state.guard).isEqualTo(ImportGuardState.Idle)
+        assertThat(restarted.clearAll()).isTrue()
+        assertThat(newLibrary().state().isBlocked(bundledSha)).isFalse()
+    }
+
+    @Test
     fun importingABlockedModelAgain_unblocksIt() {
         val library = newLibrary()
         add(library, metaA, bytesA)

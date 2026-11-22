@@ -786,6 +786,16 @@ step back up after 60 s below the threshold. Every step is logged and shown in t
     up to 300 rows). Anything else is refused with a reason that names the shapes found. Version 1 accepted only
     square inputs; the rejection `input_not_square` is gone, a too elongated input is refused as `input_aspect`
     (a key is never reused for another meaning). Square models stay accepted.
+  - *Detect-only models (M-legacy):* an output with no keypoints is accepted too: `[1, 4 + C, N]` (raw, `1 <= C <= 80`,
+    `4 + C < N`), `[1, N, 4 + C]` (`N > 300`) or `[1, N, 6]` (end to end, `N <= 300`; x1, y1, x2, y2, score, class);
+    meta text v5 records the layout and `classes`. `RawDetectDecoder` takes the person score from class
+    `TrackerConfig.detectPersonClass` (default 0, an assumption the owner checks on the phone) and writes detections with
+    17 keypoints at (0, 0) and confidence 0. The session decides "box-only model" from the loaded model's output layout
+    (`isDetectOnly`), never from keypoint scores, and passes that flag to the tracker, the lock keeper and the HUD: the head
+    point is `box centre x, box top + headFallbackTopRatio * h` every frame (not `estimated`, so the display lead stays on;
+    noise `headBoxOnlyNoiseRatio`), the re-lock torso is the box part of a whole-body box only (same `relock*` numbers and
+    judge as today; a box that is not a whole body is unsampled and fails closed), the HUD shows
+    `Box-only model: head from box (class N)` and `summary.txt` has `modelKind=pose|box` and `detectPersonClass=N`.
   - *The real tensors decide:* the shapes are read from the model itself through LiteRT (`ModelProbe`, CPU
     `CompiledModel`, worker thread); metadata inside the file is never trusted.
   - *Never worse than the built-in model:* if the imported model cannot be loaded at Start, the session runs

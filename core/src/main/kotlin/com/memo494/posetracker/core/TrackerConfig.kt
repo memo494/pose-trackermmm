@@ -200,7 +200,10 @@ package com.memo494.posetracker.core
  * @property relockJudgeMaxFrames how many matched frames, count, a new track may be looked at for a re-lock in all,
  *   frames with no readable torso included (those do not count toward [relockJudgeFrames]); a track that has not been
  *   accepted or judged on [relockJudgeFrames] readable frames after that many is rejected once, in
- *   [[MIN_RELOCK_JUDGE_MAX_FRAMES], [MAX_RELOCK_JUDGE_MAX_FRAMES]].
+ *   [[relockJudgeFrames], [MAX_RELOCK_JUDGE_MAX_FRAMES]].
+ * @property relockMinSourceSamples fewest frames, count, a signature bucket (whole torso or upper body) must hold
+ *   before candidates are compared with it: one frame may be a bad one (an occluder, a stranger), so a bucket below this
+ *   is "not comparable" (never a match), in [[MIN_RELOCK_MIN_SOURCE_SAMPLES], [MAX_RELOCK_MIN_SOURCE_SAMPLES]].
  * @property relockOccluderMaxOverlap largest share, unitless, of the locked person's torso rectangle that another
  *   detected person's box may cover for the frame to still be added to the signature (the pixels would be that
  *   person's clothes), in [[MIN_RELOCK_OCCLUDER_MAX_OVERLAP], 1].
@@ -307,6 +310,7 @@ data class TrackerConfig(
     val relockJudgeFrames: Int = DEFAULT_RELOCK_JUDGE_FRAMES,
     val relockUpperTorsoRatio: Float = DEFAULT_RELOCK_UPPER_TORSO_RATIO,
     val relockJudgeMaxFrames: Int = DEFAULT_RELOCK_JUDGE_MAX_FRAMES,
+    val relockMinSourceSamples: Int = DEFAULT_RELOCK_MIN_SOURCE_SAMPLES,
     val relockOccluderMaxOverlap: Float = DEFAULT_RELOCK_OCCLUDER_MAX_OVERLAP,
     val assocMissNearRatio: Float = DEFAULT_ASSOC_MISS_NEAR_RATIO,
     val assocMissLogPerMin: Int = DEFAULT_ASSOC_MISS_LOG_PER_MIN,
@@ -604,8 +608,12 @@ data class TrackerConfig(
         require(relockJudgeFrames in MIN_RELOCK_JUDGE_FRAMES..MAX_RELOCK_JUDGE_FRAMES) {
             "relockJudgeFrames $relockJudgeFrames outside [$MIN_RELOCK_JUDGE_FRAMES, $MAX_RELOCK_JUDGE_FRAMES]"
         }
-        require(relockJudgeMaxFrames in MIN_RELOCK_JUDGE_MAX_FRAMES..MAX_RELOCK_JUDGE_MAX_FRAMES) {
-            "relockJudgeMaxFrames $relockJudgeMaxFrames outside [$MIN_RELOCK_JUDGE_MAX_FRAMES, $MAX_RELOCK_JUDGE_MAX_FRAMES]"
+        require(relockJudgeMaxFrames in relockJudgeFrames..MAX_RELOCK_JUDGE_MAX_FRAMES) {
+            "relockJudgeMaxFrames $relockJudgeMaxFrames outside [relockJudgeFrames $relockJudgeFrames, $MAX_RELOCK_JUDGE_MAX_FRAMES]"
+        }
+        require(relockMinSourceSamples in MIN_RELOCK_MIN_SOURCE_SAMPLES..MAX_RELOCK_MIN_SOURCE_SAMPLES) {
+            "relockMinSourceSamples $relockMinSourceSamples outside " +
+                "[$MIN_RELOCK_MIN_SOURCE_SAMPLES, $MAX_RELOCK_MIN_SOURCE_SAMPLES]"
         }
         require(relockOccluderMaxOverlap in MIN_RELOCK_OCCLUDER_MAX_OVERLAP..1f) {
             "relockOccluderMaxOverlap $relockOccluderMaxOverlap outside [$MIN_RELOCK_OCCLUDER_MAX_OVERLAP, 1]"
@@ -1336,11 +1344,17 @@ data class TrackerConfig(
         /** Default [relockJudgeMaxFrames], count (owner log 2026-11-22: a person entering clipped needs well over 10 frames). */
         const val DEFAULT_RELOCK_JUDGE_MAX_FRAMES = 30
 
-        /** Lowest accepted [relockJudgeMaxFrames]. */
-        const val MIN_RELOCK_JUDGE_MAX_FRAMES = 1
-
         /** Highest accepted [relockJudgeMaxFrames]. */
         const val MAX_RELOCK_JUDGE_MAX_FRAMES = 1000
+
+        /** Default [relockMinSourceSamples], count. */
+        const val DEFAULT_RELOCK_MIN_SOURCE_SAMPLES = 3
+
+        /** Lowest accepted [relockMinSourceSamples]. */
+        const val MIN_RELOCK_MIN_SOURCE_SAMPLES = 1
+
+        /** Highest accepted [relockMinSourceSamples]. */
+        const val MAX_RELOCK_MIN_SOURCE_SAMPLES = 50
 
         /** Default [relockOccluderMaxOverlap], unitless. */
         const val DEFAULT_RELOCK_OCCLUDER_MAX_OVERLAP = 0.25f

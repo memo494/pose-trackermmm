@@ -42,10 +42,15 @@ import kotlin.math.min
  * - **re-lock**: while pending, a candidate is any shown track matched in the frame whose id is above
  *   `maxIdAtLastMatch` (so a person who came back under a new id while the old track was still lost counts too).
  *   Each candidate is judged on each of its first `relockJudgeFrames` matched frames: every shown, matched track is
- *   sampled once per frame (a clipped or too small torso is "unsampled"), the candidate's distance to the signature
- *   and the nearest of the others go to [RelockMatcher.judge], and the lock moves at the first acceptance. A
- *   candidate that is not accepted in its window is counted and logged once, when the window ends. Another track
- *   that cannot be sampled makes every candidate ambiguous (`next=unsampled`: fail closed);
+ *   sampled once per frame (a clipped or too small torso is "unsampled"; a torso of a bucket the signature holds fewer
+ *   than `relockMinSourceSamples` frames of, whole torso against upper body, is "not comparable"), the candidate's
+ *   distance to the signature and the nearest of the others go to [RelockMatcher.judge], and the lock moves at the
+ *   first acceptance. Only readable frames count toward `relockJudgeFrames`; every matched frame counts toward the cap
+ *   `relockJudgeMaxFrames`. A candidate that is not accepted in its window is counted and logged once, when the window
+ *   ends (`d=` newest, `min=` smallest of the window, `src=` torso rule, `sig=` frames in the signature). Another track
+ *   that cannot be sampled or compared makes every candidate ambiguous (`next=unsampled`: fail closed). While the held
+ *   track is matched, a frame whose torso another detected person's box covers by more than `relockOccluderMaxOverlap`
+ *   is not added to the signature;
  * - **early re-lock** (M4f): the same judging, with the same rules, already while the held track is LOST (coasting, not
  *   yet removed) and a signature exists, so the ring does not wait for the old track to be removed. At the first
  *   acceptance the lock moves at once, the old track is no longer held, and the line ends with `early`. An early accept
@@ -97,6 +102,7 @@ internal class LockKeeper(
     private val candidateFrames = IntArray(config.maxTracks)
     private val candidateAttempts = IntArray(config.maxTracks)
     private val candidateDistance = FloatArray(config.maxTracks)
+    private val candidateMinDistance = FloatArray(config.maxTracks)
     private val candidateNext = FloatArray(config.maxTracks)
     private val candidateReason = IntArray(config.maxTracks)
     private val candidateSource = IntArray(config.maxTracks)
@@ -342,13 +348,16 @@ internal class LockKeeper(
     ): Boolean {
         candidateAttempts[slot]++
         if (sampleSource[index] != TorsoRect.SOURCE_NONE) candidateSource[slot] = sampleSource[index]
+        if (sampleStatus[index] != STATUS_OK && candidateFrames[slot] == 0) {
+            candidateReason[slot] = if (sampleStatus[index] == STATUS_UNCOMPARABLE) REASON_NO_COMPARABLE else REASON_NO_TORSO
+        }
         if (sampleStatus[index] == STATUS_OK) {
             candidateFrames[slot]++
             val distance = sampleDistance[index]
             val next = nearestOther(list, index)
             when (matcher.judge(distance, next)) {
                 RelockMatcher.Verdict.ACCEPT -> {
-                    moveTo(list.id(index), distance, next, early, min(distance, candidateDistance[slot]), candidateSource[slot])
+                    moveTo(list.id(index), distance, next, early, min(distance, candidateMinDistance[slot]), candidateSource[slot])
                     return false
                 }
 
@@ -367,17 +376,16 @@ internal class LockKeeper(
         return true
     }
 
-    /** Notes the newest verdict; the distance (and the `next` of that frame) kept is the smallest of the window. */
+    /** Notes the verdict of the newest readable frame, and the smallest distance of the window. */
     private fun noteVerdict(
         slot: Int,
         distance: Float,
         next: Float,
         reason: Int,
     ) {
-        if (distance < candidateDistance[slot]) {
-            candidateDistance[slot] = distance
-            candidateNext[slot] = next
-        }
+        candidateDistance[slot] = distance
+        candidateNext[slot] = next
+        candidateMinDistance[slot] = min(candidateMinDistance[slot], distance)
         candidateReason[slot] = reason
     }
 
@@ -387,20 +395,13 @@ internal class LockKeeper(
         id: Int,
     ) {
         relockRejectCount++
-        val distance = format(candidateDistance[slot])
+        val distances = "d=${format(candidateDistance[slot])} min=${format(candidateMinDistance[slot])}"
         val tail = " src=${sourceName(candidateSource[slot])} sig=$signatureFrames"
         when (candidateReason[slot]) {
-            REASON_TOO_FAR -> {
-                log("lock: candidate id=$id d=$distance rejected (too far)$tail")
-            }
-
-            REASON_AMBIGUOUS -> {
-                log("lock: candidate id=$id d=$distance rejected (ambiguous, next=${format(candidateNext[slot])})$tail")
-            }
-
-            else -> {
-                log("lock: candidate id=$id rejected (no torso)$tail")
-            }
+            REASON_TOO_FAR -> log("lock: candidate id=$id $distances rejected (too far)$tail")
+            REASON_AMBIGUOUS -> log("lock: candidate id=$id $distances rejected (ambiguous, next=${format(candidateNext[slot])})$tail")
+            REASON_NO_COMPARABLE -> log("lock: candidate id=$id rejected (no comparable torso)$tail")
+            else -> log("lock: candidate id=$id rejected (no torso)$tail")
         }
     }
 
@@ -415,6 +416,7 @@ internal class LockKeeper(
         candidateFrames[slot] = 0
         candidateAttempts[slot] = 0
         candidateDistance[slot] = Float.POSITIVE_INFINITY
+        candidateMinDistance[slot] = Float.POSITIVE_INFINITY
         candidateNext[slot] = Float.POSITIVE_INFINITY
         candidateSource[slot] = TorsoRect.SOURCE_NONE
         candidateReason[slot] = REASON_NO_TORSO
@@ -432,6 +434,7 @@ internal class LockKeeper(
                 candidateAttempts[kept] = candidateAttempts[slot]
                 candidateSource[kept] = candidateSource[slot]
                 candidateDistance[kept] = candidateDistance[slot]
+                candidateMinDistance[kept] = candidateMinDistance[slot]
                 candidateNext[kept] = candidateNext[slot]
                 candidateReason[kept] = candidateReason[slot]
             }
@@ -442,7 +445,8 @@ internal class LockKeeper(
 
     /**
      * Samples every shown track matched in this frame once: its status ([STATUS_OK] with a distance to the signature,
-     * [STATUS_UNSAMPLED] when it has no torso, a clipped or too small one) or [STATUS_NONE] when it is not shown or not
+     * [STATUS_UNSAMPLED] when it has no torso, a clipped or too small one, [STATUS_UNCOMPARABLE] when the torso was read but
+     * the signature holds too little of its bucket) or [STATUS_NONE] when it is not shown or not
      * matched.
      */
     private fun sampleAll(
@@ -458,12 +462,15 @@ internal class LockKeeper(
             }
             val read = sampleOne(list, i, detections, frame)
             sampleSource[i] = torso.source
-            // A torso of a kind the signature never saw (a desk person against a standing one) cannot be compared: unsampled.
-            if (read && signature.hasDataFor(sampleSignature.lastSource)) {
-                sampleStatus[i] = STATUS_OK
-                sampleDistance[i] = sampleSignature.distanceTo(signature)
-            } else {
+            // A torso whose bucket the signature does not hold enough of (a desk person against a standing one, or
+            // too few frames) cannot be compared: never a match, never "far".
+            if (!read) {
                 sampleStatus[i] = STATUS_UNSAMPLED
+            } else if (signature.hasDataFor(sampleSignature.lastBucket)) {
+                sampleStatus[i] = STATUS_OK
+                sampleDistance[i] = sampleSignature.distanceTo(signature, sampleSignature.lastBucket)
+            } else {
+                sampleStatus[i] = STATUS_UNCOMPARABLE
             }
         }
     }
@@ -492,7 +499,7 @@ internal class LockKeeper(
         var nearest = Float.POSITIVE_INFINITY
         for (j in 0 until list.size) {
             if (j == skip || sampleStatus[j] == STATUS_NONE) continue
-            if (sampleStatus[j] == STATUS_UNSAMPLED) return Float.NaN
+            if (sampleStatus[j] == STATUS_UNSAMPLED || sampleStatus[j] == STATUS_UNCOMPARABLE) return Float.NaN
             nearest = min(nearest, sampleDistance[j])
         }
         return nearest
@@ -579,11 +586,13 @@ internal class LockKeeper(
         const val REASON_NO_TORSO = 0
         const val REASON_TOO_FAR = 1
         const val REASON_AMBIGUOUS = 2
+        const val REASON_NO_COMPARABLE = 3
 
         /** How [sampleAll] found a track. */
         const val STATUS_NONE = 0
         const val STATUS_OK = 1
         const val STATUS_UNSAMPLED = 2
+        const val STATUS_UNCOMPARABLE = 3
 
         /** `tryRelock` while pending: no held track in the list. */
         const val NOT_EARLY = -1

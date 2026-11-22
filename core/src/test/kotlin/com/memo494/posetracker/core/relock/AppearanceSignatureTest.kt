@@ -220,31 +220,62 @@ class AppearanceSignatureTest {
         assertThat(toBlue).isWithin(MIX_TOLERANCE).of(sqrt(1f - sqrt(config.relockSignatureAlpha)))
     }
 
+    private fun rectOf(source: Int): TorsoRect = TorsoRect().apply { set(0, 0, SIDE, SIDE, source = source) }
+
     @Test
-    fun signaturesOfDifferentTorsoSources_areKeptApart_andOnlyTheSameSourceIsCompared() {
-        val keypoints = TorsoRect().apply { set(0, 0, SIDE, SIDE, source = TorsoRect.SOURCE_KEYPOINTS) }
-        val upper = TorsoRect().apply { set(0, 0, SIDE, SIDE, source = TorsoRect.SOURCE_UPPER_BODY) }
-        val held = AppearanceSignature(config)
-        held.blend(solid(RED), SIDE, SIDE, keypoints)
+    fun signaturesOfDifferentBuckets_areKeptApart_andOnlyTheSameBucketIsCompared() {
+        val keypoints = rectOf(TorsoRect.SOURCE_KEYPOINTS)
+        val upper = rectOf(TorsoRect.SOURCE_UPPER_BODY)
+        val held = matured(solid(RED), keypoints)
 
         val sample = signatureOf(solid(RED), area = upper)
 
-        assertThat(held.hasDataFor(TorsoRect.SOURCE_KEYPOINTS)).isTrue()
-        assertThat(held.hasDataFor(TorsoRect.SOURCE_UPPER_BODY)).isFalse()
-        assertThat(sample.distanceTo(held)).isEqualTo(1f)
-        assertThat(signatureOf(solid(RED), area = keypoints).distanceTo(held)).isWithin(DISTANCE_TOLERANCE).of(0f)
+        assertThat(held.hasDataFor(TorsoRect.BUCKET_WHOLE)).isTrue()
+        assertThat(held.hasDataFor(TorsoRect.BUCKET_UPPER)).isFalse()
+        assertThat(sample.distanceTo(held, sample.lastBucket)).isEqualTo(1f)
+        assertThat(signatureOf(solid(RED), area = keypoints).distanceTo(held, TorsoRect.BUCKET_WHOLE))
+            .isWithin(DISTANCE_TOLERANCE)
+            .of(0f)
     }
 
     @Test
-    fun blend_aNewSource_doesNotChangeTheHistogramOfTheOtherOne() {
-        val keypoints = TorsoRect().apply { set(0, 0, SIDE, SIDE, source = TorsoRect.SOURCE_KEYPOINTS) }
-        val upper = TorsoRect().apply { set(0, 0, SIDE, SIDE, source = TorsoRect.SOURCE_UPPER_BODY) }
+    fun keypointAndBoxTorsos_shareOneWholeTorsoBucket() {
+        val held = matured(solid(RED), rectOf(TorsoRect.SOURCE_KEYPOINTS))
+
+        val boxSample = signatureOf(solid(RED), area = rectOf(TorsoRect.SOURCE_BOX))
+
+        assertThat(boxSample.lastBucket).isEqualTo(TorsoRect.BUCKET_WHOLE)
+        assertThat(held.hasDataFor(boxSample.lastBucket)).isTrue()
+        assertThat(boxSample.distanceTo(held, boxSample.lastBucket)).isWithin(DISTANCE_TOLERANCE).of(0f)
+    }
+
+    @Test
+    fun aBucketWithFewerThanTheLeastSamples_isNotComparable() {
+        val signature = AppearanceSignature(config)
+        repeat(config.relockMinSourceSamples - 1) { signature.blend(solid(BLUE), SIDE, SIDE, rect) }
+
+        assertThat(signature.hasData).isTrue()
+        assertThat(signature.hasDataFor(TorsoRect.BUCKET_WHOLE)).isFalse()
+
+        signature.blend(solid(BLUE), SIDE, SIDE, rect)
+
+        assertThat(signature.hasDataFor(TorsoRect.BUCKET_WHOLE)).isTrue()
+    }
+
+    @Test
+    fun blend_aNewBucket_doesNotChangeTheHistogramOfTheOtherOne() {
+        val keypoints = rectOf(TorsoRect.SOURCE_KEYPOINTS)
+        val upper = rectOf(TorsoRect.SOURCE_UPPER_BODY)
         val held = matured(solid(RED), keypoints)
 
-        held.blend(solid(BLUE), SIDE, SIDE, upper)
+        repeat(MATURE_BLENDS) { held.blend(solid(BLUE), SIDE, SIDE, upper) }
 
-        assertThat(signatureOf(solid(RED), area = keypoints).distanceTo(held)).isWithin(DISTANCE_TOLERANCE).of(0f)
-        assertThat(signatureOf(solid(BLUE), area = upper).distanceTo(held)).isWithin(DISTANCE_TOLERANCE).of(0f)
+        assertThat(signatureOf(solid(RED), area = keypoints).distanceTo(held, TorsoRect.BUCKET_WHOLE))
+            .isWithin(DISTANCE_TOLERANCE)
+            .of(0f)
+        assertThat(signatureOf(solid(BLUE), area = upper).distanceTo(held, TorsoRect.BUCKET_UPPER))
+            .isWithin(DISTANCE_TOLERANCE)
+            .of(0f)
     }
 
     @Test

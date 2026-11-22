@@ -33,6 +33,13 @@ class TorsoRect {
     var source: Int = SOURCE_NONE
         private set
 
+    /**
+     * Which signature histogram the rectangle belongs to, [BUCKET_WHOLE] or [BUCKET_UPPER]: the shoulder-to-hip rectangle
+     * and the box part are both a whole torso and are compared with each other; the upper-body part is not.
+     */
+    val bucket: Int
+        get() = if (source == SOURCE_UPPER_BODY) BUCKET_UPPER else BUCKET_WHOLE
+
     /** True when the rectangle holds no pixel. */
     val isEmpty: Boolean
         get() = rightImg <= leftImg || bottomImg <= topImg
@@ -93,5 +100,14 @@ class TorsoRect {
 
         /** How many sources there are, [SOURCE_NONE] included. */
         const val SOURCE_COUNT = 4
+
+        /** Signature bucket of a whole torso (keypoints, box, or set by hand). */
+        const val BUCKET_WHOLE = 0
+
+        /** Signature bucket of the upper body only. */
+        const val BUCKET_UPPER = 1
+
+        /** How many buckets there are. */
+        const val BUCKET_COUNT = 2
     }
 }

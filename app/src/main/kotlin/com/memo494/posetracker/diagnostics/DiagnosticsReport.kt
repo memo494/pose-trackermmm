@@ -36,6 +36,8 @@ internal object DiagnosticsReport {
     private const val NONE = "none"
     private const val SOURCE_BUILT_IN = "builtin"
     private const val SOURCE_IMPORTED = "imported"
+    private const val KIND_POSE = "pose"
+    private const val KIND_BOX = "box"
     private const val NOT_AVAILABLE = "n/a"
     private const val MS_DECIMALS = 1
     private const val THERMAL_DECIMALS = 2
@@ -53,6 +55,7 @@ internal object DiagnosticsReport {
      * @param modelInfo text of `model_info.json`; `null` = it could not be read.
      * @param lastCrash text of the last saved crash; `null` = none.
      * @param tuningOverrides how many tuning-sheet overrides the newest session ran with (`tuningOverrides` in `summary.txt`).
+     * @param detectPersonClass the person class index of the session (`detectPersonClass` in `summary.txt`).
      */
     fun entries(
         appInfo: Map<String, String>,
@@ -63,9 +66,10 @@ internal object DiagnosticsReport {
         modelInfo: String?,
         lastCrash: String?,
         tuningOverrides: Int = 0,
+        detectPersonClass: Int = TrackerConfig.DEFAULT_DETECT_PERSON_CLASS,
     ): List<ReportEntry> =
         listOf(
-            ReportEntry(SUMMARY, summary(appInfo, deviceInfo, stats, tuningOverrides)),
+            ReportEntry(SUMMARY, summary(appInfo, deviceInfo, stats, tuningOverrides, detectPersonClass)),
             ReportEntry(CONFIG, withNewline(config)),
             ReportEntry(LOG, if (logLines.isEmpty()) "$EMPTY_LOG\n" else logLines.joinToString("\n", postfix = "\n")),
             modelEntry(modelInfo),
@@ -84,6 +88,7 @@ internal object DiagnosticsReport {
         deviceInfo: Map<String, String>,
         stats: CaptureStats?,
         tuningOverrides: Int,
+        detectPersonClass: Int,
     ): String {
         val out = StringBuilder()
         out.append("[app]\n")
@@ -95,7 +100,7 @@ internal object DiagnosticsReport {
         if (stats == null) {
             out.append(NO_SESSION).append('\n')
         } else {
-            appendStats(out, stats)
+            appendStats(out, stats, detectPersonClass)
         }
         return out.toString()
     }
@@ -103,6 +108,7 @@ internal object DiagnosticsReport {
     private fun appendStats(
         out: StringBuilder,
         stats: CaptureStats,
+        detectPersonClass: Int,
     ) {
         line(out, "accelerator", stats.accelerator ?: UNKNOWN)
         line(out, "captureFps", stats.captureFps)
@@ -146,7 +152,7 @@ internal object DiagnosticsReport {
         line(out, "assocBirthNearLive", stats.assocBirthNearLive)
         line(out, "assocBirthAfterRemoval", stats.assocBirthAfterRemoval)
         line(out, "assocBirthSuppressed", stats.assocBirthSuppressed)
-        appendModel(out, stats.model)
+        appendModel(out, stats.model, detectPersonClass)
         appendThermalStepDown(out, stats)
         appendTiming(out, stats)
     }
@@ -224,7 +230,8 @@ internal object DiagnosticsReport {
     ): String = if (value.isFinite()) String.format(Locale.ROOT, "%.${places}f", value) else NOT_AVAILABLE
 
     /**
-     * The model of the session: `modelFile`, `modelSha256` (first [TrackerConfig.SHA256_SHORT_CHARS] hex characters)
+     * The model of the session: `modelKind` (`box` for a running imported detect-only model, `pose` otherwise),
+     * `detectPersonClass` (the session's person class index, relevant for `box`), `modelFile`, `modelSha256` (first [TrackerConfig.SHA256_SHORT_CHARS] hex characters)
      * and `modelOutputRows` describe the imported model in use; for the built-in model `modelFile` is the bundled file
      * (`yolo26n-pose_448x960.tflite`) with its `modelSha256` (`builtin` / `none` when no bundled model runs); a refused imported
      * model is named in `modelFallbackFile`. The model fields describe the model loaded now; `modelPortrait` and
@@ -235,13 +242,17 @@ internal object DiagnosticsReport {
     private fun appendModel(
         out: StringBuilder,
         model: ModelStatus?,
+        detectPersonClass: Int,
     ) {
         if (model == null) {
             line(out, "modelSource", UNKNOWN)
+            line(out, "detectPersonClass", detectPersonClass)
             return
         }
         val inUse = if (model.source == ModelSource.IMPORTED) model.meta else null
         line(out, "modelSource", if (model.source == ModelSource.IMPORTED) SOURCE_IMPORTED else SOURCE_BUILT_IN)
+        line(out, "modelKind", if (inUse?.outputLayout?.isDetectOnly == true) KIND_BOX else KIND_POSE)
+        line(out, "detectPersonClass", detectPersonClass)
         line(out, "modelFile", inUse?.displayName ?: model.builtInFile ?: SOURCE_BUILT_IN)
         line(out, "modelSha256", inUse?.let(::shortSha) ?: model.builtInSha256?.take(TrackerConfig.SHA256_SHORT_CHARS) ?: NONE)
         line(out, "modelInputSize", ModelInputText.text(model.inputWidth, model.inputHeight))

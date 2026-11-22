@@ -775,4 +775,56 @@ class DiagnosticsReportTest {
         assertThat(modelLines(portrait)).contains("modelSlotsRefused=portrait")
         assertThat(modelLines(both)).contains("modelSlotsRefused=portrait,landscape")
     }
+
+    // ---- model kind (M-legacy T3) ----
+
+    private val detectMeta =
+        importedMeta.copy(
+            outputRows = 2100,
+            outputLayout = com.memo494.posetracker.core.modelimport.PoseOutputLayout.DETECT_RAW_CHANNELS_FIRST,
+            classes = 2,
+        )
+
+    @Test
+    fun summary_aBoxOnlyImportedModel_isModelKindBox() {
+        assertThat(modelLines(importedStatus(detectMeta, 320, 320))).contains("modelKind=box")
+    }
+
+    @Test
+    fun summary_poseModels_areModelKindPose() {
+        assertThat(modelLines(importedStatus(importedMeta, 640, 640))).contains("modelKind=pose")
+        assertThat(modelLines(builtInStatus(416, 416))).contains("modelKind=pose")
+    }
+
+    @Test
+    fun summary_aBoxOnlyModelThatFellBackToTheBuiltIn_isModelKindPose() {
+        val status = ModelStatus(ModelSource.BUILT_IN, detectMeta, ModelFallback.LOAD_FAILED, "x", inputWidth = 416, inputHeight = 416)
+
+        assertThat(modelLines(status)).contains("modelKind=pose")
+    }
+
+    @Test
+    fun summary_printsThePersonClassOfTheSession() {
+        val lines =
+            DiagnosticsReport
+                .entries(
+                    appInfo,
+                    deviceInfo,
+                    "c",
+                    stats.copy(model = importedStatus(detectMeta, 320, 320)),
+                    emptyList(),
+                    null,
+                    null,
+                    detectPersonClass = 1,
+                ).text("summary.txt")
+                .split("\n")
+
+        assertThat(lines).contains("detectPersonClass=1")
+        assertThat(lines.indexOf("modelKind=box")).isLessThan(lines.indexOf("detectPersonClass=1"))
+    }
+
+    @Test
+    fun summary_withoutAModelStatus_stillPrintsTheDefaultPersonClass() {
+        assertThat(modelLines(null)).contains("detectPersonClass=0")
+    }
 }

@@ -45,6 +45,10 @@ data class LoadedModel(
     val importedModelNotUsed: Boolean
         get() = fallback != null && fallback != ModelFallback.BUILT_IN_FAILED
 
+    /** Whether the running model is an imported box-only (detect-only) one; a built-in fallback is always a pose model. */
+    val boxOnly: Boolean
+        get() = detector != null && source == ModelSource.IMPORTED && meta?.outputLayout?.isDetectOnly == true
+
     /** The status for [ModelStatusHolder]; the input width and height are the running detector's, 0 without one. */
     fun status(): ModelStatus =
         ModelStatus(

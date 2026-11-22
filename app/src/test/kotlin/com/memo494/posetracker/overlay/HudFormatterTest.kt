@@ -629,4 +629,48 @@ class HudFormatterTest {
         assertThat(warning(sample.copy(dotsVisible = false, warning = note))).isEqualTo("Content not visible: dots hidden")
         assertThat(warning(sample.copy(warning = note), armed = true)).startsWith("Built-in model failed")
     }
+
+    // ---- box-only models (M-legacy T3) ----
+
+    @Test
+    fun warning_aBoxOnlyModel_showsTheNoteWithItsPersonClass() {
+        assertThat(warning(sample.copy(boxOnlyClass = 0))).isEqualTo("Box-only model: head from box (class 0)")
+        assertThat(warning(sample.copy(boxOnlyClass = 1))).isEqualTo("Box-only model: head from box (class 1)")
+        assertThat(warning(sample.copy(boxOnlyClass = TrackerConfig.DETECT_MAX_CLASSES - 1)))
+            .isEqualTo("Box-only model: head from box (class 79)")
+    }
+
+    @Test
+    fun warning_aPoseModel_hasNoBoxOnlyNote() {
+        assertThat(sample.boxOnlyClass).isEqualTo(OverlayState.NOT_BOX_ONLY)
+        assertThat(warning(sample)).isEmpty()
+    }
+
+    @Test
+    fun warning_theBoxOnlyNoteFitsTheHudLine_forEveryClass() {
+        val roomy = CharArray(TrackerConfig.HUD_LINE_CAPACITY_CHARS * 2)
+        for (personClass in 0 until TrackerConfig.DETECT_MAX_CLASSES) {
+            val length = HudFormatter.formatWarning(sample.copy(boxOnlyClass = personClass), roomy)
+
+            assertThat(length).isGreaterThan(0)
+            assertThat(length).isAtMost(TrackerConfig.HUD_LINE_CAPACITY_CHARS)
+        }
+    }
+
+    @Test
+    fun warning_everyRealWarningAndTheArmedHintWinOverTheBoxOnlyNote() {
+        val boxOnly = sample.copy(boxOnlyClass = 0)
+
+        assertThat(warning(boxOnly.copy(warning = OverlayWarning.DETECTOR_UNAVAILABLE))).isEqualTo("Model not loaded: no detection")
+        assertThat(warning(boxOnly.copy(dotsVisible = false))).isEqualTo("Content not visible: dots hidden")
+        assertThat(warning(boxOnly.copy(warning = OverlayWarning.THERMAL_STEPPED_DOWN))).isEqualTo("Hot: smaller model (320)")
+        assertThat(warning(boxOnly, armed = true)).isEqualTo("tap a person")
+    }
+
+    @Test
+    fun hudChanged_seesTheBoxOnlyNote() {
+        assertThat(HudFormatter.hudChanged(sample, sample.copy(boxOnlyClass = 0), idleFps)).isTrue()
+        assertThat(HudFormatter.hudChanged(sample.copy(boxOnlyClass = 0), sample.copy(boxOnlyClass = 1), idleFps)).isTrue()
+        assertThat(HudFormatter.hudChanged(sample.copy(boxOnlyClass = 0), sample.copy(boxOnlyClass = 0), idleFps)).isFalse()
+    }
 }

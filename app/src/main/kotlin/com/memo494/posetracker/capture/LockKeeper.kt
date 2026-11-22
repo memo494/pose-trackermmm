@@ -77,6 +77,19 @@ internal class LockKeeper(
     private var heldId = OverlayState.NO_LOCK
     private val matcher = RelockMatcher(config)
     private val torsoRegion = TorsoRegion(config)
+
+    /**
+     * Whether the model is box-only (no keypoints; decided by the loaded model). The torso is then the box part of a
+     * whole-body box only (`TorsoRegion.boxOnly`): the same `relock*` numbers and the same judge as a pose model whose
+     * shoulders are not confident, so a re-lock is never accepted more easily than today; a person whose box is not a
+     * whole body is "unsampled" and the judge stays fail-closed (no signature: the lock ends, logged as `cleared (no
+     * signature)`). Capture thread.
+     */
+    var boxOnly: Boolean
+        get() = torsoRegion.boxOnly
+        set(value) {
+            torsoRegion.boxOnly = value
+        }
     private val torso = TorsoRect()
     private val signature = AppearanceSignature(config)
     private val sampleSignature = AppearanceSignature(config)

@@ -196,6 +196,7 @@ class FramePipelineTest {
         builtInModelFailed: Boolean = false,
         config: TrackerConfig = TrackerConfig(),
         modelWrongShape: Boolean = false,
+        boxOnly: Boolean = false,
     ): FramePipeline {
         val pipeline =
             FramePipeline(
@@ -217,6 +218,7 @@ class FramePipelineTest {
                 importedModelNotUsed,
                 builtInModelFailed,
                 modelWrongShape,
+                boxOnly = boxOnly,
             )
         pipeline.setExpectedSize(CaptureSize(WIDTH, HEIGHT))
         return pipeline
@@ -1038,8 +1040,11 @@ class FramePipelineTest {
     // ---- the tracker (M3b T2) ----
 
     /** A pipeline expecting [TRACK_WIDTH] x [TRACK_HEIGHT] frames; the states of the set-up are forgotten. */
-    private fun trackingPipeline(config: TrackerConfig = TrackerConfig()): FramePipeline {
-        val pipeline = pipeline(config = config)
+    private fun trackingPipeline(
+        config: TrackerConfig = TrackerConfig(),
+        boxOnly: Boolean = false,
+    ): FramePipeline {
+        val pipeline = pipeline(config = config, boxOnly = boxOnly)
         pipeline.setExpectedSize(CaptureSize(TRACK_WIDTH, TRACK_HEIGHT))
         states.clear()
         return pipeline
@@ -3092,5 +3097,106 @@ class FramePipelineTest {
 
         pipeline.onModelChanged(ScriptedDetector(events), imported = false, notUsed = false)
         assertThat(states.last().warning).isNull()
+    }
+
+    // ---- box-only models (M-legacy T3) ----
+
+    /** [walker] as a detect-only model emits it: the same box, 17 keypoints at (0, 0) with confidence 0. */
+    private fun boxOnlyWalker(shiftXImg: Float = 0f): PoseDetection {
+        val full = walker(shiftXImg = shiftXImg)
+        return PoseDetection(
+            full.boxLeftImg,
+            full.boxTopImg,
+            full.boxRightImg,
+            full.boxBottomImg,
+            full.score,
+            FloatArray(HEAD_KEYPOINTS * 2),
+            FloatArray(HEAD_KEYPOINTS),
+        )
+    }
+
+    @Test
+    fun boxOnly_statesCarryThePersonClass_andAPoseModelCarriesNone() {
+        val box = trackingPipeline(TrackerConfig(detectPersonClass = 1), boxOnly = true)
+        detector.people = listOf(boxOnlyWalker())
+        frameAt(box, 0)
+        assertThat(states.last().boxOnlyClass).isEqualTo(1)
+
+        states.clear()
+        val pose = trackingPipeline()
+        frameAt(pose, 0)
+        assertThat(states.last().boxOnlyClass).isEqualTo(OverlayState.NOT_BOX_ONLY)
+    }
+
+    @Test
+    fun boxOnly_aPersonGetsATrackWithTheDotOnTheBoxHead_andTapToLockWorks() {
+        val pipeline = trackingPipeline(boxOnly = true)
+        detector.people = listOf(boxOnlyWalker())
+        val lastMs = framesFrom(pipeline, 0, 3)
+        val tracks = states.last().tracks
+        assertThat(tracks.count).isEqualTo(1)
+        // Box x 100..160, top 20, 200 high: dot at the centre x and 0.10 of the height below the top.
+        assertThat(tracks.headXImg(0)).isWithin(HEAD_TOLERANCE_IMG).of(130f)
+        assertThat(tracks.headYImg(0)).isWithin(HEAD_TOLERANCE_IMG).of(40f)
+        assertThat(tracks.isHeadEstimated(0)).isFalse()
+
+        pipeline.requestLock(tracks.id(0))
+        frameAt(pipeline, lastMs + FRAME_STEP_MS)
+
+        assertThat(states.last().lockedId).isEqualTo(tracks.id(0))
+    }
+
+    @Test
+    fun boxOnly_aLockedPersonWhoLeavesAndComesBackInTheSameColours_getsTheLockAgainThroughTheBoxTorso() {
+        val pipeline = trackingPipeline(boxOnly = true)
+        val first = Look(boxOnlyWalker(), RED_SHIRT)
+        lookFramesFrom(pipeline, 0, 3, first)
+        pipeline.requestLock(1)
+        var atMs = lookFramesFrom(pipeline, 3 * FRAME_STEP_MS, 3, first)
+        for (i in 0 until 4) {
+            atMs += DEPARTURE_STEP_MS
+            lookFrameAt(pipeline, atMs)
+        }
+
+        lookFramesFrom(pipeline, atMs + FRAME_STEP_MS, 3, Look(boxOnlyWalker(NEW_PERSON_SHIFT_X_IMG), RED_SHIRT))
+
+        assertThat(states.last().lockedId).isEqualTo(states.last().tracks.id(0))
+        assertThat(pipeline.lockRelockCount).isEqualTo(1)
+        assertThat(lockLogs().last()).contains("src=box")
+    }
+
+    @Test
+    fun boxOnly_aDifferentlyColouredStranger_doesNotGetTheLock() {
+        val pipeline = trackingPipeline(boxOnly = true)
+        val first = Look(boxOnlyWalker(), RED_SHIRT)
+        lookFramesFrom(pipeline, 0, 3, first)
+        pipeline.requestLock(1)
+        var atMs = lookFramesFrom(pipeline, 3 * FRAME_STEP_MS, 3, first)
+        for (i in 0 until 4) {
+            atMs += DEPARTURE_STEP_MS
+            lookFrameAt(pipeline, atMs)
+        }
+
+        lookFramesFrom(pipeline, atMs + FRAME_STEP_MS, 15, Look(boxOnlyWalker(NEW_PERSON_SHIFT_X_IMG), BLUE_SHIRT))
+
+        assertThat(states.last().lockedId).isEqualTo(OverlayState.NO_LOCK)
+        assertThat(pipeline.lockRelockCount).isEqualTo(0)
+    }
+
+    @Test
+    fun boxOnly_changingTheModelKind_updatesTheNoteAndResetsTheTracks() {
+        val pipeline = trackingPipeline()
+        detector.people = listOf(boxOnlyWalker())
+        framesFrom(pipeline, 0, 3)
+        assertThat(states.last().tracks.count).isEqualTo(1)
+
+        pipeline.onModelChanged(detector, imported = true, notUsed = false, boxOnly = true)
+
+        assertThat(states.last().boxOnlyClass).isEqualTo(0)
+        assertThat(states.last().tracks.count).isEqualTo(0)
+
+        pipeline.onModelChanged(detector, imported = false, notUsed = false)
+
+        assertThat(states.last().boxOnlyClass).isEqualTo(OverlayState.NOT_BOX_ONLY)
     }
 }

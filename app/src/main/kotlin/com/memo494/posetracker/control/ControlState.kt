@@ -2,6 +2,8 @@ package com.memo494.posetracker.control
 
 import com.memo494.posetracker.core.TrackerConfig
 import com.memo494.posetracker.core.modelimport.ModelOrientation
+import com.memo494.posetracker.core.tuning.TuningKey
+import com.memo494.posetracker.core.tuning.TuningOverrides
 
 /** What the control screen knows. Pure data: [ControlReducer] is the only place that changes it. */
 internal data class ControlState(
@@ -50,6 +52,10 @@ internal data class ControlState(
     val debugMarks: Boolean = TrackerConfig.DEFAULT_DEBUG_MARKS,
     /** `true` once the user moved the switch on this screen; a saved value read later is stale and is dropped. */
     val debugMarksTouched: Boolean = false,
+    /** The values of the tuning sheet (ARCHITECTURE §7.1): only the sliders moved off their defaults. Read by the next Start only. */
+    val tuning: TuningOverrides = TuningOverrides.NONE,
+    /** `true` once the user moved a slider or pressed Reset on this screen; a saved value read later is stale and is dropped. */
+    val tuningTouched: Boolean = false,
 )
 
 /** The model the next capture start will use. Pure data: no files, no Android types. */
@@ -281,6 +287,23 @@ internal sealed interface ControlEvent {
         val enabled: Boolean,
     ) : ControlEvent
 
+    /** A tuning slider moved to [value] (not yet saved: that is [TuningCommitted]). Allowed in every state. */
+    data class TuningChanged(
+        val key: TuningKey,
+        val value: Float,
+    ) : ControlEvent
+
+    /** The user let go of a tuning slider: the values are saved. */
+    data object TuningCommitted : ControlEvent
+
+    /** The user pressed "Reset to defaults" on the tuning sheet. */
+    data object TuningResetClicked : ControlEvent
+
+    /** The saved tuning values were read off the main thread when the screen started. */
+    data class TuningLoaded(
+        val overrides: TuningOverrides,
+    ) : ControlEvent
+
     /** The user pressed "Delete" on the library model [sha256]. */
     data class DeleteModelClicked(
         val sha256: String,
@@ -339,6 +362,9 @@ internal enum class ControlEffect {
 
     /** Save [ControlStep.debugMarks] in the app preferences on a worker thread. */
     PERSIST_DEBUG_MARKS,
+
+    /** Save [ControlStep.tuning] in the tuning file on a worker thread. */
+    PERSIST_TUNING,
 }
 
 /**
@@ -346,6 +372,8 @@ internal enum class ControlEffect {
  * [importUri] is set only with [ControlEffect.RUN_IMPORT]: the picked document, as text.
  * [debugMarks] is set only with [ControlEffect.START_SERVICE] (the value the service gets as an Intent extra) and
  * [ControlEffect.PERSIST_DEBUG_MARKS] (the value to save); otherwise `null`.
+ * [tuning] is set with [ControlEffect.START_SERVICE] (the overrides the service gets as an Intent extra) and
+ * [ControlEffect.PERSIST_TUNING] (the overrides to save); otherwise `null`.
  * [modelSha] is set with [ControlEffect.DELETE_MODEL] (the model to delete) and [ControlEffect.SET_SLOT] (the model to
  * choose, `null` = built-in); [slotOrientation] only with [ControlEffect.SET_SLOT].
  */
@@ -356,6 +384,7 @@ internal data class ControlStep(
     val debugMarks: Boolean? = null,
     val modelSha: String? = null,
     val slotOrientation: ModelOrientation? = null,
+    val tuning: TuningOverrides? = null,
 )
 
 /** Pure decision logic of the control screen: total (every event in every state answers) and free of Android. */
@@ -406,7 +435,30 @@ internal object ControlReducer {
             is ControlEvent.ModelStateLoaded -> onModelStateLoaded(state, event)
             is ControlEvent.DebugMarksToggled -> onDebugMarksToggled(state, event.enabled)
             is ControlEvent.DebugMarksLoaded -> onDebugMarksLoaded(state, event.enabled)
+            is ControlEvent.TuningChanged -> onTuningChanged(state, event.key, event.value)
+            ControlEvent.TuningCommitted -> ControlStep(state, ControlEffect.PERSIST_TUNING, tuning = state.tuning)
+            ControlEvent.TuningResetClicked -> onTuningReset(state)
+            is ControlEvent.TuningLoaded -> onTuningLoaded(state, event.overrides)
         }
+
+    private fun onTuningChanged(
+        state: ControlState,
+        key: TuningKey,
+        value: Float,
+    ): ControlStep = ControlStep(state.copy(tuning = state.tuning.with(key, value), tuningTouched = true), null)
+
+    private fun onTuningReset(state: ControlState): ControlStep =
+        ControlStep(
+            state.copy(tuning = state.tuning.reset(), tuningTouched = true),
+            ControlEffect.PERSIST_TUNING,
+            tuning = TuningOverrides.NONE,
+        )
+
+    /** The saved values are read off the main thread; ones that arrive after the user used the sheet are stale. */
+    private fun onTuningLoaded(
+        state: ControlState,
+        overrides: TuningOverrides,
+    ): ControlStep = if (state.tuningTouched) ControlStep(state, null) else ControlStep(state.copy(tuning = overrides), null)
 
     private fun onDebugMarksToggled(
         state: ControlState,
@@ -459,7 +511,7 @@ internal object ControlReducer {
     ): ControlStep {
         if (granted) {
             val started = state.copy(awaitingConsent = false, notice = null)
-            return ControlStep(started, ControlEffect.START_SERVICE, debugMarks = state.debugMarks)
+            return ControlStep(started, ControlEffect.START_SERVICE, debugMarks = state.debugMarks, tuning = state.tuning)
         }
         return ControlStep(state.copy(awaitingConsent = false, notice = ControlNotice.CONSENT_DENIED), null)
     }

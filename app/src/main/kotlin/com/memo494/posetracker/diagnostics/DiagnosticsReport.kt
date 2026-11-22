@@ -49,6 +49,7 @@ internal object DiagnosticsReport {
      * @param logLines the in-app log, oldest first.
      * @param modelInfo text of `model_info.json`; `null` = it could not be read.
      * @param lastCrash text of the last saved crash; `null` = none.
+     * @param tuningOverrides how many tuning-sheet overrides the newest session ran with (`tuningOverrides` in `summary.txt`).
      */
     fun entries(
         appInfo: Map<String, String>,
@@ -58,9 +59,10 @@ internal object DiagnosticsReport {
         logLines: List<String>,
         modelInfo: String?,
         lastCrash: String?,
+        tuningOverrides: Int = 0,
     ): List<ReportEntry> =
         listOf(
-            ReportEntry(SUMMARY, summary(appInfo, deviceInfo, stats)),
+            ReportEntry(SUMMARY, summary(appInfo, deviceInfo, stats, tuningOverrides)),
             ReportEntry(CONFIG, withNewline(config)),
             ReportEntry(LOG, if (logLines.isEmpty()) "$EMPTY_LOG\n" else logLines.joinToString("\n", postfix = "\n")),
             modelEntry(modelInfo),
@@ -78,10 +80,12 @@ internal object DiagnosticsReport {
         appInfo: Map<String, String>,
         deviceInfo: Map<String, String>,
         stats: CaptureStats?,
+        tuningOverrides: Int,
     ): String {
         val out = StringBuilder()
         out.append("[app]\n")
         appInfo.forEach { (key, value) -> line(out, key, value) }
+        line(out, "tuningOverrides", tuningOverrides)
         out.append("[device]\n")
         deviceInfo.forEach { (key, value) -> line(out, key, value) }
         out.append("[capture]\n")

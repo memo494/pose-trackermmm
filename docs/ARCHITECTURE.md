@@ -724,6 +724,11 @@ default 0.1) and the lock group (`lockHandleSizeDp` 16..96, 40; `lockMaxTapDista
 default 1.0) and `assocMissLogPerMin` (0..600, default 30), which change no track; M4f adds `trackGateMinSigmaRatio`
 (0..1, default 0.2; 0 = no floor on the gate's sigma) and `relockEarlyMaxHeadRatio` (0.1..3, default 0.6). There is no `displayLeadMs`
 (no prediction, §6.4).
+**Tuning sheet (F6).** A collapsible block of the control screen with one slider per `TuningKey` (core: `scoreThreshold`, `smoothMinCutoffHz`,
+`smoothBeta`, `trackMaxLostMs`, `trackMatchMaxCost`, `trackLowMatchMaxCost`, `relockMaxDistance`, `relockMinMargin`, `relockJudgeFrames`; bounds are the
+`MIN_*`/`MAX_*` constants, a new slider is one enum entry) and "Reset to defaults"; it applies on the next Start (the overrides travel in the Start Intent as
+text). Saved by `TuningStore` as `noBackupFilesDir/tuning/tuning.txt` (scratch + rename, off the main thread); a value outside today's bounds or an unknown key is ignored, an unreadable file is all defaults plus one log line.
+`config.txt` prints the session's effective config and `summary.txt` has `tuningOverrides=N`.
 
 ### 7.2 Thermal policy (M5; the model step-down is implemented in F7)
 If thermal status ≥ `MODERATE` or headroom forecast > 0.9: step down the analysis fps cap 60 → 30; then 416 → 320;

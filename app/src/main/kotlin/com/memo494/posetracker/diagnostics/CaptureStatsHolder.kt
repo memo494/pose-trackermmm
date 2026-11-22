@@ -16,9 +16,24 @@ internal object CaptureStatsHolder {
     @Volatile
     var latest: CaptureStats? = null
 
-    /** The `debugMarks` of the newest session's config (set when it starts); `config.txt` shows it. */
+    /** The config the newest session runs with, tuning overrides included (set when it starts); `config.txt` shows it. */
     @Volatile
-    var debugMarks: Boolean = TrackerConfig.DEFAULT_DEBUG_MARKS
+    var sessionConfig: TrackerConfig = TrackerConfig()
+        private set
+
+    /** How many tuning overrides the newest session runs with; `summary.txt` shows it as `tuningOverrides`. */
+    @Volatile
+    var tuningOverrides: Int = 0
+        private set
+
+    /** Service start: remembers the [config] of the new session and the number of [overrides] in it. */
+    fun setSession(
+        config: TrackerConfig,
+        overrides: Int,
+    ) {
+        sessionConfig = config
+        tuningOverrides = overrides
+    }
 
     /**
      * Capture thread, once per HUD tick: stores a snapshot of [state], the [pipeline] counters and its timing

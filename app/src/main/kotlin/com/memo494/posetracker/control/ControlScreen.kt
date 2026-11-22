@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import com.memo494.posetracker.R
 import com.memo494.posetracker.core.TrackerConfig
 import com.memo494.posetracker.core.modelimport.ModelOrientation
+import com.memo494.posetracker.core.tuning.TuningKey
 
 private val SCREEN_PADDING = 24.dp
 private val ITEM_SPACING = 16.dp
@@ -53,6 +54,9 @@ internal fun ControlScreen(
     onDeleteModelClick: (String) -> Unit,
     onSlotPick: (ModelOrientation, String?) -> Unit,
     onDebugMarksChange: (Boolean) -> Unit,
+    onTuningChange: (TuningKey, Float) -> Unit,
+    onTuningCommit: () -> Unit,
+    onTuningReset: () -> Unit,
     modifier: Modifier = Modifier,
     crashContent: @Composable () -> Unit = {},
     diagnosticsContent: @Composable () -> Unit = {},
@@ -100,6 +104,8 @@ internal fun ControlScreen(
             }
 
             DebugMarksSwitch(state.debugMarks, onDebugMarksChange)
+
+            TuningSheet(state.tuning, onTuningChange, onTuningCommit, onTuningReset)
 
             ModelBlock(state, onImportClick, onRemoveAllClick, onDeleteModelClick, onSlotPick)
 
@@ -353,6 +359,9 @@ private fun ControlScreenPreview() {
             onDeleteModelClick = {},
             onSlotPick = { _, _ -> },
             onDebugMarksChange = {},
+            onTuningChange = { _, _ -> },
+            onTuningCommit = {},
+            onTuningReset = {},
         )
     }
 }

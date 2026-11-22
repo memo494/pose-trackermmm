@@ -35,11 +35,12 @@ internal object DiagnosticsZip {
             DiagnosticsReport.entries(
                 appInfo = appInfo(),
                 deviceInfo = deviceInfo(context),
-                config = TrackerConfig(debugMarks = CaptureStatsHolder.debugMarks).toString(),
+                config = CaptureStatsHolder.sessionConfig.toString(),
                 stats = CaptureStatsHolder.latest,
                 logLines = AppLog.lines(),
                 modelInfo = readModelInfo(context),
                 lastCrash = CrashStore.read(context),
+                tuningOverrides = CaptureStatsHolder.tuningOverrides,
             )
         val directory = File(context.cacheDir, DIRECTORY)
         if (!directory.isDirectory && !directory.mkdirs()) throw IOException("cannot create $directory")

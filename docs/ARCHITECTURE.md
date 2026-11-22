@@ -738,8 +738,8 @@ default 1.0) and `assocMissLogPerMin` (0..600, default 30), which change no trac
 `trackAccelMinScale` (0.05..1, 0.5) and `trackAccelIntervalTauMs` (100..10000, 1000), §6.3 and §6.4.
 **Tuning sheet (F6).** A collapsible block of the control screen with one slider per `TuningKey` (core: `scoreThreshold`, `smoothMinCutoffHz`,
 `smoothBeta`, `trackMaxLostMs`, `trackMatchMaxCost`, `trackLowMatchMaxCost`, `relockMaxDistance`, `relockMinMargin`, `relockJudgeFrames`, and the ring-lead group `displayLeadEnabled` (0/1), `displayLeadMaxMs`, `displayLeadMaxRatio`, `displayLeadSpeedLowHps`; bounds are the
-`MIN_*`/`MAX_*` constants, a new slider is one enum entry) and "Reset to defaults"; it applies on the next Start (the overrides travel in the Start Intent as
-text). Saved by `TuningStore` as `noBackupFilesDir/tuning/tuning.txt` (scratch + rename, off the main thread); a value outside today's bounds or an unknown key is ignored, an unreadable file is all defaults plus one log line.
+`MIN_*`/`MAX_*` constants, narrower sheet-only `TUNING_*` ones for the safety and wide sliders; a new slider is one enum entry) and "Reset to defaults"; it applies on the next Start (the overrides travel in the Start Intent as
+text). Saved by `TuningStore` as `noBackupFilesDir/tuning/tuning.txt` (scratch + rename, off the main thread, saves ordered by tickets on an app-wide scope, a read waits for pending saves); a value outside today's bounds or an unknown key is ignored, an unreadable file is all defaults plus one log line.
 `config.txt` prints the session's effective config and `summary.txt` has `tuningOverrides=N`.
 
 ### 7.2 Thermal policy (M5; the model step-down is implemented in F7)

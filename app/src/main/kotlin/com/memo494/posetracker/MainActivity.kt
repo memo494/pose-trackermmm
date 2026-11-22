@@ -56,8 +56,6 @@ import com.memo494.posetracker.tuning.TuningStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
@@ -83,9 +81,6 @@ class MainActivity : ComponentActivity() {
 
     /** Counts the model-state reads; only the newest read may answer (main thread only). */
     private var modelLoadSeq = 0
-
-    /** Keeps the tuning saves in the order they were asked for (the lock is fair; main thread only). */
-    private val tuningSaveLock = Mutex()
 
     // Registered at activity level so a result that arrives after a recreation still reaches the new instance.
     private val consentLauncher =
@@ -466,7 +461,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** Reads the saved tuning sheet off the main thread; the store never throws and logs an unreadable file itself. */
+    /** Reads the saved tuning sheet off the main thread, after any save still being written; the store never throws and logs an unreadable file itself. */
     private fun loadTuning() {
         lifecycleScope.launch {
             val saved = withContext(Dispatchers.IO) { TuningStore(applicationContext).read() }
@@ -474,14 +469,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** Saves the tuning sheet off the main thread, in the order asked; a failed write is logged by the store. */
-    private fun saveTuning(overrides: TuningOverrides) {
-        lifecycleScope.launch {
-            tuningSaveLock.withLock {
-                withContext(Dispatchers.IO) { TuningStore(applicationContext).write(overrides) }
-            }
-        }
-    }
+    /** Saves the tuning sheet in the background (app-wide scope, in the order asked, see [TuningStore.saveInBackground]). */
+    private fun saveTuning(overrides: TuningOverrides) = TuningStore.saveInBackground(applicationContext, overrides)
 
     /** Saves the "Debug marks" switch off the main thread; a failed write is logged and the switch still works this run. */
     private fun saveDebugMarks(enabled: Boolean) {

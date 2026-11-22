@@ -8,10 +8,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -21,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import com.memo494.posetracker.R
 import com.memo494.posetracker.core.tuning.TuningGroup
 import com.memo494.posetracker.core.tuning.TuningKey
+import com.memo494.posetracker.core.tuning.TuningKind
 import com.memo494.posetracker.core.tuning.TuningOverrides
 import com.memo494.posetracker.tuning.TuningRow
 import com.memo494.posetracker.tuning.TuningSheetMapper
@@ -47,7 +50,7 @@ internal fun TuningSheet(
         }
         if (open) {
             Text(stringResource(R.string.tuning_note), style = MaterialTheme.typography.bodySmall)
-            val rows = TuningSheetMapper.rows(overrides)
+            val rows = remember(overrides) { TuningSheetMapper.rows(overrides) }
             for (group in TuningGroup.entries) {
                 Text(stringResource(groupTitle(group)), style = MaterialTheme.typography.titleSmall)
                 if (group == TuningGroup.LEAD) {
@@ -91,12 +94,22 @@ private fun TuningRowView(
             val color = if (row.overridden) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
             Text(row.valueText, style = MaterialTheme.typography.bodyMedium, color = color)
         }
-        Slider(
-            value = row.sliderValue,
-            onValueChange = { onChange(row.key, TuningSheetMapper.snap(row.key, it)) },
-            onValueChangeFinished = onCommit,
-            valueRange = row.key.min..row.key.max,
-        )
+        if (row.key.kind == TuningKind.SWITCH) {
+            Switch(
+                checked = row.sliderValue >= row.key.max,
+                onCheckedChange = {
+                    onChange(row.key, if (it) row.key.max else row.key.min)
+                    onCommit()
+                },
+            )
+        } else {
+            Slider(
+                value = row.sliderValue,
+                onValueChange = { onChange(row.key, TuningSheetMapper.snap(row.key, it)) },
+                onValueChangeFinished = onCommit,
+                valueRange = row.key.min..row.key.max,
+            )
+        }
         Text(row.defaultText, style = MaterialTheme.typography.bodySmall)
     }
 }

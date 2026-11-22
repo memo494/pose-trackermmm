@@ -1,12 +1,18 @@
 package com.memo494.posetracker.tuning
 
 import android.content.Context
+import com.memo494.posetracker.core.TrackerConfig
 import com.memo494.posetracker.core.tuning.TuningOverrides
 import com.memo494.posetracker.diagnostics.AppLog
 import com.memo494.posetracker.modelimport.WorkerThreadCheck
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import kotlin.concurrent.withLock
 
 /**
  * The saved tuning sheet: one small text file (`TuningOverrides.encode`) in an app-private directory, the same
@@ -26,6 +32,8 @@ internal class TuningStore(
     private val rename: (File, File) -> Boolean,
     private val readFile: (File) -> String,
     private val log: (String, Throwable?) -> Unit,
+    private val gate: TuningSaveGate = TuningSaveGate.PROCESS,
+    private val maxWaitMs: Long = TrackerConfig.TUNING_SAVE_WAIT_MS,
 ) {
     /** The production store, in `noBackupFilesDir/tuning/`. */
     constructor(context: Context) : this(
@@ -41,7 +49,8 @@ internal class TuningStore(
     /** The saved overrides; never throws (except on the main thread), see the class text. */
     fun read(): TuningOverrides {
         threadCheck()
-        synchronized(LOCK) {
+        gate.lock.withLock {
+            gate.awaitPending(maxWaitMs)
             val file = target
             if (!file.exists()) return TuningOverrides.NONE
             val text =
@@ -57,12 +66,27 @@ internal class TuningStore(
         }
     }
 
-    /** Saves [overrides]; `false` (logged once, scratch file removed, the old file kept) when it could not be written. */
-    fun write(overrides: TuningOverrides): Boolean {
+    /** A ticket for the next save, in the order saves are asked for; no file work, any thread. */
+    fun reserve(): Long = gate.reserve()
+
+    /**
+     * Saves [overrides] as the save of [ticket]; `false` (logged once, scratch file removed, the old file kept) when it
+     * could not be written. A save whose [ticket] is older than one already settled is skipped (`true`): the file holds a
+     * newer value.
+     */
+    fun write(
+        overrides: TuningOverrides,
+        ticket: Long = reserve(),
+    ): Boolean {
         threadCheck()
-        synchronized(LOCK) {
+        gate.lock.withLock {
+            if (gate.isStale(ticket)) {
+                gate.settle(ticket)
+                return true
+            }
             val scratch = File(directory, FILE_NAME + SCRATCH_SUFFIX)
             try {
+                if (scratch.exists()) scratch.deleteRecursively()
                 if (!directory.isDirectory && !directory.mkdirs()) throw IOException("cannot create $directory")
                 FileOutputStream(scratch).use { output ->
                     output.write(overrides.encode().toByteArray(Charsets.UTF_8))
@@ -76,6 +100,8 @@ internal class TuningStore(
                 scratch.delete()
                 log("tuning: saving failed", t)
                 return false
+            } finally {
+                gate.settle(ticket)
             }
         }
     }
@@ -89,7 +115,20 @@ internal class TuningStore(
 
         private const val SCRATCH_SUFFIX = ".tmp"
 
-        /** One lock for the whole process: a write and a read never overlap. */
-        private val LOCK = Any()
+        /** Saves outlive the activity that asked for them (a rotation or a Start must not cancel the write). */
+        private val saveScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+        /**
+         * Saves [overrides] in the background: the ticket is taken on the caller's thread (so saves keep the order they
+         * were asked for), the file work runs on an app-wide IO scope, not on the main thread and not in an activity.
+         */
+        fun saveInBackground(
+            context: Context,
+            overrides: TuningOverrides,
+        ) {
+            val store = TuningStore(context.applicationContext)
+            val ticket = store.reserve()
+            saveScope.launch { store.write(overrides, ticket) }
+        }
     }
 }

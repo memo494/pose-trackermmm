@@ -2,6 +2,7 @@ package com.memo494.posetracker.tuning
 
 import com.memo494.posetracker.core.tuning.TuningGroup
 import com.memo494.posetracker.core.tuning.TuningKey
+import com.memo494.posetracker.core.tuning.TuningKind
 import com.memo494.posetracker.core.tuning.TuningOverrides
 import java.math.BigDecimal
 import java.util.Locale
@@ -35,6 +36,7 @@ internal object TuningSheetMapper {
         key: TuningKey,
         value: Float,
     ): String {
+        if (key.kind == TuningKind.SWITCH) return if (value >= key.max) "on" else "off"
         val number = String.format(Locale.ROOT, "%.${decimalsOf(key)}f", value)
         return if (key.unit.isEmpty()) number else "$number ${key.unit}"
     }

@@ -17,6 +17,13 @@ class TuningSheetMapperTest {
     }
 
     @Test
+    fun valueText_aSwitchSaysOnOrOff() {
+        assertThat(TuningSheetMapper.valueText(TuningKey.DISPLAY_LEAD_ENABLED, 1f)).isEqualTo("on")
+        assertThat(TuningSheetMapper.valueText(TuningKey.DISPLAY_LEAD_ENABLED, 0f)).isEqualTo("off")
+        assertThat(TuningSheetMapper.defaultText(TuningKey.DISPLAY_LEAD_ENABLED)).isEqualTo("default on")
+    }
+
+    @Test
     fun valueText_usesADotWhateverTheLocale() {
         val saved = java.util.Locale.getDefault()
         try {

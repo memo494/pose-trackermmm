@@ -15,6 +15,7 @@ import com.memo494.posetracker.core.TrackerConfig
 import com.memo494.posetracker.core.tuning.TuningOverrides
 import com.memo494.posetracker.diagnostics.AppLog
 import com.memo494.posetracker.diagnostics.CaptureStatsHolder
+import com.memo494.posetracker.tuning.TuningSession
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -108,10 +109,16 @@ class CaptureService : Service() {
      */
     private fun sessionConfig(intent: Intent): TrackerConfig {
         val debugMarks = intent.getBooleanExtra(EXTRA_DEBUG_MARKS, TrackerConfig.DEFAULT_DEBUG_MARKS)
-        val overrides = intent.getStringExtra(EXTRA_TUNING)?.let(TuningOverrides::decode) ?: TuningOverrides.NONE
+        val overrides = TuningSession.overridesOf(intent.getStringExtra(EXTRA_TUNING))
         val result = overrides.applyTo(TrackerConfig(debugMarks = debugMarks))
         CaptureStatsHolder.setSession(result.config, result.applied)
-        if (result.applied > 0) AppLog.log("tuning: ${result.applied} override(s): ${overrides.summaryText()}", null)
+        if (overrides.count > 0) AppLog.log("tuning: ${result.applied} override(s) applied: ${overrides.summaryText()}", null)
+        if (result.skipped.isNotEmpty()) {
+            AppLog.log(
+                "tuning: skipped (the config refused them): ${result.skipped.joinToString { it.id }}",
+                null,
+            )
+        }
         return result.config
     }
 

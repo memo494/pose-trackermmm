@@ -1,6 +1,7 @@
 package com.memo494.posetracker.modelimport
 
 import com.google.common.truth.Truth.assertThat
+import com.google.common.truth.Truth.assertWithMessage
 import com.memo494.posetracker.core.TrackerConfig
 import com.memo494.posetracker.core.modelimport.ImportGuardState
 import com.memo494.posetracker.core.modelimport.ImportStage
@@ -842,7 +843,7 @@ class ModelLibraryStoreTest {
         assertThat(productionImport(tfliteBytes(600, 2), "two.tflite")).isInstanceOf(ImportOutcome.Accepted::class.java)
 
         val names = productionLibrary().state().entries.map { it.meta.displayName }
-        com.google.common.truth.Truth.assertWithMessage(tree()).that(names).containsExactly("one.tflite", "two.tflite")
+        assertWithMessage(tree()).that(names).containsExactly("one.tflite", "two.tflite")
     }
 
     @Test
@@ -852,7 +853,7 @@ class ModelLibraryStoreTest {
         assertThat(productionImport(tfliteBytes(600, 2), "two.tflite")).isInstanceOf(ImportOutcome.Accepted::class.java)
 
         val names = productionLibrary().state().entries.map { it.meta.displayName }
-        com.google.common.truth.Truth.assertWithMessage(tree()).that(names).containsExactly("a.tflite", "two.tflite")
+        assertWithMessage(tree()).that(names).containsExactly("a.tflite", "two.tflite")
     }
 
     @Test
@@ -862,7 +863,7 @@ class ModelLibraryStoreTest {
         assertThat(productionImport(tfliteBytes(700, 3), "three.tflite")).isInstanceOf(ImportOutcome.Accepted::class.java)
 
         val names = productionLibrary().state().entries.map { it.meta.displayName }
-        com.google.common.truth.Truth.assertWithMessage(tree()).that(names).containsExactly("a.tflite", "two.tflite", "three.tflite")
+        assertWithMessage(tree()).that(names).containsExactly("a.tflite", "two.tflite", "three.tflite")
     }
 
     // ---- threads ----

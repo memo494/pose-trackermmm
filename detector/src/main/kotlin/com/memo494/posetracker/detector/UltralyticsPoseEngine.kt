@@ -115,6 +115,8 @@ internal class UltralyticsPoseEngine private constructor(
          * model turns out to be unusable: the estimator is closed before the exception propagates.
          *
          * @param scoreThreshold minimum person confidence, unitless in [0, 1].
+         * @param rawNmsIou IoU above which a raw model output's lower-scored box is dropped, unitless
+         *   (see [TrackerConfig.rawNmsIou]); unused for an end-to-end output.
          * @throws IllegalStateException when the input layout was not recognised as NCHW `[1,3,H,W]` or the
          *   accelerator is neither GPU nor CPU; LiteRT exceptions for a model that cannot be loaded. The input
          *   may be rectangular; its width and height are reported as [inputWidth] and [inputHeight].
@@ -124,6 +126,7 @@ internal class UltralyticsPoseEngine private constructor(
             modelFile: File,
             useGpu: Boolean,
             scoreThreshold: Float,
+            rawNmsIou: Float = TrackerConfig.DEFAULT_RAW_NMS_IOU,
         ): UltralyticsPoseEngine {
             val estimator =
                 PoseEstimator(
@@ -133,6 +136,7 @@ internal class UltralyticsPoseEngine private constructor(
                     useGpu,
                     scoreThreshold,
                     TrackerConfig.MAX_DETECTIONS_PER_FRAME,
+                    rawNmsIou,
                 )
             try {
                 return wrap(estimator)

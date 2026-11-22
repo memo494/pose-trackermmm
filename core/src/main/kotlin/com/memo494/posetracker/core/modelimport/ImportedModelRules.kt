@@ -25,8 +25,11 @@ enum class ImportRejection(
     /** The model does not have exactly one input tensor. */
     INPUT_COUNT("input_count"),
 
-    /** The input is not `float32`. */
+    /** The input is not `float32` (and not `int8`/`uint8`, which are [QUANTIZED_IO]). */
     INPUT_TYPE("input_type"),
+
+    /** The input or the output is `int8` or `uint8` (an INT8 export); only `float32` is accepted. */
+    QUANTIZED_IO("quantized_io"),
 
     /** The input is not 4-dimensional with batch 1 and 3 channels first, i.e. not NCHW `[1, 3, H, W]`. */
     INPUT_NOT_NCHW("input_not_nchw"),
@@ -46,39 +49,57 @@ enum class ImportRejection(
     /** The model does not have exactly one output tensor. */
     OUTPUT_COUNT("output_count"),
 
-    /** The output is not `float32`. */
+    /** The output is not `float32` (and not `int8`/`uint8`, which are [QUANTIZED_IO]). */
     OUTPUT_TYPE("output_type"),
 
     /**
-     * The output is the classic channels-first head `[1, C, N]` (for example `[1, 56, 8400]`) instead of
-     * the end-to-end `[1, N, 57]` pose head; recognised so the message can say so.
+     * The output is a channels-first head `[1, C, N]` that is not the 17-keypoint raw pose head `[1, 56, N]`
+     * (for example `[1, 84, 8400]`); recognised so the message can say so.
      */
     OUTPUT_CLASSIC_HEAD("output_classic_head"),
 
     /**
-     * The output is `[1, N, 57]` but `N` is above [TrackerConfig.IMPORT_MAX_OUTPUT_ROWS]: the vendored
-     * `PoseEstimator` treats 57 columns as end-to-end only up to `END_TO_END_MAX_ROWS` rows, so the model would
-     * fail at every Start.
+     * The output has channels `C` with `5 <= C < 56` (`[1, C, N]` or `[1, N, C]`): 4 box values and classes, too few
+     * for 17 keypoints, so it is a detection model without body keypoints (for example `[1, 6, 2100]`); except
+     * channel counts of a pose head with another keypoint count, see [OUTPUT_KEYPOINT_COUNT].
+     */
+    OUTPUT_DETECT_ONLY("output_detect_only"),
+
+    /**
+     * The output has `5 + 3k` channels (`[1, C, N]` or `[1, N, C]`, `8 <= C < 56`): a pose model with another number of
+     * keypoints than 17 (for example 41 channels = 12 keypoints). Only 17 body keypoints are supported.
+     */
+    OUTPUT_KEYPOINT_COUNT("output_keypoint_count"),
+
+    /**
+     * The output has more rows than the layout allows: `[1, N, 57]` above [TrackerConfig.IMPORT_MAX_OUTPUT_ROWS] (the
+     * vendored `PoseEstimator` treats 57 columns as end-to-end only up to `END_TO_END_MAX_ROWS` rows, so the model
+     * would fail at every Start), or a raw `[1, 56, N]` / `[1, N, 56]` above [TrackerConfig.IMPORT_MAX_RAW_OUTPUT_ROWS].
      */
     OUTPUT_ROWS("output_rows"),
 
-    /** Any other output that is not `[1, N, 57]` with `0 < N <= 300` (other keypoint count, detect model, wrong rank). */
+    /**
+     * Any other output that is not `[1, N, 57]` with `0 < N <= 300` and not a raw `[1, 56, N]` / `[1, N, 56]`
+     * (other keypoint count, wrong rank, a `56 x 56` output that could be either raw layout).
+     */
     OUTPUT_SHAPE("output_shape"),
 }
 
 /** Result of [ImportedModelRules.check]. */
 sealed interface ImportCheck {
     /**
-     * The model fits layout version 2.
+     * The model fits layout version 2 (end-to-end) or a raw pose layout.
      *
      * @property inputWidth width `W` of the input tensor `[1, 3, H, W]`, in pixels (Mdl space).
      * @property inputHeight height `H` of the input tensor `[1, 3, H, W]`, in pixels (Mdl space).
      * @property outputRows rows `N` of the output (candidate detections per frame), unitless.
+     * @property outputLayout how the output is laid out.
      */
     data class Accepted(
         val inputWidth: Int,
         val inputHeight: Int,
         val outputRows: Int,
+        val outputLayout: PoseOutputLayout = PoseOutputLayout.END_TO_END,
     ) : ImportCheck
 
     /**
@@ -102,6 +123,9 @@ object ImportedModelRules {
     /** The only accepted element type name. */
     const val FLOAT32 = "float32"
 
+    private const val INT8 = "int8"
+    private const val UINT8 = "uint8"
+
     private const val INPUT_RANK = 4
     private const val OUTPUT_RANK = 3
     private const val BATCH = 1
@@ -113,14 +137,18 @@ object ImportedModelRules {
 
     /**
      * Applies the rules in this order and returns the first that fails: input count, output count, input
-     * type, input layout (NHWC recognised, otherwise NCHW rank/batch/channels, then height and width each
+     * type (`int8`/`uint8` is [ImportRejection.QUANTIZED_IO], any other non-float32 [ImportRejection.INPUT_TYPE]),
+     * input layout (NHWC recognised, otherwise NCHW rank/batch/channels, then height and width each
      * inside the size range, then each a multiple of [TrackerConfig.IMPORT_INPUT_SIZE_STEP], then the
      * long side at most [TrackerConfig.importMaxInputAspect] times the short side), output type, output
-     * shape (classic head recognised). Accepts exactly one `float32` input `[1, 3, H, W]` (not necessarily
-     * square) and one `float32` output
-     * `[1, N, 57]` with `0 < N <=` [TrackerConfig.IMPORT_MAX_OUTPUT_ROWS] ([TrackerConfig.POSE_OUTPUT_COLUMNS]
-     * columns; the vendored `PoseEstimator` treats 57 columns as end-to-end only up to its
-     * `END_TO_END_MAX_ROWS`, so a larger `N` is refused as [ImportRejection.OUTPUT_ROWS]).
+     * shape (detect-only and other channels-first heads recognised). Accepts exactly one `float32` input
+     * `[1, 3, H, W]` (not necessarily square) and one `float32` output that is one of:
+     * - `[1, N, 57]` with `0 < N <=` [TrackerConfig.IMPORT_MAX_OUTPUT_ROWS] ([TrackerConfig.POSE_OUTPUT_COLUMNS]
+     *   columns, [PoseOutputLayout.END_TO_END]; the vendored `PoseEstimator` treats 57 columns as end-to-end only up
+     *   to its `END_TO_END_MAX_ROWS`, so a larger `N` is refused as [ImportRejection.OUTPUT_ROWS]);
+     * - `[1, 56, N]` or `[1, N, 56]` ([TrackerConfig.POSE_RAW_CHANNELS], [PoseOutputLayout.RAW_CHANNELS_FIRST] /
+     *   [PoseOutputLayout.RAW_CHANNELS_LAST]) with `56 < N <=` [TrackerConfig.IMPORT_MAX_RAW_OUTPUT_ROWS]. A shape
+     *   with 56 on both axes is ambiguous and refused as [ImportRejection.OUTPUT_SHAPE].
      */
     fun check(
         inputs: List<TensorDescription>,
@@ -135,7 +163,9 @@ object ImportedModelRules {
         if (outputs.size != 1) return reject(ImportRejection.OUTPUT_COUNT)
         val input = inputs[0]
         val output = outputs[0]
-        if (input.elementType != FLOAT32) return reject(ImportRejection.INPUT_TYPE)
+        if (input.elementType != FLOAT32) {
+            return reject(if (isQuantized(input)) ImportRejection.QUANTIZED_IO else ImportRejection.INPUT_TYPE)
+        }
 
         val inputShape = input.shape
         val height: Int
@@ -152,14 +182,60 @@ object ImportedModelRules {
             return reject(ImportRejection.INPUT_NOT_NCHW)
         }
 
-        if (output.elementType != FLOAT32) return reject(ImportRejection.OUTPUT_TYPE)
+        if (output.elementType != FLOAT32) {
+            return reject(if (isQuantized(output)) ImportRejection.QUANTIZED_IO else ImportRejection.OUTPUT_TYPE)
+        }
         val outputShape = output.shape
         if (isPoseHead(outputShape)) {
             val rows = outputShape[AXIS_1]
             if (rows > TrackerConfig.IMPORT_MAX_OUTPUT_ROWS) return reject(ImportRejection.OUTPUT_ROWS)
             return ImportCheck.Accepted(inputWidth = width, inputHeight = height, outputRows = rows)
         }
-        return reject(if (isClassicHead(outputShape)) ImportRejection.OUTPUT_CLASSIC_HEAD else ImportRejection.OUTPUT_SHAPE)
+        val rawLayout = PoseOutputLayout.rawOf(outputShape)
+        if (rawLayout != null) {
+            val rows = maxOf(outputShape[AXIS_1], outputShape[AXIS_2])
+            if (rows > TrackerConfig.IMPORT_MAX_RAW_OUTPUT_ROWS) return reject(ImportRejection.OUTPUT_ROWS)
+            return ImportCheck.Accepted(inputWidth = width, inputHeight = height, outputRows = rows, outputLayout = rawLayout)
+        }
+        return reject(
+            when {
+                isDetectOnly(outputShape) -> ImportRejection.OUTPUT_DETECT_ONLY
+                isOtherKeypointCount(outputShape) -> ImportRejection.OUTPUT_KEYPOINT_COUNT
+                isClassicHead(outputShape) -> ImportRejection.OUTPUT_CLASSIC_HEAD
+                else -> ImportRejection.OUTPUT_SHAPE
+            },
+        )
+    }
+
+    private fun isQuantized(tensor: TensorDescription): Boolean = tensor.elementType == INT8 || tensor.elementType == UINT8
+
+    /**
+     * `[1, C, N]` or `[1, N, C]` with more rows `N` than channels `C`, `C` from 5 (4 box values and one class) up to
+     * one below the 56 of a raw pose head, and no axis of exactly 56 (a small raw-looking shape is not a detector).
+     * Channel counts that fit a pose head with another keypoint count are [isOtherKeypointCount] instead.
+     */
+    private fun isDetectOnly(shape: List<Int>): Boolean = fewChannels(shape) { !isOtherKeypointChannels(it) }
+
+    /** `5 + 3k` channels (k = 1..15): a pose head with another keypoint count than 17, not a detector. */
+    private fun isOtherKeypointCount(shape: List<Int>): Boolean = fewChannels(shape) { isOtherKeypointChannels(it) }
+
+    private fun isOtherKeypointChannels(channels: Int): Boolean =
+        channels >= TrackerConfig.POSE_BOX_VALUES + TrackerConfig.POSE_SCORE_VALUES + TrackerConfig.POSE_VALUES_PER_KEYPOINT &&
+            (channels - TrackerConfig.POSE_BOX_VALUES - TrackerConfig.POSE_SCORE_VALUES) % TrackerConfig.POSE_VALUES_PER_KEYPOINT == 0
+
+    private fun fewChannels(
+        shape: List<Int>,
+        accept: (Int) -> Boolean,
+    ): Boolean {
+        if (shape.size != OUTPUT_RANK || shape[AXIS_BATCH] != BATCH) return false
+        if (shape[AXIS_1] == TrackerConfig.POSE_RAW_CHANNELS || shape[AXIS_2] == TrackerConfig.POSE_RAW_CHANNELS) return false
+        val minChannels = TrackerConfig.POSE_BOX_VALUES + TrackerConfig.POSE_SCORE_VALUES
+
+        fun fits(
+            channels: Int,
+            rows: Int,
+        ) = channels in minChannels until TrackerConfig.POSE_RAW_CHANNELS && rows > channels && accept(channels)
+        return fits(shape[AXIS_1], shape[AXIS_2]) || fits(shape[AXIS_2], shape[AXIS_1])
     }
 
     private fun inRange(
@@ -191,12 +267,13 @@ object ImportedModelRules {
 
     /**
      * `[1, C, N]` with channels first: batch 1, a positive channel count `C` smaller than the row count
-     * `N`, and neither equal to the 57 columns of the accepted head.
+     * `N`, and neither equal to the 57 columns of the end-to-end head nor the 56 of a raw one.
      */
     private fun isClassicHead(shape: List<Int>): Boolean =
         shape.size == OUTPUT_RANK && shape[AXIS_BATCH] == BATCH && shape[AXIS_1] > 0 &&
             shape[AXIS_1] < shape[AXIS_2] && shape[AXIS_1] != TrackerConfig.POSE_OUTPUT_COLUMNS &&
-            shape[AXIS_2] != TrackerConfig.POSE_OUTPUT_COLUMNS
+            shape[AXIS_2] != TrackerConfig.POSE_OUTPUT_COLUMNS &&
+            shape[AXIS_1] != TrackerConfig.POSE_RAW_CHANNELS && shape[AXIS_2] != TrackerConfig.POSE_RAW_CHANNELS
 
     private fun describe(
         inputs: List<TensorDescription>,

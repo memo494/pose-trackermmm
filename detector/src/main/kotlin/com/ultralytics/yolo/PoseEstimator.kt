@@ -5,6 +5,9 @@ package com.ultralytics.yolo
 import android.content.Context
 import android.graphics.*
 import android.util.Log
+import com.memo494.posetracker.core.TrackerConfig
+import com.memo494.posetracker.core.decode.RawPoseDecoder
+import com.memo494.posetracker.core.modelimport.PoseOutputLayout
 import kotlin.math.max
 import kotlin.math.min
 
@@ -14,7 +17,8 @@ class PoseEstimator(
     override var labels: List<String>,
     private val useGpu: Boolean = true,
     private var confidenceThreshold: Float = 0.25f,   // Can be changed as needed
-    private var numItemsThreshold: Int = 30
+    private var numItemsThreshold: Int = 30,
+    rawNmsIou: Float = TrackerConfig.DEFAULT_RAW_NMS_IOU
 ) : BasePredictor() {
 
     private enum class OutputLayout {
@@ -42,6 +46,8 @@ class PoseEstimator(
     private var keypointStart = BOX_CONF_FEATURES
     private var keypointCount = 0
     private var isEndToEnd = false
+    // pose-tracker: raw [1, 56, N] / [1, N, 56] output (nms=None exports), decoded by core's RawPoseDecoder; null otherwise.
+    private var rawDecoder: RawPoseDecoder? = null
     private lateinit var outputLayout: OutputLayout
 
     // Diagnostics of the last predict (pose-tracker change, see third_party/ULTRALYTICS.md); -1 = not measured yet.
@@ -74,8 +80,11 @@ class PoseEstimator(
         }
 
         batchSize = outputShape[0]
-        val featuresFirstPose = isPoseFeatureCount(outputShape[1]) && outputShape[2] > END_TO_END_MAX_ROWS
-        val anchorsFirstPose = isPoseFeatureCount(outputShape[2]) && outputShape[1] > END_TO_END_MAX_ROWS
+        val rawLayout = PoseOutputLayout.rawOf(outputShape) // pose-tracker: same rule as the import check
+        val featuresFirstPose = rawLayout == PoseOutputLayout.RAW_CHANNELS_FIRST ||
+            (rawLayout == null && isPoseFeatureCount(outputShape[1]) && outputShape[2] > END_TO_END_MAX_ROWS)
+        val anchorsFirstPose = rawLayout == PoseOutputLayout.RAW_CHANNELS_LAST ||
+            (rawLayout == null && isPoseFeatureCount(outputShape[2]) && outputShape[1] > END_TO_END_MAX_ROWS)
         isEndToEnd = !featuresFirstPose &&
             !anchorsFirstPose &&
             outputShape[1] <= END_TO_END_MAX_ROWS &&
@@ -103,6 +112,15 @@ class PoseEstimator(
         keypointStart = if (isEndToEnd && (outFeatures - 6) % 3 == 0) 6 else BOX_CONF_FEATURES
         keypointCount = keypointCountFromFeatureCount(outFeatures, keypointStart)
         outDim2 = outputShape[2]
+        if (rawLayout != null) {
+            rawDecoder = RawPoseDecoder(
+                rawLayout,
+                numAnchors,
+                inWidth,
+                inHeight,
+                TrackerConfig(rawNmsIou = rawNmsIou)
+            )
+        }
 
         floatInput = FloatArray(inWidth * inHeight * 3)
         inputBitmap = Bitmap.createBitmap(inWidth, inHeight, Bitmap.Config.ARGB_8888)
@@ -169,6 +187,7 @@ class PoseEstimator(
         origHeight: Int
     ): List<PoseDetection> {
         recordRawScoreStats(flat, confidenceThreshold)
+        rawDecoder?.let { return postProcessRawPose(it, flat, confidenceThreshold, origWidth, origHeight) }
         if (isEndToEnd) {
             return postProcessEndToEndPose(flat, confidenceThreshold, origWidth, origHeight)
         }
@@ -239,6 +258,59 @@ class PoseEstimator(
 
         val finalDetections = nmsPoseDetections(detections, iouThreshold)
         return finalDetections
+    }
+
+    /**
+     * pose-tracker: raw pose output. The core decoder thresholds, runs class-agnostic NMS and caps the rows and gives
+     * boxes and keypoints in model pixels; they are mapped to the image exactly like the end-to-end path does
+     * (letterbox inverse), in pixel mode.
+     */
+    private fun postProcessRawPose(
+        decoder: RawPoseDecoder,
+        flat: FloatArray,
+        confidenceThreshold: Float,
+        origWidth: Int,
+        origHeight: Int
+    ): List<PoseDetection> {
+        val count = decoder.decode(flat, confidenceThreshold)
+        val detections = mutableListOf<PoseDetection>()
+        for (i in 0 until count) {
+            val outputRect = RectF(
+                decoder.boxLeftMdl(i),
+                decoder.boxTopMdl(i),
+                decoder.boxRightMdl(i),
+                decoder.boxBottomMdl(i)
+            )
+            val rectF = inputRectFromOutputRect(outputRect, origWidth, origHeight, false) ?: continue
+            val normBox = normalizedRectFromInputRect(rectF, origWidth, origHeight)
+
+            val kpArray = mutableListOf<Pair<Float, Float>>()
+            val kpConfArray = mutableListOf<Float>()
+            for (k in 0 until keypointCount) {
+                kpArray.add(
+                    inputPointFromOutputPoint(
+                        decoder.keypointXMdl(i, k),
+                        decoder.keypointYMdl(i, k),
+                        origWidth,
+                        origHeight,
+                        false
+                    )
+                )
+                kpConfArray.add(decoder.keypointScore(i, k))
+            }
+
+            detections.add(
+                PoseDetection(
+                    box = Box(0, labelName(0), decoder.scoreOf(i), rectF, normBox),
+                    keypoints = Keypoints(
+                        xyn = kpArray.map { (fx, fy) -> (fx / origWidth) to (fy / origHeight) },
+                        xy = kpArray,
+                        conf = kpConfArray
+                    )
+                )
+            )
+        }
+        return detections
     }
 
     private fun postProcessEndToEndPose(

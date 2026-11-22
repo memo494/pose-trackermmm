@@ -1259,4 +1259,19 @@ class TrackerConfigTest {
         assertThat(value).isAtLeast(min)
         assertThat(value).isAtMost(max)
     }
+
+    @Test
+    fun rawNmsIou_defaultsToPointSeven_andRejectsOutOfRangeAndNonFinite() {
+        assertThat(TrackerConfig().rawNmsIou).isEqualTo(0.7f)
+        assertThat(TrackerConfig(rawNmsIou = TrackerConfig.MIN_RAW_NMS_IOU).rawNmsIou).isEqualTo(TrackerConfig.MIN_RAW_NMS_IOU)
+        assertThat(TrackerConfig(rawNmsIou = TrackerConfig.MAX_RAW_NMS_IOU).rawNmsIou).isEqualTo(TrackerConfig.MAX_RAW_NMS_IOU)
+        val bad =
+            listOf(
+                TrackerConfig.MIN_RAW_NMS_IOU - 0.01f,
+                TrackerConfig.MAX_RAW_NMS_IOU + 0.01f,
+                Float.NaN,
+                Float.POSITIVE_INFINITY,
+            )
+        for (value in bad) assertThrows(IllegalArgumentException::class.java) { TrackerConfig(rawNmsIou = value) }
+    }
 }

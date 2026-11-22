@@ -286,6 +286,12 @@ private fun ImportResultText(result: ImportSummary) {
                         ControlModelMapper.messageRes(result.reason),
                         ControlModelMapper.aspectLimitText(TrackerConfig().importMaxInputAspect),
                     )
+                } else if (result.reason == ModelRejectionReason.OUTPUT_ROWS) {
+                    stringResource(
+                        ControlModelMapper.messageRes(result.reason),
+                        TrackerConfig.IMPORT_MAX_OUTPUT_ROWS,
+                        TrackerConfig.IMPORT_MAX_RAW_OUTPUT_ROWS,
+                    )
                 } else {
                     stringResource(ControlModelMapper.messageRes(result.reason))
                 }

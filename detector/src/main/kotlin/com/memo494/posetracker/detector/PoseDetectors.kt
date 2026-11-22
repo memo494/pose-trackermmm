@@ -42,7 +42,7 @@ object PoseDetectors {
         val factory =
             PoseEngineFactory { accelerator ->
                 val useGpu = accelerator == Accelerator.GPU
-                UltralyticsPoseEngine.create(appContext, modelFile, useGpu, config.scoreThreshold)
+                UltralyticsPoseEngine.create(appContext, modelFile, useGpu, config.scoreThreshold, config.rawNmsIou)
             }
         return LiteRtPoseDetector.create(factory, config.scoreThreshold, config.modelInputSize, config.modelInputSize)
     }
@@ -79,7 +79,7 @@ object PoseDetectors {
         val factory =
             PoseEngineFactory { accelerator ->
                 val useGpu = accelerator == Accelerator.GPU
-                UltralyticsPoseEngine.create(appContext, file, useGpu, config.scoreThreshold)
+                UltralyticsPoseEngine.create(appContext, file, useGpu, config.scoreThreshold, config.rawNmsIou)
             }
         return LiteRtPoseDetector.create(factory, config.scoreThreshold, meta.inputWidth, meta.inputHeight)
     }

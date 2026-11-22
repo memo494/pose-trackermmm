@@ -758,6 +758,8 @@ class TrackerConfigTest {
         assertThat(config.displayLeadSpeedLowHps).isEqualTo(0.5f)
         assertThat(config.displayLeadSpeedHighHps).isEqualTo(1.0f)
         assertThat(config.displayLeadMaxRatio).isEqualTo(0.25f)
+        assertThat(config.displayLeadStopFullRatio).isEqualTo(0.8f)
+        assertThat(config.displayLeadFadeMs).isEqualTo(80f)
     }
 
     @Test
@@ -796,6 +798,12 @@ class TrackerConfigTest {
                 { TrackerConfig(displayLeadMaxRatio = -0.1f) },
                 { TrackerConfig(displayLeadMaxRatio = TrackerConfig.MAX_DISPLAY_LEAD_MAX_RATIO + 0.1f) },
                 { TrackerConfig(displayLeadMaxRatio = Float.NaN) },
+                { TrackerConfig(displayLeadStopFullRatio = TrackerConfig.MIN_DISPLAY_LEAD_STOP_FULL_RATIO / 2f) },
+                { TrackerConfig(displayLeadStopFullRatio = TrackerConfig.MAX_DISPLAY_LEAD_STOP_FULL_RATIO * 2f) },
+                { TrackerConfig(displayLeadStopFullRatio = Float.NaN) },
+                { TrackerConfig(displayLeadFadeMs = -1f) },
+                { TrackerConfig(displayLeadFadeMs = TrackerConfig.MAX_DISPLAY_LEAD_FADE_MS * 2f) },
+                { TrackerConfig(displayLeadFadeMs = Float.NaN) },
             )
         for (build in rejected) assertThrows(IllegalArgumentException::class.java) { build() }
     }

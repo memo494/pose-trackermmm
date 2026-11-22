@@ -4,6 +4,7 @@ import com.google.common.truth.Truth.assertWithMessage
 import com.memo494.posetracker.core.TrackerConfig
 import org.junit.jupiter.api.Test
 import kotlin.math.hypot
+import kotlin.math.max
 import kotlin.math.roundToInt
 
 /**
@@ -116,6 +117,94 @@ class DisplayLeadScenarioTest {
                 )
             sameIdsAndRingsNearTheirOwnHead("side by side", scene(listOf(a, b), SIDE_S, rate, seed), a, b, rate, seed, 0.0, 0.0)
         }
+
+    @Test
+    fun walkerWithMissingDetections_doesNotStepBackOnScreenBecauseOfTheLead() =
+        forEachRun { rate, seed ->
+            for (heightsPerS in listOf(1.0, 2.0)) {
+                for (missProbability in listOf(MISS_LOW, MISS_HIGH)) {
+                    val scene = sceneWithMisses(heightsPerS, rate, seed, missProbability)
+                    val on = largestBackwardStepInH(runDisplayed(scene, withLead))
+                    val off = largestBackwardStepInH(runDisplayed(scene, withoutLead))
+                    val where = "walker $heightsPerS h/s, ${(missProbability * PERCENT).roundToInt()} % misses, ${rate.label}, seed $seed"
+                    assertWithMessage("$where: backward step with lead $on h, without $off h, limit <= $off + ${MetricsThresholds.F4_MAX_BACKWARD_STEP_H}")
+                        .that(on <= off + MetricsThresholds.F4_MAX_BACKWARD_STEP_H)
+                        .isTrue()
+                }
+            }
+        }
+
+    @Test
+    fun walkerWithMeasurementNoise_isNotJitterierThanTheRawMeasurementBecauseOfTheLead() =
+        forEachRun { rate, seed ->
+            if (rate.jitter > 0.0) return@forEachRun
+            for (heightsPerS in listOf(1.0, 2.0)) {
+                val seconds = (WALK_END_X - WALK_START_X) / (heightsPerS * HEIGHT)
+                val person = ScenePerson(1, listOf(pt(0.0, WALK_START_X), pt(seconds, WALK_END_X)))
+                val scene = scene(listOf(person), seconds, rate, seed)
+                val frames = scene.frames.filter { it.timeS > JITTER_FROM_S }
+                val raw = hypot(secondDifferenceRms(frames.map { it.truth[0].measuredHeadXImg }), secondDifferenceRms(frames.map { it.truth[0].measuredHeadYImg }))
+                val on = drawnJitter(runDisplayed(scene, withLead))
+                val off = drawnJitter(runDisplayed(scene, withoutLead))
+                val where = "walker $heightsPerS h/s with noise, ${rate.label}, seed $seed"
+                assertWithMessage("$where: jitter / raw jitter is ${on / raw} with the lead (${off / raw} without), limit <= ${MetricsThresholds.F4_MAX_MOVING_JITTER_RATIO}")
+                    .that(on / raw <= MetricsThresholds.F4_MAX_MOVING_JITTER_RATIO)
+                    .isTrue()
+            }
+        }
+
+    /** A walker whose detection is missing in [missProbability] of the frames from frame [MISS_FROM_FRAME] on (like S13). */
+    private fun sceneWithMisses(
+        heightsPerS: Double,
+        rate: Rate,
+        seed: Long,
+        missProbability: Double,
+    ): SyntheticScene {
+        val seconds = (WALK_END_X - WALK_START_X) / (heightsPerS * HEIGHT)
+        // The frame times of a scene with noise depend on what is emitted, so a jittered scene is noise free (as S13).
+        val noise = if (rate.jitter > 0.0) 0.0 else NOISE_RATIO
+        fun build(dropouts: List<TimeInterval>) =
+            SyntheticScene(
+                people = listOf(ScenePerson(1, listOf(pt(0.0, WALK_START_X), pt(seconds, WALK_END_X)), dropouts = dropouts)),
+                durationS = seconds,
+                fps = rate.fps,
+                seed = seed,
+                frameJitterFraction = rate.jitter,
+                keypointNoiseRatio = noise,
+                boxNoiseRatio = noise,
+            )
+        val times = SyntheticScene(emptyList(), seconds, rate.fps, seed, rate.jitter).frames.map { it.timeS }
+        val random = java.util.Random(seed * SEED_FACTOR + SEED_OFFSET)
+        val misses =
+            times.indices
+                .filter { it >= MISS_FROM_FRAME && random.nextDouble() < missProbability }
+                .map { TimeInterval(times[it] - TIME_EPS_S, times[it] + TIME_EPS_S) }
+        val scene = build(misses)
+        assertWithMessage("frame times stay those of the scene without people").that(scene.frames.map { it.timeS }.take(times.size)).isEqualTo(times.take(scene.frames.size))
+        return scene
+    }
+
+    /** The largest step backwards, in heights, between the drawn points of two consecutive frames of the walker (to the right) after 1.5 s. */
+    private fun largestBackwardStepInH(run: DisplayedRun): Double {
+        var worst = 0.0
+        var previous: DisplayedTrack? = null
+        for (frame in run.frames) {
+            val track = frame.tracks.firstOrNull()
+            if (track != null && previous != null && frame.timeS > BACKWARD_FROM_S) worst = max(worst, (previous.xImg - track.xImg) / HEIGHT)
+            previous = track
+        }
+        return worst
+    }
+
+    private fun drawnJitter(run: DisplayedRun): Double {
+        val frames = run.frames.filter { it.timeS > JITTER_FROM_S }
+        return hypot(
+            secondDifferenceRms(frames.map { it.tracks.firstOrNull()?.xImg ?: Double.NaN }),
+            secondDifferenceRms(frames.map { it.tracks.firstOrNull()?.yImg ?: Double.NaN }),
+        )
+    }
+
+    private fun secondDifferenceRms(values: List<Double>): Double = TrackingMetrics.jitterRms(values.toDoubleArray())
 
     private fun walker(heightsPerS: Double) =
         forEachRun { rate, seed ->
@@ -301,6 +390,14 @@ class DisplayLeadScenarioTest {
         const val OVERLAP_FROM_S = 2.1
         const val OVERLAP_TO_S = 2.9
         const val RING_CHECK_FROM_S = 1.5
+        const val MISS_LOW = 0.1
+        const val MISS_HIGH = 0.2
+        const val MISS_FROM_FRAME = 12
+        const val BACKWARD_FROM_S = 1.5
+        const val JITTER_FROM_S = 1.5
+        const val TIME_EPS_S = 1e-7
+        const val SEED_FACTOR = 31L
+        const val SEED_OFFSET = 7L
         const val SIDE_S = 4.0
         const val SIDE_START_X = 200.0
         const val SIDE_GAP_H = 0.6

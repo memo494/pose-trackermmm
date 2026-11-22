@@ -11,7 +11,7 @@ import com.memo494.posetracker.core.TrackerConfig
  * - [speedGain] `gSpeed`: 0 up to `displayLeadSpeedLowHps`, 1 from `displayLeadSpeedHighHps`, linear between (on the
  *   smoother's filtered speed). A still or trembling head has speed far below the low limit, so it gets no lead.
  * - [stopGain] `gStop`: the share of the tracker's speed that the raw measured head still has along the tracker's
- *   direction, 0 to 1. A head that stops or turns shows a measured step of 0 or backwards one frame before the
+ *   direction (full from `displayLeadStopFullRatio`), 0 to 1. A head that stops or turns shows a measured step of 0 or backwards one frame before the
  *   filters know, so the lead is dropped at once and cannot overshoot.
  * - [leadTimeMs] `L = min(result age + displayLeadExtraMs + half the frame interval, displayLeadMaxMs)`.
  */
@@ -41,11 +41,12 @@ internal object DisplayLead {
         vyImgPerS: Float,
         measuredVxImgPerS: Float,
         measuredVyImgPerS: Float,
+        config: TrackerConfig,
     ): Float {
         val speed2 = vxImgPerS * vxImgPerS + vyImgPerS * vyImgPerS
         if (!(speed2 > 0f && speed2.isFinite())) return 0f
         val gain = (measuredVxImgPerS * vxImgPerS + measuredVyImgPerS * vyImgPerS) / speed2
-        return if (gain.isNaN()) 0f else gain.coerceIn(0f, 1f)
+        return if (gain.isNaN()) 0f else (gain / config.displayLeadStopFullRatio).coerceIn(0f, 1f)
     }
 
     /** `L` in milliseconds; an age or an interval that is not a positive number counts as 0. */

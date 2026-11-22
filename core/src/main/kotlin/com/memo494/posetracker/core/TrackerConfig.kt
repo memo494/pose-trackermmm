@@ -165,6 +165,14 @@ package com.memo494.posetracker.core
  * @property displayLeadSpeedHighHps filtered speed in heights per second at and above which the lead is full, in
  *   [[MIN_DISPLAY_LEAD_SPEED_HPS], [MAX_DISPLAY_LEAD_SPEED_HPS]], not below [displayLeadSpeedLowHps]; the lead grows
  *   linearly in between.
+ * @property displayLeadStopFullRatio share of the tracker's speed that the measured head must still have along the
+ *   tracker's direction for the lead to be full, in [[MIN_DISPLAY_LEAD_STOP_FULL_RATIO],
+ *   [MAX_DISPLAY_LEAD_STOP_FULL_RATIO]]; below it the lead shrinks in proportion (a stop gives 0). A value under 1 keeps
+ *   the noise of the measured step from making the dot of a steady walker tremble.
+ * @property displayLeadFadeMs time constant in milliseconds with which the lead that is on screen decays when it is
+ *   switched off (a miss, an estimated head, a lost track), in [[MIN_DISPLAY_LEAD_FADE_MS], [MAX_DISPLAY_LEAD_FADE_MS]],
+ *   about one frame interval at low rates, so the dot does not jump back by the whole lead; 0 = cut at once. A fade
+ *   only lowers the lead: it never grows and never exceeds `displayLeadMaxRatio`.
  * @property displayLeadMaxRatio longest lead as a multiple of the track height (unitless), in
  *   [[MIN_DISPLAY_LEAD_MAX_RATIO], [MAX_DISPLAY_LEAD_MAX_RATIO]].
  * @property fadeMinAlpha lowest opacity, unitless, of the marks of a `LOST` track: the opacity falls from 1 to
@@ -305,6 +313,8 @@ data class TrackerConfig(
     val displayLeadExtraMs: Float = DEFAULT_DISPLAY_LEAD_EXTRA_MS,
     val displayLeadSpeedLowHps: Float = DEFAULT_DISPLAY_LEAD_SPEED_LOW_HPS,
     val displayLeadSpeedHighHps: Float = DEFAULT_DISPLAY_LEAD_SPEED_HIGH_HPS,
+    val displayLeadStopFullRatio: Float = DEFAULT_DISPLAY_LEAD_STOP_FULL_RATIO,
+    val displayLeadFadeMs: Float = DEFAULT_DISPLAY_LEAD_FADE_MS,
     val displayLeadMaxRatio: Float = DEFAULT_DISPLAY_LEAD_MAX_RATIO,
     val fadeMinAlpha: Float = DEFAULT_FADE_MIN_ALPHA,
     val fadeStepAlpha: Float = DEFAULT_FADE_STEP_ALPHA,
@@ -565,6 +575,13 @@ data class TrackerConfig(
         }
         require(displayLeadSpeedHighHps in displayLeadSpeedLowHps..MAX_DISPLAY_LEAD_SPEED_HPS) {
             "displayLeadSpeedHighHps $displayLeadSpeedHighHps outside [$displayLeadSpeedLowHps (the low speed), $MAX_DISPLAY_LEAD_SPEED_HPS]"
+        }
+        require(displayLeadStopFullRatio in MIN_DISPLAY_LEAD_STOP_FULL_RATIO..MAX_DISPLAY_LEAD_STOP_FULL_RATIO) {
+            "displayLeadStopFullRatio $displayLeadStopFullRatio outside " +
+                "[$MIN_DISPLAY_LEAD_STOP_FULL_RATIO, $MAX_DISPLAY_LEAD_STOP_FULL_RATIO]"
+        }
+        require(displayLeadFadeMs in MIN_DISPLAY_LEAD_FADE_MS..MAX_DISPLAY_LEAD_FADE_MS) {
+            "displayLeadFadeMs $displayLeadFadeMs outside [$MIN_DISPLAY_LEAD_FADE_MS, $MAX_DISPLAY_LEAD_FADE_MS]"
         }
         require(displayLeadMaxRatio in MIN_DISPLAY_LEAD_MAX_RATIO..MAX_DISPLAY_LEAD_MAX_RATIO) {
             "displayLeadMaxRatio $displayLeadMaxRatio outside [$MIN_DISPLAY_LEAD_MAX_RATIO, $MAX_DISPLAY_LEAD_MAX_RATIO]"
@@ -1246,6 +1263,24 @@ data class TrackerConfig(
 
         /** Highest accepted [displayLeadSpeedLowHps] / [displayLeadSpeedHighHps], in track heights per second. */
         const val MAX_DISPLAY_LEAD_SPEED_HPS = 10f
+
+        /** Default [displayLeadStopFullRatio], unitless. */
+        const val DEFAULT_DISPLAY_LEAD_STOP_FULL_RATIO = 0.8f
+
+        /** Lowest accepted [displayLeadStopFullRatio]. */
+        const val MIN_DISPLAY_LEAD_STOP_FULL_RATIO = 0.1f
+
+        /** Highest accepted [displayLeadStopFullRatio]: the measured step must match the tracker's speed. */
+        const val MAX_DISPLAY_LEAD_STOP_FULL_RATIO = 1f
+
+        /** Default [displayLeadFadeMs], in milliseconds. */
+        const val DEFAULT_DISPLAY_LEAD_FADE_MS = 80f
+
+        /** Lowest accepted [displayLeadFadeMs], in milliseconds (0 = cut at once). */
+        const val MIN_DISPLAY_LEAD_FADE_MS = 0f
+
+        /** Highest accepted [displayLeadFadeMs], in milliseconds. */
+        const val MAX_DISPLAY_LEAD_FADE_MS = 1000f
 
         /** Default [displayLeadMaxRatio], in track heights. */
         const val DEFAULT_DISPLAY_LEAD_MAX_RATIO = 0.25f

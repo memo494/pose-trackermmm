@@ -1,5 +1,7 @@
 package com.memo494.posetracker.core.tracking
 
+import com.memo494.posetracker.core.TrackerConfig
+
 /**
  * An immutable copy of the shown tracks (`TrackList.isShown`) at one moment, in list order, for the overlay
  * (docs/plans/M3.md, M3b). The tracker's own [TrackList] is a reused view that is valid only until its next call,
@@ -136,7 +138,7 @@ class TrackSnapshot private constructor(
         ): TrackSnapshot = build(tracks, widthImg, heightImg, smoother, timestampNs, SMOOTHED, 0f, 0f, resultAgeMs)
 
         /**
-         * Like [of] for the idle republish: a shown track the [smoother] knows keeps its last smoothed head point
+         * Like [of] for the idle republish: a shown track the [smoother] knows keeps its last drawn head point (smoothed, plus the lead that was on screen)
          * (the box moved by the same delta), a track it does not know (newly promoted) passes through unsmoothed.
          * The smoother is not advanced. A `LOST` track's [TrackSnapshot.lostMs] is its lost time plus [idleMs] (the
          * time since the newest frame; a negative or non-numeric value counts as 0), capped at [maxLostMs]
@@ -194,22 +196,25 @@ class TrackSnapshot private constructor(
                     headYImg = smoother.outYImg
                     values[base + SPEED_HPS] = smoother.outSpeedHps
                     val leadMs = leadTimeFor(tracks, i, smoother, resultAgeMs)
-                    if (leadMs > 0f) {
-                        val seconds = leadMs / MS_PER_S
-                        var leadXImg = tracks.velocityXImgPerS(i) * seconds
-                        var leadYImg = tracks.velocityYImgPerS(i) * seconds
-                        val scale = DisplayLead.capScale(leadXImg, leadYImg, smoother.config.displayLeadMaxRatio * tracks.heightImg(i))
-                        leadXImg *= scale
-                        leadYImg *= scale
-                        if (scale > 0f) {
-                            headXImg += leadXImg
-                            headYImg += leadYImg
-                            values[base + LEAD_MS] = leadMs
-                        }
-                    }
+                    val seconds = leadMs / MS_PER_S
+                    val capImg = smoother.config.displayLeadMaxRatio * tracks.heightImg(i)
+                    var targetXImg = tracks.velocityXImgPerS(i) * seconds
+                    var targetYImg = tracks.velocityYImgPerS(i) * seconds
+                    val scale = DisplayLead.capScale(targetXImg, targetYImg, capImg)
+                    targetXImg *= scale
+                    targetYImg *= scale
+                    smoother.settleLead(
+                        if (leadMs > 0f) targetXImg else 0f,
+                        if (leadMs > 0f) targetYImg else 0f,
+                        capImg,
+                        fade = leadGated(tracks, i, smoother.config),
+                    )
+                    headXImg += smoother.outLeadXImg
+                    headYImg += smoother.outLeadYImg
+                    if (leadMs > 0f && scale > 0f) values[base + LEAD_MS] = leadMs
                 } else if (smoother != null && smoother.recall(ids[next])) {
-                    headXImg = smoother.outXImg
-                    headYImg = smoother.outYImg
+                    headXImg = smoother.outXImg + smoother.outLeadXImg
+                    headYImg = smoother.outYImg + smoother.outLeadYImg
                 }
                 val deltaXImg = deltaOf(headXImg, rawXImg)
                 val deltaYImg = deltaOf(headYImg, rawYImg)
@@ -226,6 +231,13 @@ class TrackSnapshot private constructor(
             return TrackSnapshot(shown, widthImg, heightImg, ids, flags, values)
         }
 
+        /** True when a gate switches the lead off for track [i]: disabled, not confirmed (lost) or an estimated head. */
+        private fun leadGated(
+            tracks: TrackList,
+            i: Int,
+            config: TrackerConfig,
+        ): Boolean = !config.displayLeadEnabled || tracks.state(i) != TrackState.CONFIRMED || tracks.isHeadEstimated(i)
+
         /**
          * The lead time `gSpeed * gStop * L` in milliseconds for shown track [i] right after `smoother.smooth`, or 0 when
          * the lead is off or must not apply: a lost track, an estimated head, a track not confirmed, a first sample.
@@ -237,7 +249,7 @@ class TrackSnapshot private constructor(
             resultAgeMs: Float,
         ): Float {
             val config = smoother.config
-            if (!config.displayLeadEnabled || tracks.state(i) != TrackState.CONFIRMED || tracks.isHeadEstimated(i)) return 0f
+            if (leadGated(tracks, i, config)) return 0f
             val speedGain = DisplayLead.speedGain(smoother.outSpeedHps, config)
             if (speedGain <= 0f) return 0f
             val stopGain =
@@ -246,6 +258,7 @@ class TrackSnapshot private constructor(
                     tracks.velocityYImgPerS(i),
                     tracks.measuredVelocityXImgPerS(i),
                     tracks.measuredVelocityYImgPerS(i),
+                    config,
                 )
             return speedGain * stopGain * DisplayLead.leadTimeMs(resultAgeMs, smoother.outIntervalMs, config)
         }

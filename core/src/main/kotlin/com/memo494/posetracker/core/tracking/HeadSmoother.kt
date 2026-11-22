@@ -2,6 +2,7 @@ package com.memo494.posetracker.core.tracking
 
 import com.memo494.posetracker.core.TrackerConfig
 import kotlin.math.PI
+import kotlin.math.exp
 import kotlin.math.hypot
 
 /**
@@ -17,7 +18,7 @@ import kotlin.math.hypot
  * Use per processed frame: [begin] with the frame's timestamp, [smooth] once for each shown track, [end]. A track
  * that was not smoothed between the two loses its slot, so an id that comes back starts again as a first sample.
  * When the pool is full, a new id takes the slot of an id not yet smoothed in the frame. [recall] reads the stored
- * point of an id without advancing anything (the idle republish). [reset] forgets every id (call it wherever the
+ * point of an id, and the lead on top of it, without advancing anything (the idle republish). [reset] forgets every id (call it wherever the
  * tracker is reset).
  *
  * Holds a pool of [TrackerConfig.maxTracks] slots keyed by track id; no call allocates after construction. Results
@@ -36,6 +37,9 @@ class HeadSmoother(
     private val dxImgPerS = DoubleArray(capacity)
     private val dyImgPerS = DoubleArray(capacity)
     private val lastNs = LongArray(capacity)
+    private val leadXImg = DoubleArray(capacity)
+    private val leadYImg = DoubleArray(capacity)
+    private var lastSlot = -1
     private var frameNs = 0L
 
     /** Head x of the newest [smooth] or successful [recall] call, Img pixels. */
@@ -56,6 +60,14 @@ class HeadSmoother(
 
     /** Milliseconds between the newest [smooth] call's frame and the id's frame before it; 0 where [outSpeedHps] is 0. */
     var outIntervalMs: Float = 0f
+        private set
+
+    /** Lead x of the newest [settleLead] or successful [recall] call, Img pixels: what is drawn on top of [outXImg]. */
+    var outLeadXImg: Float = 0f
+        private set
+
+    /** Lead y of the newest [settleLead] or successful [recall] call, Img pixels. */
+    var outLeadYImg: Float = 0f
         private set
 
     /** Number of ids that currently hold a slot. */
@@ -91,8 +103,12 @@ class HeadSmoother(
         outYImg = yImg
         outSpeedHps = 0f
         outIntervalMs = 0f
+        outLeadXImg = 0f
+        outLeadYImg = 0f
+        lastSlot = -1
         if (!config.smoothEnabled) return
         var slot = find(id)
+        lastSlot = slot
         if (!xImg.isFinite() || !yImg.isFinite() || !heightImg.isFinite() || heightImg <= 0f) {
             if (slot >= 0) seen[slot] = true
             return
@@ -101,6 +117,9 @@ class HeadSmoother(
             slot = freeSlot()
             if (slot < 0) return
             ids[slot] = id
+            lastSlot = slot
+            leadXImg[slot] = 0.0
+            leadYImg[slot] = 0.0
             inUse[slot] = true
             seen[slot] = true
             storedXImg[slot] = xImg.toDouble()
@@ -133,6 +152,46 @@ class HeadSmoother(
     }
 
     /**
+     * Sets the lead of the track of the newest [smooth] call: the target ([targetXImg], [targetYImg], Img pixels; a
+     * value that is not finite counts as 0) or, when [fade] is true, the lead that was on screen for the track decayed
+     * over this frame's interval with `displayLeadFadeMs` (cut at once when that is 0) if that is longer: a lead that is
+     * switched off by a gate (a miss, an estimated head) fades out instead of dropping to 0, and a lead never grows by
+     * fading. With [fade] false (a stop or a turn of the measured head) the target is taken as it is. The result is limited to [maxLengthImg] and written to
+     * [outLeadXImg] / [outLeadYImg]; it is kept for the next frame and for [recall] (the idle republish). A call after a
+     * [smooth] that gave no slot (smoother off, full pool) passes the target through.
+     */
+    fun settleLead(
+        targetXImg: Float,
+        targetYImg: Float,
+        maxLengthImg: Float,
+        fade: Boolean,
+    ) {
+        var x = if (targetXImg.isFinite()) targetXImg.toDouble() else 0.0
+        var y = if (targetYImg.isFinite()) targetYImg.toDouble() else 0.0
+        val slot = lastSlot
+        if (slot >= 0) {
+            val fadeMs = config.displayLeadFadeMs
+            val decay = if (!fade) 0.0 else if (fadeMs > 0f) exp(-outIntervalMs.toDouble() / fadeMs) else 0.0
+            val fadedX = leadXImg[slot] * decay
+            val fadedY = leadYImg[slot] * decay
+            if (fadedX * fadedX + fadedY * fadedY > x * x + y * y) {
+                x = fadedX
+                y = fadedY
+            }
+            val length = hypot(x, y)
+            if (length > maxLengthImg) {
+                val scale = if (maxLengthImg > 0f) maxLengthImg / length else 0.0
+                x *= scale
+                y *= scale
+            }
+            leadXImg[slot] = x
+            leadYImg[slot] = y
+        }
+        outLeadXImg = x.toFloat()
+        outLeadYImg = y.toFloat()
+    }
+
+    /**
      * Marks [id] as shown in this frame before any [smooth], so the full-pool fallback never takes its slot. An id
      * without a slot is ignored.
      */
@@ -159,6 +218,8 @@ class HeadSmoother(
         if (slot < 0) return false
         outXImg = storedXImg[slot].toFloat()
         outYImg = storedYImg[slot].toFloat()
+        outLeadXImg = leadXImg[slot].toFloat()
+        outLeadYImg = leadYImg[slot].toFloat()
         return true
     }
 

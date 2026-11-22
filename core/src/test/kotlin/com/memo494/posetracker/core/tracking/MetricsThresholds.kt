@@ -165,4 +165,18 @@ object MetricsThresholds {
 
     /** F4: capture to screen in the display model, in milliseconds. */
     const val F4_DISPLAY_LATENCY_MS = 75.0
+
+    /**
+     * F4: walker at 1 and 2 h/s whose detection is missing in 10 to 20 % of the frames: the largest step backwards between
+     * two frames on screen with the lead, in units of h, at most. Without the lead it is 0; measured with the lead 0.004
+     * (before the fade of a switched-off lead it was 0.09, the whole lead dropping at once).
+     */
+    const val F4_MAX_BACKWARD_STEP_H = 0.02
+
+    /**
+     * F4: walker at 1 and 2 h/s with measurement noise: the jitter of the drawn point (RMS of the second difference) with
+     * the lead over the jitter of the raw measurement, at most. Measured 1.07 (without the lead 0.43; with an unsmoothed
+     * stop gate 2.0).
+     */
+    const val F4_MAX_MOVING_JITTER_RATIO = 1.2
 }

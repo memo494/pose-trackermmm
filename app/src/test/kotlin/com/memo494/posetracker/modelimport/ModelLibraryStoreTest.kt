@@ -815,8 +815,9 @@ class ModelLibraryStoreTest {
         assertThat(library.state().entries).hasSize(1)
     }
 
-    // ---- EXPERIMENT (to be removed): production-like wiring ----
+    // ---- the owner's import flow with the production wiring (a new store per call, as MainActivity does) ----
 
+    /** The process-wide "app-start step applied" flag of the production store. */
     private val processFlag = AtomicBoolean(false)
 
     /** Like MainActivity: a new store per call, the production defaults (in-flight check, File::renameTo, process flag). */
@@ -833,10 +834,11 @@ class ModelLibraryStoreTest {
         name: String,
     ): ImportOutcome = importBytes(importerFor(productionLibrary()), bytes, name)
 
+    /** Every path under the store and the logged lines: the failure message shows what is on disk. */
     private fun tree(): String = directory.walkTopDown().joinToString("\n") { it.relativeTo(tmp.root).path } + "\nlogs=" + logs
 
     @Test
-    fun experiment_twoImports_productionWiring() {
+    fun importer_twoModels_withTheProductionWiring_bothStayInTheLibrary() {
         productionLibrary().state()
         assertThat(productionImport(tfliteBytes(500, 1), "one.tflite")).isInstanceOf(ImportOutcome.Accepted::class.java)
         productionLibrary().state()
@@ -847,7 +849,7 @@ class ModelLibraryStoreTest {
     }
 
     @Test
-    fun experiment_legacyThenImport_productionWiring() {
+    fun importer_afterTheMigration_withTheProductionWiring_keepsTheMigratedModel() {
         storeLegacyModel(metaA, bytesA)
         productionLibrary().state()
         assertThat(productionImport(tfliteBytes(600, 2), "two.tflite")).isInstanceOf(ImportOutcome.Accepted::class.java)
@@ -857,7 +859,7 @@ class ModelLibraryStoreTest {
     }
 
     @Test
-    fun experiment_legacyImportFirst_productionWiring() {
+    fun importer_whenTheMigrationRunsInsideTheImport_keepsTheMigratedModel() {
         storeLegacyModel(metaA, bytesA)
         assertThat(productionImport(tfliteBytes(600, 2), "two.tflite")).isInstanceOf(ImportOutcome.Accepted::class.java)
         assertThat(productionImport(tfliteBytes(700, 3), "three.tflite")).isInstanceOf(ImportOutcome.Accepted::class.java)
